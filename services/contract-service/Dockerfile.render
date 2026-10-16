@@ -1,0 +1,10 @@
+# Dockerfile cho Render: build context = thư mục gốc repo.
+FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer fonts-liberation poppler-utils && rm -rf /var/lib/apt/lists/*
+COPY libs/common_auth /libs/common_auth
+RUN pip install --no-cache-dir /libs/common_auth
+COPY services/contract-service/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY services/contract-service/app ./app
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

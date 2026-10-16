@@ -1,0 +1,159 @@
+# Gateway cho Render. File này là TEMPLATE: lúc container khởi động, image nginx chính thức
+# thay các biến ${...} bằng biến môi trường (chỉ các biến khớp NGINX_ENVSUBST_FILTER),
+# rồi ghi ra /etc/nginx/nginx.conf. Biến nginx như $http_origin không bị đụng tới.
+#
+# Khác bản local (gateway/nginx.conf):
+#   - Không có Docker DNS, nên proxy tới URL public https://<service>.onrender.com
+#   - Lắng nghe cổng ${PORT} do Render cấp
+#   - Timeout dài hơn vì service gói free ngủ sau 15 phút, đánh thức mất khoảng 50 giây
+
+events {}
+
+http {
+    # Origin FE được phép gọi kèm cookie. FRONTEND_ORIGIN đặt trên Render (vd. https://ten-app.vercel.app).
+    map $http_origin $cors_origin {
+        default "";
+        "${FRONTEND_ORIGIN}" $http_origin;
+        "http://localhost:3000" $http_origin;
+        "http://127.0.0.1:3000" $http_origin;
+    }
+
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        "" close;
+    }
+
+    # DNS resolver lấy từ /etc/resolv.conf của container (NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1).
+    # Cần vì proxy_pass dùng biến, nginx phân giải tên miền lúc chạy.
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=30s ipv6=off;
+    resolver_timeout 10s;
+
+    server {
+        listen ${PORT};
+        client_max_body_size 10m;
+
+        add_header Access-Control-Allow-Origin $cors_origin always;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Authorization, X-Request-ID, Idempotency-Key" always;
+        add_header Access-Control-Allow-Credentials "true" always;
+        add_header Access-Control-Expose-Headers "X-Request-ID, Content-Disposition, X-Content-SHA256" always;
+        add_header Vary "Origin" always;
+
+        if ($request_method = OPTIONS) {
+            return 204;
+        }
+
+        # Dùng chung cho mọi location (location nào tự khai báo proxy_set_header thì phải lặp lại hết).
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_ssl_server_name on;
+        proxy_connect_timeout 75s;
+        proxy_read_timeout 90s;
+        proxy_send_timeout 90s;
+
+        location = / {
+            default_type application/json;
+            return 200 '{"status":"ok","service":"gateway","message":"Backend Gateway is running on Render"}\n';
+        }
+
+        location = /favicon.ico {
+            return 204;
+        }
+
+        # proxy_pass có biến thì nginx KHÔNG tự thay prefix, nên dùng rewrite để đổi /api/x/... -> /api/v1/x/...
+
+        location = /api/procedures {
+            set $up "${PROCEDURE_SERVICE_URL}";
+            rewrite ^ /api/v1/procedures break;
+            proxy_pass $up;
+        }
+
+        location = /api/procedures/ {
+            set $up "${PROCEDURE_SERVICE_URL}";
+            rewrite ^ /api/v1/procedures break;
+            proxy_pass $up;
+        }
+
+        location /api/agent/ {
+            set $up "${AGENT_SERVICE_URL}";
+            rewrite ^/api/agent/(.*)$ /api/v1/agent/$1 break;
+            proxy_pass $up;
+        }
+
+        location = /api/users {
+            set $up "${USER_SERVICE_URL}";
+            rewrite ^ /api/v1/users break;
+            proxy_pass $up;
+        }
+
+        location /api/users/ {
+            set $up "${USER_SERVICE_URL}";
+            rewrite ^/api/users/(.*)$ /api/v1/users/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/lawyers/ {
+            set $up "${LAWYER_SERVICE_URL}";
+            rewrite ^/api/lawyers/(.*)$ /api/v1/lawyers/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/procedures/ {
+            set $up "${PROCEDURE_SERVICE_URL}";
+            rewrite ^/api/procedures/(.*)$ /api/v1/procedures/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/rag/ {
+            set $up "${RAG_SERVICE_URL}";
+            rewrite ^/api/rag/(.*)$ /api/v1/rag/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/contracts/ {
+            set $up "${CONTRACT_SERVICE_URL}";
+            rewrite ^/api/contracts/(.*)$ /api/v1/contracts/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/documents/ {
+            set $up "${DOCUMENT_SERVICE_URL}";
+            rewrite ^/api/documents/(.*)$ /api/v1/documents/$1 break;
+            proxy_pass $up;
+            proxy_read_timeout 120s;
+        }
+
+        location /api/locations/ {
+            set $up "${LOCATION_SERVICE_URL}";
+            rewrite ^/api/locations/(.*)$ /api/v1/locations/$1 break;
+            proxy_pass $up;
+        }
+
+        location /api/consultations/ {
+            set $up "${CONSULTATION_SERVICE_URL}";
+            rewrite ^/api/consultations/(.*)$ /api/v1/consultations/$1 break;
+            proxy_pass $up;
+        }
+
+        location /ws/consultations/ {
+            set $up "${CONSULTATION_SERVICE_URL}";
+            rewrite ^/ws/consultations/(.*)$ /ws/v1/consultations/$1 break;
+            proxy_pass $up;
+            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_read_timeout 3600s;
+        }
+
+        location /api/notifications/ {
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^/api/notifications/(.*)$ /api/v1/notifications/$1 break;
+            proxy_pass $up;
+        }
+    }
+}

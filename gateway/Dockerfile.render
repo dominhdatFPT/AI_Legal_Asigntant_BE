@@ -1,0 +1,8 @@
+# Gateway cho Render: build context = thư mục gốc repo.
+FROM nginx:1.27-alpine
+# Image nginx chính thức tự chạy envsubst trên /etc/nginx/templates/*.template lúc khởi động.
+COPY gateway/render/nginx.conf.template /etc/nginx/templates/nginx.conf.template
+ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx \
+    NGINX_ENVSUBST_FILTER="^(PORT|FRONTEND_ORIGIN|NGINX_LOCAL_RESOLVERS|[A-Z]+_SERVICE_URL)$" \
+    NGINX_ENTRYPOINT_LOCAL_RESOLVERS=1 \
+    PORT=10000

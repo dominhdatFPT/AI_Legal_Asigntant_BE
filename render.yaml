@@ -1,0 +1,258 @@
+# Render Blueprint: tạo gateway + các service một lần (Render Dashboard → New → Blueprint → chọn repo này).
+#
+# - Biến có `sync: false` Render sẽ hỏi giá trị lúc tạo Blueprint (DB URL, API key...).
+# - Secret file JWT KHÔNG khai báo được ở đây, phải thêm tay trên Dashboard sau khi tạo (xem RENDER_DEPLOY.md):
+#     + jwt_public.pem  → thêm vào Environment Group "ailegal-shared" (mọi service dùng)
+#     + jwt_private.pem → chỉ thêm vào ailegal-user-service
+# - URL các service đoán theo tên service. Nếu Render báo tên đã bị dùng và gắn thêm hậu tố,
+#   sửa lại URL tương ứng trong Environment Group "ailegal-shared" (chỉ sửa một chỗ).
+
+envVarGroups:
+  - name: ailegal-shared
+    envVars:
+      - key: INTERNAL_TOKEN
+        generateValue: true
+      - key: JWT_PUBLIC_KEY_PATH
+        value: /etc/secrets/jwt_public.pem
+      # Không có dấu "/" ở cuối URL.
+      - key: AGENT_SERVICE_URL
+        value: https://ailegal-agent-service.onrender.com
+      - key: USER_SERVICE_URL
+        value: https://ailegal-user-service.onrender.com
+      - key: LAWYER_SERVICE_URL
+        value: https://ailegal-lawyer-service.onrender.com
+      - key: PROCEDURE_SERVICE_URL
+        value: https://ailegal-procedure-service.onrender.com
+      - key: RAG_SERVICE_URL
+        value: https://ailegal-rag-service.onrender.com
+      - key: CONTRACT_SERVICE_URL
+        value: https://ailegal-contract-service.onrender.com
+      - key: DOCUMENT_SERVICE_URL
+        value: https://ailegal-document-service.onrender.com
+      - key: LOCATION_SERVICE_URL
+        value: https://ailegal-location-service.onrender.com
+      - key: CONSULTATION_SERVICE_URL
+        value: https://ailegal-consultation-service.onrender.com
+      - key: NOTIFICATION_SERVICE_URL
+        value: https://ailegal-notification-service.onrender.com
+
+services:
+  # ───────────── Gateway (FE chỉ gọi vào đây) ─────────────
+  - type: web
+    name: ailegal-gateway
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./gateway/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - fromGroup: ailegal-shared
+      # Origin của FE đã deploy, vd. https://ten-app.vercel.app (không có "/" cuối)
+      - key: FRONTEND_ORIGIN
+        sync: false
+
+  # ───────────── user-service ─────────────
+  - type: web
+    name: ailegal-user-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/user-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/users/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: USER_DATABASE_URL
+        sync: false
+      - key: JWT_PRIVATE_KEY_PATH
+        value: /etc/secrets/jwt_private.pem
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLOCK_SKEW_SECONDS
+        value: "10"
+      # FE và BE khác domain → cookie phải SameSite=None + Secure
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_COOKIE_SAMESITE
+        value: none
+      - key: AUTH_REFRESH_COOKIE_PATH
+        value: /api
+
+  # ───────────── lawyer-service ─────────────
+  - type: web
+    name: ailegal-lawyer-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/lawyer-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/lawyers/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: LAWYER_DATABASE_URL
+        sync: false
+      - key: LAWYER_REAPPLY_COOLDOWN_HOURS
+        value: "24"
+
+  # ───────────── consultation-service ─────────────
+  - type: web
+    name: ailegal-consultation-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/consultation-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/consultations/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: CONSULTATION_DATABASE_URL
+        sync: false
+
+  # ───────────── agent-service ─────────────
+  - type: web
+    name: ailegal-agent-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/agent-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/agent/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: AGENT_DATABASE_URL
+        sync: false
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+
+  # ───────────── rag-service ─────────────
+  - type: web
+    name: ailegal-rag-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/rag-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/rag/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: RAG_DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: EMBEDDING_PROVIDER
+        value: gemini
+      - key: EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIM
+        value: "768"
+
+  # ───────────── procedure-service ─────────────
+  - type: web
+    name: ailegal-procedure-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/procedure-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/procedures/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: PROCEDURE_DATABASE_URL
+        sync: false
+
+  # ───────────── location-service ─────────────
+  - type: web
+    name: ailegal-location-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/location-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/locations/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: LOCATION_DATABASE_URL
+        sync: false
+
+  # ───────────── contract-service ─────────────
+  # Có LibreOffice để xuất file; gói free 512 MB có thể thiếu RAM khi convert file lớn.
+  - type: web
+    name: ailegal-contract-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/contract-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/contracts/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: CONTRACT_DATABASE_URL
+        sync: false
+      - key: CONTRACT_SUPABASE_URL
+        sync: false
+      - key: CONTRACT_SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: CONTRACT_STORAGE_BUCKET
+        value: contract-files
+      # Origin FE đã deploy (giống FRONTEND_ORIGIN của gateway); nhiều origin thì ngăn bằng dấu phẩy
+      - key: CONTRACT_ALLOWED_ORIGINS
+        sync: false
+
+  # ───────────── notification-service ─────────────
+  - type: web
+    name: ailegal-notification-service
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./services/notification-service/Dockerfile.render
+    dockerContext: .
+    healthCheckPath: /api/v1/notifications/health
+    envVars:
+      - fromGroup: ailegal-shared
+      - key: NOTIFICATION_DATABASE_URL
+        sync: false
+
+  # ───────────── document-service (TẮT mặc định) ─────────────
+  # Image có torch + VietOCR + Tesseract, cần >= 2 GB RAM → gói free không chạy được, phải dùng gói trả phí
+  # (Standard trở lên). Muốn bật thì bỏ comment khối dưới.
+  # - type: web
+  #   name: ailegal-document-service
+  #   runtime: docker
+  #   plan: standard
+  #   region: singapore
+  #   dockerfilePath: ./services/document-service/Dockerfile.render
+  #   dockerContext: .
+  #   healthCheckPath: /api/v1/documents/health
+  #   envVars:
+  #     - fromGroup: ailegal-shared
+  #     - key: DOCUMENT_DATABASE_URL
+  #       sync: false
+  #     - key: DOCUMENT_DATABASE_POOLER_HOST
+  #       sync: false
+  #     - key: DOCUMENT_SUPABASE_URL
+  #       sync: false
+  #     - key: DOCUMENT_SUPABASE_SERVICE_ROLE_KEY
+  #       sync: false
+  #     - key: DOCUMENT_STORAGE_BUCKET
+  #       value: document-files
+  #     - key: DOCUMENT_HTTP_TIMEOUT_SECONDS
+  #       value: "20"
+  #     - key: DOCUMENT_ALLOWED_ORIGINS
+  #       sync: false
+  #     - key: DOCUMENT_OCR_MODEL_DIR
+  #       value: /usr/share/tesseract-ocr/5/tessdata
+  #     - key: DOCUMENT_OCR_CPU_THREADS
+  #       value: "2"
+  #     - key: DOCUMENT_VIETOCR_ENABLED
+  #       value: "1"
+  #     - key: DOCUMENT_VIETOCR_MODEL_DIR
+  #       value: /opt/vietocr
