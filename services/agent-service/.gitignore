@@ -1,0 +1,27 @@
+# .env files — KHÔNG commit lên GitLab
+.env
+.env.*
+!.env.example
+
+# JWT keys — KHÔNG commit lên GitLab (private key đặc biệt nhạy cảm)
+keys/
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.iml

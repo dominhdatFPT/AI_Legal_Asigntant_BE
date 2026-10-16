@@ -1,0 +1,30 @@
+{
+  "request": {
+    "message": "Tôi muốn đăng ký hộ kinh doanh"
+  },
+  "response": {
+    "data": {
+      "answer": "Đã tìm thấy thủ tục phù hợp.",
+      "procedure": {
+        "id": "HKD-001",
+        "code": "HKD-001",
+        "name": "Đăng ký thành lập hộ kinh doanh"
+      }
+    },
+    "error": null,
+    "request_id": "req-example"
+  },
+  "not_found_example": {
+    "request": {
+      "message": "xin chào"
+    },
+    "response": {
+      "data": {
+        "answer": "Chưa tìm thấy thủ tục phù hợp.",
+        "procedure": null
+      },
+      "error": null,
+      "request_id": "req-example-not-found"
+    }
+  }
+}

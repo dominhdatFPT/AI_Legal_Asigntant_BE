@@ -1,0 +1,13 @@
+-r services/agent-service/requirements.txt
+-r services/user-service/requirements.txt
+-r services/lawyer-service/requirements.txt
+-r services/procedure-service/requirements.txt
+-r services/rag-service/requirements.txt
+-r services/contract-service/requirements.txt
+-r services/document-service/requirements.txt
+-r services/location-service/requirements.txt
+-r services/consultation-service/requirements.txt
+-r services/notification-service/requirements.txt
+pytest>=8,<9
+PyYAML>=6,<7
+-e ./libs/common_auth

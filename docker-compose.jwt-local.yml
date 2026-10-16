@@ -1,0 +1,9 @@
+# Optional local-only ports for the two services; no Gateway/other services required.
+# docker compose -f docker-compose.yml -f docker-compose.jwt-local.yml up -d --no-deps contract-service notification-service
+services:
+  contract-service:
+    ports:
+      - "127.0.0.1:8006:8000"
+  notification-service:
+    ports:
+      - "127.0.0.1:8009:8000"

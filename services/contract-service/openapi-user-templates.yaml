@@ -1,0 +1,469 @@
+openapi: 3.0.3
+info:
+  title: Contract - mẫu DOCX/PDF cá nhân
+  version: 0.4.0
+  description: 'C6–C8 đã triển khai. Mẫu riêng import qua Document, snapshot private, mapping user-confirm; DOCX dùng marker rõ ràng, PDF chọn vùng trắng. Không tự PDF-to-DOCX hoặc đoán ô điền bằng AI. Phụ thuộc User/Document thật cần test liên thông ở C9.'
+servers:
+  - url: http://localhost:8080/api
+  - url: http://contract-service:8000/api/v1
+security:
+  - BearerAuth: []
+paths:
+  /contracts/user-templates:
+    post:
+      operationId: importPersonalTemplate
+      summary: Import mẫu riêng từ file DOCX/PDF đã upload ở Document
+      x-status: implemented
+      description: 'C8: owner từ JWT; DOCUMENT_SERVICE_URL /api/v1/documents/{document_id}, /processing, /extraction, /content bằng Bearer. Kiểm tra owner/latest job/source_sha256/hash/header/bytes và recheck metadata cuối. file available+processing completed, purpose=contract_template, MIME DOCX/PDF; 9 MiB/100 trang. Không redirect, không lưu JWT cho worker, không đọc DB Document. Chuẩn bị PDF nguồn đồng bộ trước 202 (DOCX LibreOffice tối đa60s); không có background analysis/LLM. Lưu snapshot source+preview private và extraction JSON trong version trước commit template/analysis. Analysis trả needs_review; DOCX chỉ marker {{field_name}} rõ ràng, PDF user chọn vùng trống. Không tự suy đoán ô điền từ OCR. Replay cùng owner/key/body không gọi Document; khác body409, mẫu đã xóa410. Hash/job lệch502; pending409; purpose sai422; owner/deleted404; mạng503/timeout504. Không sửa file gốc; orphan sweep sau crash chưa tự động.'
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [document_id, name]
+              properties:
+                document_id: {type: string, format: uuid}
+                name: {type: string, minLength: 1, maxLength: 200}
+            example:
+              document_id: 88888888-8888-4888-8888-888888888888
+              name: Mẫu hợp đồng của tôi
+      responses:
+        '202': {$ref: '#/components/responses/AnalysisAccepted'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        '504': {$ref: '#/components/responses/Error'}
+    get:
+      operationId: listPersonalTemplates
+      summary: Danh sách mẫu riêng của tôi
+      x-status: implemented
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200':
+          description: Chỉ mẫu personal thuộc người gọi, không gồm mẫu đã xóa mềm
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data, error, request_id]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [items, page, page_size, total]
+                    properties:
+                      items: {type: array, items: {$ref: '#/components/schemas/PersonalTemplate'}}
+                      page: {type: integer, minimum: 1}
+                      page_size: {type: integer, minimum: 1, maximum: 100}
+                      total: {type: integer, minimum: 0}
+                  error: {type: object, nullable: true}
+                  request_id: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /contracts/user-templates/{template_id}:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    get:
+      operationId: getPersonalTemplate
+      summary: Chi tiết mẫu riêng và phiên bản
+      x-status: implemented
+      responses:
+        '200': {$ref: '#/components/responses/TemplateResponse'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deletePersonalTemplate
+      summary: Xóa mềm mẫu riêng
+      x-status: implemented
+      description: 'Chỉ chủ mẫu. Không xóa file gốc Document, không xóa snapshot đang được nháp/job tham chiếu. Job analysis/generation active thì 409. Nháp đã có vẫn giữ đúng phiên bản và chủ được đọc; mẫu deleted không tạo nháp mới.'
+      responses:
+        '204': {description: 'Đã xóa mềm, không có body'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /contracts/template-analyses/{analysis_id}:
+    parameters:
+      - {name: analysis_id, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getTemplateAnalysis
+      summary: Poll trạng thái nhận diện field/vị trí điền
+      x-status: implemented
+      description: 'Chỉ chủ. queued/processing chưa có mapping dùng được; needs_review cho phép sửa/confirm; failed có error_code và user import lại với key mới. OCR confidence thấp phải cảnh báo, không tự đoán giá trị. Analysis trả field suggestions, không đọc dữ liệu giấy tờ cá nhân khác.'
+      responses:
+        '200': {$ref: '#/components/responses/AnalysisResponse'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /contracts/user-templates/{template_id}/mapping:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    put:
+      operationId: replacePersonalTemplateMapping
+      summary: User sửa danh sách field và vị trí điền
+      x-status: implemented
+      description: 'Owner-only, draft/needs_review và expected_revision đúng; thay toàn bộ fields, tăng revision, race409. Tối đa100 field/20 placement; DOCX locator và preview_boxes phải đúng manifest server và cover mọi marker, không XPath tự do. PDF page/box hợp lệ, không chồng và vùng trắng qua kiểm tra pixel; font8..72, không tràn. Published bất biến; muốn đổi file phải import mới.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, fields]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+                fields: {type: array, minItems: 1, maxItems: 100, items: {$ref: '#/components/schemas/MappedField'}}
+            example:
+              expected_revision: 1
+              fields:
+                - name: party_a_name
+                  label: Họ tên bên A
+                  type: text
+                  required: true
+                  confidence: null
+                  placements:
+                    - kind: pdf_box
+                      page: 1
+                      x: 0.2
+                      y: 0.25
+                      width: 0.5
+                      height: 0.04
+                      font_size: 12
+                      multiline: false
+      responses:
+        '200': {$ref: '#/components/responses/TemplateResponse'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /contracts/user-templates/{template_id}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    post:
+      operationId: confirmPersonalTemplateMapping
+      summary: User xác nhận các chỗ cần điền
+      x-status: implemented
+      description: 'Owner-only; draft/needs_review, expected_revision khớp, mapping không rỗng. Recheck private preview/hash và mọi placement trước publish; recheck revision dưới lock lúc commit. User phải review rồi gọi confirm; backend không biết user có thực sự mở preview. Atomic analysis confirmed + version published/published_at, không vào catalog admin. Tạo nháp bằng template_version_id đã xác nhận.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {$ref: '#/components/responses/TemplateResponse'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /contracts/user-templates/{template_id}/source-preview:
+    parameters:
+      - $ref: '#/components/parameters/TemplateId'
+    get:
+      operationId: getPersonalTemplateSourcePreview
+      summary: Link PDF xem bản gốc trước khi xác nhận vị trí
+      x-status: implemented
+      description: 'Chỉ chủ. Link private có hạn 5 phút, không log query chữ ký. DOCX được chuyển thành PDF xem trước; PDF có chữ/scan vẫn giữ nền từng trang. Source-preview chưa điền giá trị, FE vẽ highlights từ mapping. Chưa render được thì 409. Không sửa/ghi đè file gốc.'
+      responses:
+        '200':
+          description: Link PDF chỉ phục vụ xem trước
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [data, error, request_id]
+                properties:
+                  data:
+                    type: object
+                    additionalProperties: false
+                    required: [url, expires_at]
+                    properties:
+                      url: {type: string, format: uri}
+                      expires_at: {type: string, format: date-time}
+                  error: {type: object, nullable: true}
+                  request_id: {type: string}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /contracts/drafts/{draft_id}/preview:
+    parameters:
+      - {name: draft_id, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: previewFilledContract
+      summary: Tạo job PDF xem thử các giá trị đã điền
+      x-status: implemented
+      description: 'C7 system văn bản C4; C8 personal đã user-confirm hỗ trợ marker DOCX và PDF vùng trống. Owner-only, không body, kind=preview/format=pdf; thiếu required để trống/cảnh báo. Hash kind/draft/values/version; key cũ với values đổi409. Một active job/nháp; worker lease180s/fencing/max3 attempt, chỉ đọc snapshot, không JWT. Poll generations rồi download completed, link300s. PDF nguồn giữ nền hiển thị nhưng rasterized, không còn chữ nền searchable/AcroForm. Không PDF-to-DOCX, không gắn attachments. DOCX giữ cấu trúc source, giới hạn chữ theo vùng marker và số trang; không cam kết mọi Word layout giống tuyệt đối LibreOffice. Preview gắn nhãn mỗi trang, không outbox.'
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Job PDF preview đã lưu, chưa có file ngay
+          content:
+            application/json:
+              schema: {$ref: './openapi.yaml#/components/schemas/GenerationResponse'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /contracts/drafts/{draft_id}/identity-suggestions:
+    post:
+      operationId: suggestDraftIdentityValues
+      summary: Chỉ gợi ý dữ liệu CCCD đã lưu, các mục khác hướng dẫn tự nhập
+      x-status: implemented
+      description: |
+        Chỉ chủ nháp. Không thay đổi field_values, không sinh file và không dùng LLM để tự điền mục khác.
+        Lấy GET {DOCUMENT_SERVICE_URL}/api/v1/documents/identity-profile/me bằng JWT user; kiểm tra owner/revision/schema.
+        Chỉ profile đã user confirm ở detail user, không nhận document_id hay owner trong request, không OCR lại CCCD mỗi hợp đồng.
+        User chọn bên của mình và bindings field_name -> identity_key; chỉ whitelist 6 thông tin CCCD.
+        Không suy đoán bên A/B từ nhãn hoặc dùng CCCD của user cho người khác; FE phải cho user xem bindings trước khi gọi.
+        Chỉ field có identity_key đã khai báo/xác nhận trong template version, binding phải khớp key đó; null/thiếu là manual-only.
+        Bindings trùng field_name, field không có trong mẫu hoặc sai type ->422. Ngày chỉ map field date, các key khác field text.
+        Field đã có giá trị trong nháp không gợi ý ghi đè. Giá trị CCCD null -> để trống + hướng dẫn user.
+        Trả suggestions và manual_fields cho mọi field chưa được gợi ý, kể cả giá tiền/thời hạn/phone/email và bên còn lại.
+        Document 404 với error.code=IDENTITY_PROFILE_NOT_FOUND đúng schema ->200 suggestions=[] và hướng dẫn điền tay.
+        404 route chưa triển khai/response sai không coi là thiếu profile: 502 DOCUMENT_BAD_RESPONSE.
+        Document lỗi mạng/5xx không giả vờ thiếu CCCD: trả502/503/504. User vẫn có thể dùng API sửa nháp thủ công.
+        User review/accept rồi FE PATCH draft field_values theo API hiện có; không tự apply hay tự điền khi generate.
+        Đổi CCCD không thay draft/hợp đồng cũ; trả draft_updated_at để FE không áp suggestion vào bản nháp vừa thay đổi.
+        Không trộn citizen-profile của User vào nguồn Document. Kiểm tra owner trước khi gọi Document.
+        Bindings rỗng hoặc mọi field đã điền thì không gọi Document, identity_profile_revision=null.
+        Nháp đổi trong lúc lấy profile ->409 DRAFT_CHANGED; bị xóa ->404. Không giữ transaction qua HTTP.
+        FE tải lại nháp và merge các gợi ý được chấp nhận trước PATCH full field_values; PATCH chưa có CAS, không bảo đảm chống sửa đồng thời sau khi nhận gợi ý.
+      parameters:
+        - $ref: './openapi.yaml#/components/parameters/RequestId'
+        - name: draft_id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [bindings]
+              properties:
+                bindings:
+                  type: array
+                  maxItems: 100
+                  description: User xác nhận ánh xạ chỉ cho bên của mình; rỗng để nhận hướng dẫn điền tay.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [field_name, identity_key]
+                    properties:
+                      field_name: {type: string, pattern: '^[a-z][a-z0-9_]*$', minLength: 1, maxLength: 64}
+                      identity_key: {$ref: '#/components/schemas/IdentityKey'}
+            example:
+              bindings: [{field_name: party_a_name, identity_key: full_name}]
+      responses:
+        '200':
+          description: Gợi ý chưa ghi vào nháp, dữ liệu khác chỉ có hướng dẫn
+          headers: {Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentitySuggestionsResponse'}
+              example:
+                data:
+                  draft_id: 55555555-5555-4555-8555-555555555555
+                  draft_updated_at: '2026-10-08T02:00:00Z'
+                  identity_profile_revision: 1
+                  suggestions:
+                    - {field_name: party_a_name, identity_key: full_name, value: '[Họ tên đã xác nhận]', is_review_required: true}
+                  manual_fields:
+                    - {field_name: rent_amount, reason: manual_only, instruction: 'Bạn tự nhập số tiền đã thỏa thuận; hệ thống không tự điền mục này.'}
+                  warnings: []
+                error: null
+                request_id: req-identity-suggestions
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+        '504': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    CookieAuth: {type: apiKey, in: cookie, name: access_token}
+  parameters:
+    TemplateId: {name: template_id, in: path, required: true, schema: {type: string, format: uuid}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
+  schemas:
+    IdentityKey:
+      type: string
+      enum: [full_name, date_of_birth, identity_number, issue_date, issue_place, permanent_address]
+    IdentitySuggestionsResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [draft_id, draft_updated_at, identity_profile_revision, suggestions, manual_fields, warnings]
+          properties:
+            draft_id: {type: string, format: uuid}
+            draft_updated_at: {type: string, format: date-time}
+            identity_profile_revision: {type: integer, minimum: 1, nullable: true}
+            suggestions:
+              type: array
+              maxItems: 100
+              items:
+                type: object
+                additionalProperties: false
+                required: [field_name, identity_key, value, is_review_required]
+                properties:
+                  field_name: {type: string, pattern: '^[a-z][a-z0-9_]*$', minLength: 1, maxLength: 64}
+                  identity_key: {$ref: '#/components/schemas/IdentityKey'}
+                  value: {type: string, minLength: 1, maxLength: 2000}
+                  is_review_required: {type: boolean, enum: [true]}
+            manual_fields:
+              type: array
+              maxItems: 500
+              items:
+                type: object
+                additionalProperties: false
+                required: [field_name, reason, instruction]
+                properties:
+                  field_name: {type: string, pattern: '^[a-z][a-z0-9_]*$', minLength: 1, maxLength: 64}
+                  reason: {type: string, enum: [manual_only, identity_missing, profile_missing, already_filled]}
+                  instruction: {type: string, minLength: 1, maxLength: 500}
+            warnings: {type: array, items: {type: string, maxLength: 500}}
+        error: {type: object, nullable: true, enum: [null]}
+        request_id: {type: string}
+    MappedField:
+      type: object
+      additionalProperties: false
+      required: [name, label, type, required, placements, confidence]
+      properties:
+        name: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        label: {type: string, minLength: 1, maxLength: 200}
+        type: {type: string, enum: [text, date, number, boolean]}
+        required: {type: boolean}
+        identity_key: {type: string, nullable: true, default: null, enum: [full_name, date_of_birth, identity_number, issue_date, issue_place, permanent_address, null], description: 'Chỉ field thông tin CCCD được user xác nhận; null/thiếu thì chỉ hướng dẫn nhập tay. Không đánh dấu giá tiền/thời hạn/bên khác.'}
+        confidence: {type: number, minimum: 0, maximum: 1, nullable: true, description: 'null nếu user đặt vị trí thủ công'}
+        placements:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/DocxPlacement'
+              - $ref: '#/components/schemas/PdfPlacement'
+    DocxPlacement:
+      type: object
+      additionalProperties: false
+      required: [kind, locator, preview_boxes]
+      properties:
+        kind: {type: string, enum: [docx_anchor]}
+        locator: {type: string, minLength: 1, maxLength: 500, description: 'Định vị cấu trúc trong snapshot DOCX do server tạo, gồm body/table/header/footer. Không phải XPath/code user tự thực thi. Placeholder hoặc khoảng trống không rõ phải đánh dấu/chọn lại.'}
+        preview_boxes:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: 'Tọa độ trên PDF xem trước để FE highlight. Server tạo/cập nhật theo locator; không dùng tọa độ này để sửa cấu trúc DOCX.'
+          items: {$ref: '#/components/schemas/PdfPlacement'}
+    PdfPlacement:
+      type: object
+      additionalProperties: false
+      required: [kind, page, x, y, width, height, font_size, multiline]
+      description: 'Tọa độ chuẩn hóa 0..1 trên trang hiển thị sau áp dụng rotation/crop: gốc trên-trái. Server phải kiểm tra x+width<=1, y+height<=1, số trang tồn tại; tràn chữ trả TEXT_OVERFLOW thay vì cắt nội dung. Không xóa chữ có sẵn ở nền PDF.'
+      properties:
+        kind: {type: string, enum: [pdf_box]}
+        page: {type: integer, minimum: 1, maximum: 100}
+        x: {type: number, minimum: 0, maximum: 1}
+        y: {type: number, minimum: 0, maximum: 1}
+        width: {type: number, exclusiveMinimum: true, minimum: 0, maximum: 1}
+        height: {type: number, exclusiveMinimum: true, minimum: 0, maximum: 1}
+        font_size: {type: number, minimum: 8, maximum: 72}
+        multiline: {type: boolean}
+    PersonalTemplate:
+      type: object
+      additionalProperties: false
+      required: [id, template_version_id, name, source_format, version_status, mapping_revision, fields, warnings]
+      properties:
+        id: {type: string, format: uuid}
+        template_version_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 200}
+        source_format: {type: string, enum: [docx, pdf]}
+        version_status: {type: string, enum: [draft, published]}
+        mapping_revision: {type: integer, minimum: 0}
+        fields: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/MappedField'}}
+        warnings: {type: array, items: {type: string, maxLength: 500}}
+    TemplateEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/PersonalTemplate'}
+        error: {type: object, nullable: true}
+        request_id: {type: string}
+    Analysis:
+      type: object
+      additionalProperties: false
+      required: [id, template_id, template_version_id, status, error_code]
+      properties:
+        id: {type: string, format: uuid}
+        template_id: {type: string, format: uuid}
+        template_version_id: {type: string, format: uuid}
+        status: {type: string, enum: [queued, processing, needs_review, confirmed, failed]}
+        error_code: {type: string, nullable: true}
+        template: {$ref: '#/components/schemas/PersonalTemplate'}
+    AnalysisEnvelope:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Analysis'}
+        error: {type: object, nullable: true}
+        request_id: {type: string}
+  responses:
+    AnalysisAccepted:
+      description: Đã lưu job phân tích
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AnalysisEnvelope'}
+          example:
+            data:
+              id: 99999999-9999-4999-8999-999999999999
+              template_id: 33333333-3333-4333-8333-333333333333
+              template_version_id: 44444444-4444-4444-8444-444444444444
+              status: queued
+              error_code: null
+            error: null
+            request_id: req-import-demo
+    AnalysisResponse:
+      description: Trạng thái job và kết quả đề xuất nếu đã xử lý
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/AnalysisEnvelope'}
+    TemplateResponse:
+      description: Mẫu riêng của người đang gọi
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/TemplateEnvelope'}
+    Error:
+      description: 'Lỗi theo HTTP status. 401 UNAUTHORIZED/TOKEN_EXPIRED; 404 NOT_FOUND (bao gồm khác chủ); 409 CONFLICT/REVISION_CONFLICT/NOT_READY; 413 FILE_TOO_LARGE; 415 UNSUPPORTED_FILE_TYPE; 422 INVALID_MAPPING/TEXT_OVERFLOW/ENCRYPTED_PDF/SIGNED_PDF/UNSAFE_FILE; 502 DOCUMENT_BAD_RESPONSE; 503 SERVICE_UNAVAILABLE/DOCUMENT_UNAVAILABLE; 504 DOCUMENT_TIMEOUT. Không trả nội dung nhạy cảm trong lỗi.'
+      content:
+        application/json:
+          schema: {$ref: './openapi.yaml#/components/schemas/ErrorResponse'}

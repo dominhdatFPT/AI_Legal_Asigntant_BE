@@ -1,0 +1,942 @@
+openapi: 3.0.3
+
+info:
+  title: Procedure Service API
+  version: 0.1.0
+  description: |
+    API contract của **Procedure Service**: tra cứu thủ tục hành chính (đất đai, hộ kinh doanh)
+    và danh sách giấy tờ cần chuẩn bị.
+
+    - Tuân theo `docs/API_GUIDELINES.md` (v2): kết quả dạng `{data, error, request_id}`,
+      `snake_case`, UUID, thời gian ISO 8601 UTC, tiền là số nguyên đồng.
+    - `x-status` ở mỗi API cho biết tình trạng code:
+      `implemented` = đã chạy đúng contract; `partial` = đã có nhưng chưa đủ như contract;
+      `planned` = mới thiết kế, chưa code.
+    - Dữ liệu trong `example` chỉ để minh họa, **không phải dữ liệu pháp lý**.
+    - Không cần đăng nhập: thông tin thủ tục là công khai. API hồ sơ (`/procedures/applications...`) cần access token;
+      mỗi user chỉ thấy hồ sơ của mình, `admin` thấy tất cả.
+  x-owner: "(điền tên người phụ trách Procedure Service)"
+
+servers:
+  - url: http://localhost:8080/api
+    description: Qua Gateway (Frontend và Postman dùng địa chỉ này)
+  - url: http://localhost:8000/api/v1
+    description: Chạy riêng service bằng uvicorn trên máy
+  - url: http://procedure-service:8000/api/v1
+    description: Service khác gọi trong mạng Docker
+
+tags:
+  - name: Health
+    description: Kiểm tra service còn chạy
+  - name: Procedures
+    description: Tra cứu thủ tục và giấy tờ cần chuẩn bị
+  - name: Applications
+    description: Hồ sơ người dùng đã nộp/lưu nháp (cần đăng nhập)
+
+paths:
+  /procedures/health:
+    get:
+      tags: [Health]
+      operationId: getHealth
+      summary: Kiểm tra service
+      description: Không dùng format `{data, error, request_id}` (ngoại lệ cho health check).
+      x-status: implemented
+      responses:
+        "200":
+          description: Service đang chạy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: procedure-service }
+
+  /procedures:
+    get:
+      tags: [Procedures]
+      operationId: listProcedures
+      summary: Danh sách thủ tục
+      description: |
+        Lấy danh sách thủ tục, lọc theo lĩnh vực, có phân trang và hỗ trợ tìm kiếm.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: domain
+          in: query
+          description: Lọc theo lĩnh vực. Bỏ trống = tất cả.
+          schema: { $ref: "#/components/schemas/Domain" }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách thủ tục (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcedureListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 7c0e5b0e-2f4b-4c3e-9a51-1f0a6e2b9d10
+                      code: HKD-001
+                      name: Đăng ký thành lập hộ kinh doanh
+                      domain: business
+                  pagination: { page: 1, page_size: 20, total: 1, total_pages: 1 }
+                error: null
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/search:
+    post:
+      tags: [Procedures]
+      operationId: searchProcedures
+      summary: Tìm thủ tục theo câu hỏi
+      description: |
+        Tìm thủ tục phù hợp với câu người dùng nhập. Agent Service gọi API này khi trả lời chat.
+        Không có kết quả thì trả `items: []` (status 200), không trả 404.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProcedureSearchRequest" }
+            examples:
+              tim_thay:
+                summary: Có kết quả
+                value: { query: "đăng ký hộ kinh doanh" }
+              khong_thay:
+                summary: Không có kết quả
+                value: { query: "xin chào" }
+      responses:
+        "200":
+          description: Kết quả tìm kiếm
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcedureSearchResponse" }
+              examples:
+                tim_thay:
+                  summary: Có kết quả
+                  value:
+                    data:
+                      items:
+                        - id: HKD-001
+                          code: HKD-001
+                          name: Đăng ký thành lập hộ kinh doanh
+                    error: null
+                    request_id: req-123
+                khong_thay:
+                  summary: Không có kết quả
+                  value:
+                    data: { items: [] }
+                    error: null
+                    request_id: req-124
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/domains/{domain}/procedures:
+    get:
+      tags: [Procedures]
+      operationId: listProceduresByDomain
+      summary: Thủ tục theo lĩnh vực
+      description: |
+        Danh sách thủ tục của một lĩnh vực (`land`, `business`, hoặc `all`), sắp theo mã.
+        `include_details=false` để bỏ giấy tờ/điều kiện/căn cứ pháp lý (nhẹ hơn, FE dùng cho danh mục).
+        Alias cũ: `GET /procedures/domains/{domain}`.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: domain, in: path, required: true, schema: { type: string, enum: [land, business, all] } }
+        - { name: include_details, in: query, schema: { type: boolean, default: true } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 100 } }
+      responses:
+        "200":
+          description: Danh sách thủ tục (rỗng thì `items` = `[]`)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, error, request_id]
+                properties:
+                  data:
+                    type: object
+                    required: [domain, total, items]
+                    properties:
+                      domain: { type: string }
+                      total: { type: integer, minimum: 0 }
+                      items: { type: array, items: { $ref: "#/components/schemas/ProcedureSummary" } }
+                  error: { $ref: "#/components/schemas/NoError" }
+                  request_id: { $ref: "#/components/schemas/RequestIdValue" }
+              example:
+                data:
+                  domain: business
+                  total: 1
+                  items:
+                    - id: 7c0e5b0e-2f4b-4c3e-9a51-1f0a6e2b9d10
+                      code: HKD-001
+                      name: Đăng ký thành lập hộ kinh doanh
+                      domain: business
+                      description: Cấp giấy chứng nhận đăng ký hộ kinh doanh
+                      processing_days: 3
+                      fee: 100000
+                      fee_formatted: "100.000 ₫"
+                error: null
+                request_id: req-123
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/{procedure_id}:
+    get:
+      tags: [Procedures]
+      operationId: getProcedure
+      summary: Chi tiết thủ tục
+      description: |
+        Thông tin đầy đủ của một thủ tục: lệ phí, thời gian xử lý, căn cứ pháp lý và
+        danh sách giấy tờ cần chuẩn bị. Cơ quan tiếp nhận cụ thể do **Location Service** trả
+        (dựa trên `receiving_agency_level` và vị trí người dùng).
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: procedure_id
+          in: path
+          required: true
+          description: ID thủ tục (UUID) hoặc Mã thủ tục (HKD-001, DD-001...)
+          schema: { type: string }
+      responses:
+        "200":
+          description: Chi tiết thủ tục
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcedureDetailResponse" }
+              example:
+                data:
+                  id: 3d6f2a90-8c1b-4f0e-b7a2-5e4d9c1a2b3c
+                  code: DD-001
+                  name: Đăng ký biến động quyền sử dụng đất do chuyển nhượng
+                  domain: land
+                  description: Thủ tục sang tên khi mua bán, chuyển nhượng quyền sử dụng đất.
+                  fee: null
+                  fee_note: Theo mức thu do HĐND TP.HCM quy định
+                  processing_days: 10
+                  submission_channels: [direct, postal, online]
+                  receiving_agency_level: commune
+                  legal_bases:
+                    - doc_number: 31/2024/QH15
+                      title: Luật Đất đai 2024
+                      article_ref: Điều 133
+                      source_url: https://example.gov.vn/luat-dat-dai-2024
+                  requirements:
+                    - id: 0b8e1f6a-1c2d-4e3f-8a9b-0c1d2e3f4a5b
+                      name: Giấy chứng nhận quyền sử dụng đất (bản gốc)
+                      description: null
+                      is_required: true
+                      copies: 1
+                      document_form: original
+                      form_code: null
+                      note: null
+                    - id: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                      name: Hợp đồng chuyển nhượng quyền sử dụng đất đã công chứng
+                      description: null
+                      is_required: true
+                      copies: 1
+                      document_form: certified_copy
+                      form_code: null
+                      note: Công chứng hoặc chứng thực theo quy định
+                  effective_from: "2026-07-01"
+                  updated_at: "2026-10-02T02:00:00Z"
+                error: null
+                request_id: req-123
+        "404":
+          description: Không có thủ tục với ID này
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: PROCEDURE_NOT_FOUND
+                  message: Không tìm thấy thủ tục.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/applications:
+    get:
+      tags: [Applications]
+      operationId: listAllApplications
+      summary: Hồ sơ của mọi người (admin)
+      description: Mỗi item có thêm `user_id`. Mới nhất trước.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ApplicationDomain"
+        - $ref: "#/components/parameters/ApplicationStatusFilter"
+        - name: q
+          in: query
+          description: Tìm theo tên người nộp, số CCCD hoặc mã thủ tục
+          schema: { type: string, maxLength: 100 }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/ApplicationPageSize"
+      responses:
+        "200":
+          description: Danh sách hồ sơ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 5b1d7f3e-8a4c-4f8e-9d2a-0c6b1e7a9f21
+                      user_id: 11111111-1111-4111-8111-111111111111
+                      domain: business
+                      procedure_code: HKD-001
+                      procedure_name: Đăng ký thành lập hộ kinh doanh
+                      status: processing
+                      applicant_name: Lê Thị Thu
+                      applicant_id_number: null
+                      address: Số 45 Đường số 7, P. An Phú, TP. Thủ Đức
+                      fee: 100000
+                      receiving_agency_level: commune
+                      created_at: "2026-10-13T08:00:00+00:00"
+                      due_date: "2026-10-16"
+                  pagination: { page: 1, page_size: 10, total: 1, total_pages: 1 }
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+    post:
+      tags: [Applications]
+      operationId: submitApplication
+      summary: Nộp hoặc lưu nháp hồ sơ của tôi
+      description: |
+        Chủ hồ sơ luôn lấy từ access token (`sub`). Body không được có `user_id` (gửi kèm → 422).
+        Mã `DD-...` lưu vào bảng hồ sơ đất đai, mã còn lại lưu vào bảng hồ sơ kinh doanh.
+        `form_data` phải khớp `GET /procedures/form-schema/{procedure_code}`, áp dụng cho cả `draft` lẫn `submitted`:
+        đủ mọi ô `required` (checkbox bắt buộc phải là `true`), giá trị `select` nằm trong `options`,
+        `number` là số, `date` dạng `YYYY-MM-DD`, khớp `validation_regex`; ô không có trong schema bị từ chối.
+        Sai → 422 với `details` theo từng ô. Thủ tục chưa có schema → 422 ở ô `procedure_code`.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApplicationSubmitRequest" }
+            example:
+              procedure_code: DD-001
+              status: submitted
+              form_data:
+                applicant_name: NGUYỄN VĂN A
+                applicant_gender: Nam
+                applicant_dob: "1990-05-20"
+                applicant_id_type: CCCD
+                applicant_id_number: "001095012849"
+                applicant_id_issue_date: "2021-04-10"
+                applicant_id_issue_place: Cục Cảnh sát QLHC về TTXH
+                applicant_phone: "0901234567"
+                applicant_permanent_address: Phường Kim Mã, Quận Ba Đình, TP. Hà Nội
+                applicant_current_address: Phường Kim Mã, Quận Ba Đình, TP. Hà Nội
+                plot_number: "128"
+                map_sheet_number: "14"
+                land_address: Phường Kim Mã, Quận Ba Đình, TP. Hà Nội
+                land_area: 85.5
+                land_use_purpose: Đất ở tại đô thị (ODT)
+                transferee_name: TRẦN THỊ B
+                transferee_id_number: "001196004321"
+                transferee_address: Phường Láng Hạ, Quận Đống Đa, TP. Hà Nội
+                transfer_contract_date: "2026-09-30"
+                issuance_option: renew
+      responses:
+        "200":
+          description: Hồ sơ đã lưu
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, error, request_id]
+                properties:
+                  data: { $ref: "#/components/schemas/ApplicationRecord" }
+                  error: { $ref: "#/components/schemas/NoError" }
+                  request_id: { $ref: "#/components/schemas/RequestIdValue" }
+              example:
+                data:
+                  id: 5b1d7f3e-8a4c-4f8e-9d2a-0c6b1e7a9f21
+                  user_id: 11111111-1111-4111-8111-111111111111
+                  procedure_code: DD-001
+                  procedure_id: 7c0e5b0e-2f4b-4c3e-9a51-1f0a6e2b9d10
+                  status: submitted
+                  applicant_name: Nguyễn Văn A
+                  domain: land
+                  target_table: land_procedure_records
+                  created_at: "2026-10-13T08:00:00+00:00"
+                  updated_at: "2026-10-13T08:00:00+00:00"
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: Mã thủ tục không tồn tại
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error: { code: PROCEDURE_NOT_FOUND, message: Không tìm thấy thủ tục. }
+                request_id: req-123
+        "422":
+          description: Body sai, hoặc `form_data` không khớp form schema của thủ tục
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: VALIDATION_ERROR
+                  message: Hồ sơ còn thiếu hoặc sai thông tin, vui lòng kiểm tra các ô được đánh dấu.
+                  details:
+                    - { field: plot_number, message: Đây là ô bắt buộc. }
+                    - { field: applicant_phone, message: Sai định dạng. }
+                    - { field: citizen_fullname, message: Ô này không có trong biểu mẫu của thủ tục. }
+                request_id: req-123
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/applications/me:
+    get:
+      tags: [Applications]
+      operationId: listMyApplications
+      summary: Hồ sơ của tôi
+      description: |
+        Danh sách hồ sơ của người đang đăng nhập (chủ lấy từ token; `user_id` gửi kèm bị bỏ qua), mới nhất trước.
+        Chưa có hồ sơ → `items: []`, `total: 0`.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ApplicationDomain"
+        - $ref: "#/components/parameters/ApplicationStatusFilter"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/ApplicationPageSize"
+      responses:
+        "200":
+          description: Danh sách hồ sơ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 5b1d7f3e-8a4c-4f8e-9d2a-0c6b1e7a9f21
+                      domain: land
+                      procedure_code: DD-001
+                      procedure_name: Đăng ký biến động quyền sử dụng đất do chuyển nhượng
+                      status: submitted
+                      applicant_name: Nguyễn Văn A
+                      applicant_id_number: "001095012849"
+                      address: Phường Kim Mã, Quận Ba Đình, TP. Hà Nội
+                      fee: 0
+                      receiving_agency_level: district
+                      created_at: "2026-10-13T08:00:00+00:00"
+                      due_date: "2026-10-23"
+                  pagination: { page: 1, page_size: 10, total: 1, total_pages: 1 }
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/applications/summary:
+    get:
+      tags: [Applications]
+      operationId: getApplicationSummary
+      summary: Số hồ sơ theo lĩnh vực và trạng thái (admin)
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Số đếm cho dashboard admin
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, error, request_id]
+                properties:
+                  data:
+                    type: object
+                    required: [total, by_domain, by_status]
+                    properties:
+                      total: { type: integer, minimum: 0 }
+                      by_domain:
+                        type: object
+                        required: [land, business]
+                        properties:
+                          land: { type: integer, minimum: 0 }
+                          business: { type: integer, minimum: 0 }
+                      by_status:
+                        type: object
+                        required: [draft, submitted, processing, completed, cancelled]
+                        properties:
+                          draft: { type: integer, minimum: 0 }
+                          submitted: { type: integer, minimum: 0 }
+                          processing: { type: integer, minimum: 0 }
+                          completed: { type: integer, minimum: 0 }
+                          cancelled: { type: integer, minimum: 0 }
+                  error: { $ref: "#/components/schemas/NoError" }
+                  request_id: { $ref: "#/components/schemas/RequestIdValue" }
+              example:
+                data:
+                  total: 8
+                  by_domain: { land: 5, business: 3 }
+                  by_status: { draft: 1, submitted: 2, processing: 2, completed: 2, cancelled: 1 }
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/applications/{domain}/{record_id}:
+    get:
+      tags: [Applications]
+      operationId: getApplication
+      summary: Chi tiết một hồ sơ
+      description: Chỉ chủ hồ sơ (theo token) hoặc `admin` xem được. Hồ sơ của người khác trả 404.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: domain, in: path, required: true, schema: { $ref: "#/components/schemas/Domain" } }
+        - { name: record_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Hồ sơ đầy đủ, kèm `form_data`
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, error, request_id]
+                properties:
+                  data: { $ref: "#/components/schemas/ApplicationRecord" }
+                  error: { $ref: "#/components/schemas/NoError" }
+                  request_id: { $ref: "#/components/schemas/RequestIdValue" }
+              example:
+                data:
+                  id: 5b1d7f3e-8a4c-4f8e-9d2a-0c6b1e7a9f21
+                  user_id: 11111111-1111-4111-8111-111111111111
+                  procedure_code: DD-001
+                  status: submitted
+                  applicant_name: Nguyễn Văn A
+                  domain: land
+                  target_table: land_procedure_records
+                  form_data: { plot_number: "128" }
+                  created_at: "2026-10-13T08:00:00+00:00"
+                  updated_at: "2026-10-13T08:00:00+00:00"
+                error: null
+                request_id: req-123
+        "400":
+          description: Lĩnh vực không hợp lệ
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error: { code: INVALID_DOMAIN, message: "Domain phải là land hoặc business" }
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: Không có hồ sơ, hoặc hồ sơ không thuộc người gọi
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error: { code: APPLICATION_NOT_FOUND, message: Không tìm thấy hồ sơ đã lưu. }
+                request_id: req-123
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    CookieAuth: { type: apiKey, in: cookie, name: access_token, description: Cookie HttpOnly của hệ thống }
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Mã lần gọi. Gateway tự tạo; gọi trực tiếp không có thì service tự tạo.
+      schema: { type: string, example: req-123 }
+    Page:
+      name: page
+      in: query
+      description: Trang cần lấy, bắt đầu từ 1.
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      description: Số dòng mỗi trang.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+    ApplicationDomain:
+      name: domain
+      in: query
+      description: Lọc theo lĩnh vực. Bỏ trống = tất cả.
+      schema: { $ref: "#/components/schemas/Domain" }
+    ApplicationStatusFilter:
+      name: status
+      in: query
+      description: Lọc theo trạng thái. Bỏ trống = tất cả.
+      schema: { $ref: "#/components/schemas/ApplicationStatus" }
+    ApplicationPageSize:
+      name: page_size
+      in: query
+      description: Số hồ sơ mỗi trang.
+      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+
+  headers:
+    RequestId:
+      description: Mã lần gọi, giống `request_id` trong body.
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Thiếu, sai hoặc hết hạn access token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error: { code: UNAUTHORIZED, message: Bạn cần đăng nhập. }
+            request_id: req-123
+    Forbidden:
+      description: Không đủ quyền (chỉ admin)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error: { code: FORBIDDEN, message: Bạn không có quyền thực hiện thao tác này. }
+            request_id: req-123
+    ValidationError:
+      description: Dữ liệu gửi lên không hợp lệ
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: VALIDATION_ERROR
+              message: Dữ liệu gửi lên không hợp lệ.
+              details:
+                - field: query
+                  message: Phải có 1–2000 ký tự, không chỉ chứa khoảng trắng.
+            request_id: req-123
+    InternalError:
+      description: Lỗi Backend không lường trước
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: INTERNAL_ERROR
+              message: Hệ thống đang gặp lỗi, vui lòng thử lại sau.
+            request_id: req-123
+    DbUnavailable:
+      description: Không kết nối được database thủ tục. Không bao giờ trả dữ liệu giả thay thế.
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: PROCEDURE_DB_UNAVAILABLE
+              message: Không kết nối được cơ sở dữ liệu thủ tục, vui lòng thử lại sau.
+            request_id: req-123
+
+  schemas:
+    # ---------- Kiểu dùng chung ----------
+    RequestIdValue:
+      type: string
+      description: Mã lần gọi API
+      example: req-123
+
+    NoError:
+      description: Luôn `null` khi thành công
+      nullable: true
+      enum: [null]
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1, example: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        total: { type: integer, minimum: 0, example: 1 }
+        total_pages: { type: integer, minimum: 0, example: 1 }
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Mã lỗi cố định, FE dùng để xử lý (xem API_GUIDELINES mục 5)
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          description: Câu báo lỗi tiếng Việt, hiển thị được cho người dùng
+        details:
+          type: array
+          description: Lỗi theo từng trường (chỉ có khi `VALIDATION_ERROR`)
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string, example: query }
+              message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          description: Luôn `null` khi lỗi
+          nullable: true
+          enum: [null]
+        error: { $ref: "#/components/schemas/ErrorBody" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    # ---------- Hồ sơ ----------
+    ApplicationStatus:
+      type: string
+      enum: [draft, submitted, processing, completed, cancelled]
+    ApplicationSubmitRequest:
+      type: object
+      additionalProperties: false
+      required: [procedure_code]
+      properties:
+        procedure_code: { type: string, maxLength: 50, example: DD-001 }
+        status: { type: string, enum: [draft, submitted], default: draft }
+        form_data:
+          type: object
+          additionalProperties: true
+          description: |
+            Đất: applicant_name, applicant_id_number, applicant_phone, plot_number, map_sheet_number, land_area, land_address.
+            Kinh doanh: applicant_name, business_name_vn, business_type, headquarters_address, charter_capital.
+        extra_data: { type: object, additionalProperties: true }
+    ApplicationRecord:
+      type: object
+      required: [id, user_id, procedure_code, status, domain, target_table, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        procedure_code: { type: string }
+        procedure_id: { type: string, format: uuid, nullable: true }
+        status: { $ref: "#/components/schemas/ApplicationStatus" }
+        applicant_name: { type: string, nullable: true }
+        domain: { $ref: "#/components/schemas/Domain" }
+        target_table: { type: string, enum: [land_procedure_records, business_procedure_records] }
+        form_data: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ApplicationListItem:
+      type: object
+      required: [id, domain, procedure_code, procedure_name, status, applicant_name, applicant_id_number, address,
+                 fee, receiving_agency_level, created_at, due_date]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid, description: Chỉ có ở danh sách của admin }
+        domain: { $ref: "#/components/schemas/Domain" }
+        procedure_code: { type: string }
+        procedure_name: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/ApplicationStatus" }
+        applicant_name: { type: string, nullable: true }
+        applicant_id_number: { type: string, nullable: true }
+        address: { type: string, nullable: true, description: Địa chỉ thửa đất hoặc trụ sở kinh doanh }
+        fee: { type: integer, nullable: true, minimum: 0, description: Lệ phí (đồng) của thủ tục }
+        receiving_agency_level: { type: string, nullable: true, enum: [commune, district, province, null] }
+        created_at: { type: string, format: date-time }
+        due_date: { type: string, format: date, nullable: true, description: "Ngày nộp + processing_days (ngày lịch); null nếu thủ tục chưa có thời hạn" }
+    ApplicationListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items: { type: array, items: { $ref: "#/components/schemas/ApplicationListItem" } }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    # ---------- Thủ tục ----------
+    Domain:
+      type: string
+      description: "Lĩnh vực: `land` = đất đai, `business` = hộ kinh doanh"
+      enum: [land, business]
+
+    ProcedureSummary:
+      type: object
+      description: Thông tin rút gọn, dùng trong danh sách và kết quả tìm kiếm
+      required: [id, code, name]
+      properties:
+        id:
+          type: string
+          description: UUID. Dữ liệu mẫu hiện tại tạm dùng `HKD-001`.
+          example: 7c0e5b0e-2f4b-4c3e-9a51-1f0a6e2b9d10
+        code:
+          type: string
+          description: Mã nghiệp vụ của thủ tục
+          example: HKD-001
+        name:
+          type: string
+          example: Đăng ký thành lập hộ kinh doanh
+        domain:
+          $ref: "#/components/schemas/Domain"
+
+    Requirement:
+      type: object
+      description: Một giấy tờ cần chuẩn bị cho thủ tục
+      required: [id, name, is_required, copies, document_form]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Giấy chứng nhận quyền sử dụng đất (bản gốc) }
+        description: { type: string, nullable: true }
+        is_required:
+          type: boolean
+          description: "`false` = chỉ cần khi rơi vào trường hợp ghi ở `note`"
+        copies: { type: integer, minimum: 1, example: 1 }
+        document_form:
+          type: string
+          description: "`original` = bản chính, `copy` = bản sao, `certified_copy` = bản sao có chứng thực"
+          enum: [original, copy, certified_copy]
+        form_code:
+          type: string
+          nullable: true
+          description: Số hiệu mẫu tờ khai nếu có (lấy từ thủ tục TP.HCM đang áp dụng)
+        note: { type: string, nullable: true }
+
+    LegalBasis:
+      type: object
+      description: Văn bản pháp luật làm căn cứ cho thủ tục
+      required: [doc_number, title]
+      properties:
+        doc_number: { type: string, example: 31/2024/QH15 }
+        title: { type: string, example: Luật Đất đai 2024 }
+        article_ref: { type: string, nullable: true, example: Điều 133 }
+        source_url: { type: string, format: uri, nullable: true }
+
+    ProcedureDetail:
+      allOf:
+        - $ref: "#/components/schemas/ProcedureSummary"
+        - type: object
+          required: [domain, submission_channels, receiving_agency_level, legal_bases, requirements, updated_at]
+          properties:
+            description: { type: string, nullable: true }
+            fee:
+              type: integer
+              nullable: true
+              minimum: 0
+              description: Lệ phí (đồng). `null` khi mức thu phụ thuộc quy định địa phương, xem `fee_note`.
+            fee_note: { type: string, nullable: true }
+            processing_days:
+              type: integer
+              nullable: true
+              minimum: 0
+              description: Thời gian giải quyết (ngày làm việc)
+            submission_channels:
+              type: array
+              description: "Cách nộp: `direct` = trực tiếp, `postal` = bưu chính, `online` = trực tuyến"
+              items: { type: string, enum: [direct, postal, online] }
+            receiving_agency_level:
+              type: string
+              description: "Cấp tiếp nhận: `commune` = xã/phường, `province` = tỉnh/thành phố"
+              enum: [commune, province]
+            legal_bases:
+              type: array
+              items: { $ref: "#/components/schemas/LegalBasis" }
+            requirements:
+              type: array
+              items: { $ref: "#/components/schemas/Requirement" }
+            effective_from:
+              type: string
+              format: date
+              nullable: true
+              description: Ngày thủ tục bắt đầu áp dụng
+            updated_at: { type: string, format: date-time }
+
+    ProcedureSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+          description: Câu người dùng nhập. Khoảng trắng đầu/cuối được cắt bỏ; không được chỉ chứa khoảng trắng.
+          example: đăng ký hộ kinh doanh
+
+    # ---------- Kết quả từng API ----------
+    ProcedureListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/ProcedureSummary" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    ProcedureSearchResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/ProcedureSummary" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    ProcedureDetailResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/ProcedureDetail" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }

@@ -1,0 +1,1241 @@
+openapi: 3.0.3
+info:
+  title: Document Service API
+  version: 0.9.0
+  x-owner: Hiền
+  description: |
+    Thiết kế upload và trích xuất/OCR nối Contract, ngày 08/10/2026.
+    Task 1-3: health/me, upload/list/detail, download/content/delete đã có code.
+    Task 6: processing/extraction triển khai; worker opt-in kiểm tra/scan -> available -> extract/atomic completed.
+    Task 7: outbox005/backend dispatcher opt-in và adapter handoff; không thêm API public hoặc tự implement Contract/Notification.
+    Task 8: rootless/read-only hardening và readiness/test; xem DOCUMENT_RELEASE.md, không coi là full cloud e2e.
+    Upload/identity-ocr/identity-profile PUT kiểm tra User internal status qua JWT subject: ACCOUNT_LOCKED403,
+    PROFILE_NOT_SUBMITTED được chuẩn bị giấy tờ/profile; User thiếu/lỗi hoặc response sai503 USER_SERVICE_UNAVAILABLE.
+    Không gọi citizen-profile để tự copy/ghi đè; Contract/service tạo hồ sơ nghiệp vụ kiểm tra quyền riêng.
+    Upload ban đầu pending_check/queued; không tự chạy worker trên file nhóm. Scan lỗi fail-closed/retry giới hạn.
+    Task 4 dùng Tesseract 5 pretrained vie+eng CPU local, không train/không gọi VNPT.
+    Model cài khi build; ảnh lưu private Supabase. OCR không xác minh danh tính.
+    Task 5 GET/PUT/DELETE identity-profile/me implemented; user xác nhận sáu field, CAS revision.
+    File và giấy tờ riêng tư, chủ lấy từ JWT sub; admin không tự đọc dữ liệu cá nhân.
+    File tối đa 9 MiB (9437184 bytes); tổng multipart <= Gateway 10 MiB.
+    PDF tối đa 100 trang; DOCX/PDF cho contract_template, thêm JPEG/PNG cho supporting_document.
+    Không nhận DOCM, file hỏng/nguy hiểm, PDF mã hóa/khóa/ký số. Không log PII.
+    Contract quản lý nháp/mapping/sinh hợp đồng; Document không quản lý generated contract.
+    Luật sư (15/10/2026): lawyer-card-ocr + API nội bộ lawyer-cards cho Lawyer Service, migration 006; file riêng,
+    không đổi API CCCD/upload hiện có.
+servers:
+  - url: http://localhost:8080/api
+    description: FE/Postman qua Gateway; collection /documents/ phải có dấu slash cuối.
+  - url: http://document-service:8000/api/v1
+    description: Contract gọi trong mạng Docker, dùng DOCUMENT_SERVICE_URL.
+security:
+  - BearerAuth: []
+  - CookieAuth: []
+tags:
+  - name: documents
+paths:
+  /documents/identity-ocr:
+    post:
+      operationId: createIdentityOcrSession
+      tags: [documents]
+      x-status: implemented
+      summary: Đọc CCCD hai mặt, không xác minh danh tính
+      description: |
+        Multipart front/back, JPEG/PNG tối đa 4 MiB mỗi ảnh, tổng body tối đa 10 MiB.
+        Backend sửa orientation, bỏ metadata, lưu hai JPEG private và JSON gốc riêng trong DB RLS.
+        Tesseract 5 CPU local có sẵn, không gửi ảnh VNPT/tải model trong request.
+        Không tự retry OCR. Replay cùng key trả phiên cũ; khác ảnh/engine 409; processing/crash 409 cần đối soát.
+        Replay failed trả lỗi cũ, không chạy OCR lại. Phiên lỗi giữ ảnh private để đối soát.
+        Không đủ số CCCD và tên trả 422 OCR_UNREADABLE; quá hạn 504 OCR_TIMEOUT; bận/chưa model 503.
+        Chỉ trả sáu trường gợi ý, trường xung đột trả null + warnings. Không tạo profile hoặc sửa User KYC.
+        verification_status luôn not_performed; raw JSON/storage keys không trả cho FE.
+      parameters:
+        - {$ref: '#/components/parameters/RequestId'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [front, back]
+              properties:
+                front: {type: string, format: binary}
+                back: {type: string, format: binary}
+      responses:
+        '201':
+          description: Phiên hoàn tất hoặc replay phiên đã hoàn tất; không phải xác minh thành công
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityOcrResponse'}
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '413': {$ref: '#/components/responses/Error413'}
+        '415': {$ref: '#/components/responses/Error415'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '504': {$ref: '#/components/responses/Error504'}
+  /documents/identity-ocr/{session_id}:
+    get:
+      operationId: getIdentityOcrSession
+      tags: [documents]
+      x-status: implemented
+      summary: Chủ xem kết quả phiên đọc CCCD
+      description: Owner-only lấy từ JWT; admin không bypass. Không trả JSON gốc hoặc storage keys.
+      parameters:
+        - {name: session_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/RequestId'}
+      responses:
+        '200':
+          description: Phiên thuộc chủ, gồm processing/completed/failed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IdentityOcrResponse'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/me:
+    get:
+      operationId: getDocumentAuthContext
+      tags: [documents]
+      summary: Kiểm tra access token và danh tính gọi Document
+      description: Chỉ trả user_id và role từ JWT, không truy vấn hồ sơ, DB hoặc eKYC.
+      x-status: implemented
+      parameters:
+        - {$ref: '#/components/parameters/RequestId'}
+      responses:
+        '200':
+          description: Access token hợp lệ
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthContextResponse'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /documents/health:
+    get:
+      operationId: getDocumentHealth
+      tags: [documents]
+      summary: Kiểm tra service còn chạy
+      description: Khớp code hiện có; health không chứng minh DB, storage hoặc OCR hoạt động.
+      x-status: implemented
+      security: []
+      responses:
+        '200':
+          description: Service đang chạy
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, service]
+                properties:
+                  status: {type: string, enum: [ok]}
+                  service: {type: string, enum: [document-service]}
+              example: {status: ok, service: document-service}
+  /documents/:
+    post:
+      operationId: uploadDocument
+      tags: [documents]
+      summary: Upload mẫu hợp đồng hoặc giấy tờ
+      x-status: implemented
+      description: |
+        JWT bắt buộc; owner từ sub. multipart file/purpose/document_type, không có owner hay URL.
+        contract_template chỉ DOCX/PDF và type=contract; supporting_document nhận DOCX/PDF/JPEG/PNG.
+        identity_card chỉ supporting_document và JPEG/PNG/PDF, là khai báo chưa xác minh; không tự gán dữ liệu OCR cho bên A/B.
+        Kiểm tra MIME thực, magic bytes/parser, filename an toàn, giới hạn size/trang; không tin đuôi file.
+        Synchronous validation có thể trả 413/415/422. Ghi object quarantine rồi transaction metadata+job.
+        202 nghĩa đã nhận và xếp hàng, chưa kết luận file an toàn hoặc OCR xong.
+        Worker scan/malware/zip bomb, loại EXIF ảnh; rejected không cho tải và job failed.
+        Upload an toàn được available, sau đó OCR có thể completed hoặc failed độc lập.
+        Hash request gồm purpose/type/filename và SHA256 bytes upload trước chuẩn hóa.
+        Cùng owner/key/hash trả lại cùng document_id và trạng thái hiện tại (202); khác hash 409.
+        Khóa unique chống upload trùng; không lưu JWT trong DB/job. Idempotency hết hiệu lực truy cập nếu file deleted (410).
+        Khi dùng cookie phải kiểm tra Origin/CSRF theo allowlist FE; không mở cookie cho mọi origin.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file, purpose, document_type]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 'File 1..9437184 bytes, kiểm tra giới hạn bytes tại server; không dùng maxLength để giả lập size binary.'
+                purpose: {$ref: '#/components/schemas/Purpose'}
+                document_type: {$ref: '#/components/schemas/DocumentType'}
+            encoding:
+              file:
+                contentType: application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png
+      responses:
+        '202':
+          description: Đã lưu metadata và job; chưa xử lý xong
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentResponse'}
+              example:
+                data:
+                  document_id: 88888888-8888-4888-8888-888888888888
+                  owner_user_id: 11111111-1111-4111-8111-111111111111
+                  purpose: contract_template
+                  document_type: contract
+                  original_filename: mau-hop-dong.pdf
+                  media_type: application/pdf
+                  uploaded_size_bytes: 204800
+                  size_bytes: null
+                  sha256: null
+                  file_status: pending_check
+                  error_code: null
+                  processing_job_id: 77777777-7777-4777-8777-777777777777
+                  processing_status: queued
+                  created_at: '2026-10-08T02:00:00Z'
+                  updated_at: '2026-10-08T02:00:00Z'
+                error: null
+                request_id: req-upload-demo
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '410': {$ref: '#/components/responses/Error410'}
+        '413': {$ref: '#/components/responses/Error413'}
+        '415': {$ref: '#/components/responses/Error415'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '429': {$ref: '#/components/responses/Error429'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '504': {$ref: '#/components/responses/Error504'}
+    get:
+      operationId: listDocuments
+      tags: [documents]
+      summary: Danh sách file của tôi
+      x-status: implemented
+      description: Chỉ owner, không trả deleted; mới nhất trước theo created_at rồi document_id. Không trả storage_key hoặc nội dung OCR trong danh sách.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: purpose
+          in: query
+          schema: {$ref: '#/components/schemas/Purpose'}
+        - name: document_type
+          in: query
+          schema: {$ref: '#/components/schemas/DocumentType'}
+      responses:
+        '200':
+          description: Danh sách có phân trang
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DocumentListResponse'}
+              example:
+                data:
+                  items: []
+                  pagination: {page: 1, page_size: 20, total: 0, total_pages: 0}
+                error: null
+                request_id: req-list-demo
+        '401': {$ref: '#/components/responses/Error401'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/identity-profile/me:
+    get:
+      operationId: getMyIdentityProfile
+      tags: [documents]
+      summary: Thông tin CCCD tôi đã xác nhận ở trang detail user
+      x-status: implemented
+      description: |
+        Chỉ JWT sub, không nhận user_id; admin không vượt quyền. Không có/đã unlink ->404 IDENTITY_PROFILE_NOT_FOUND.
+        Lỗi kèm error.current_revision: 0 khi chưa từng lưu, hoặc revision row deleted để FE lưu lại mà không reset revision.
+        Trả một profile current active; không raw OCR, không signed URL/ảnh. Contract dùng lại profile, không yêu cầu upload CCCD mỗi hợp đồng.
+        Đây là dữ liệu user xác nhận, không phải xác minh CCCD/KYC. Không dùng thông tin hồ sơ User hoặc tài liệu khác để auto-fill.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200': {$ref: '#/components/responses/IdentityProfile'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/IdentityProfile404'}
+        '503': {$ref: '#/components/responses/Error503'}
+    put:
+      operationId: confirmMyIdentityProfile
+      tags: [documents]
+      summary: Lưu hoặc thay CCCD đã review, dùng lại cho hợp đồng sau
+      x-status: implemented
+      description: |
+        Trang detail upload một lần rồi lấy OCR, user kiểm tra/sửa và confirm bằng API này.
+        JSON <=16 KiB; chọn đúng một nguồn không-null: source_session_id của T4 completed cùng owner,
+        hoặc source_document_id của luồng file cũ (cần worker T6). Không tạo file/job/result giả cho session.
+        source_document_id cùng owner, supporting_document/identity_card, JPEG/PNG/PDF available, latest job completed.
+        Server xác định source_result_id/hash; không nhận ID result hoặc owner tùy ý. File không đúng loại CCCD khai báo ->422.
+        expected_revision=0 khi chưa có profile; sửa/thay phải khớp revision hiện tại, lệch ->409 REVISION_CONFLICT.
+        Thay thế toàn bộ 6 fields, thiếu trên CCCD gửi null; ít nhất một field có giá trị sau trim. Không chấp nhận chuỗi toàn khoảng trắng, không thêm phone/email/giá tiền.
+        Ngày thật YYYY-MM-DD không tương lai, issue_date không trước date_of_birth; không control/format characters.
+        Owner advisory lock, khóa nguồn cũ/mới theo thứ tự rồi profile; recheck trạng thái dưới transaction.
+        Lặp body cùng revision đã sử dụng trả409, không tự tạo revision mới. Đổi profile không sửa nháp cũ.
+        Cookie mutation phải Origin/CSRF check. Không tự lưu OCR vào profile trước user confirm.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, fields]
+              oneOf:
+                - required: [source_session_id]
+                  properties:
+                    source_session_id: {type: string, format: uuid}
+                - required: [source_document_id]
+                  properties:
+                    source_document_id: {type: string, format: uuid}
+              properties:
+                source_session_id: {type: string, format: uuid, nullable: true}
+                source_document_id: {type: string, format: uuid, nullable: true}
+                expected_revision: {type: integer, minimum: 0, maximum: 2147483647}
+                fields: {$ref: '#/components/schemas/IdentityFields'}
+            example:
+              source_document_id: 66666666-6666-4666-8666-666666666666
+              expected_revision: 0
+              fields: {full_name: '[Họ tên đã xác nhận]', date_of_birth: null, identity_number: '000000000000', issue_date: null, issue_place: null, permanent_address: null}
+      responses:
+        '200': {$ref: '#/components/responses/IdentityProfile'}
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '413': {$ref: '#/components/responses/Error413'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+    delete:
+      operationId: unlinkMyIdentityProfile
+      tags: [documents]
+      summary: Ngừng dùng CCCD đã lưu
+      x-status: implemented
+      description: |
+        Soft-delete profile dưới CAS revision; không xóa file nguồn hoặc dữ liệu đã điền trong nháp Contract.
+        Trả204 không body theo API_GUIDELINES; GET sau unlink trả404 với error.current_revision.
+        expected_revision lệch ->409; không có row ->404. Deleted chấp nhận revision hiện tại hoặc trước lần unlink cuối,
+        trả204 không tăng revision lại. Profile đã tạo lại active thì stale DELETE trả409, không xóa bản mới.
+        Profile không còn active thì file nguồn có thể được xóa riêng qua DELETE document. Cookie mutation cần Origin/CSRF check.
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+        - name: expected_revision
+          in: query
+          required: true
+          schema: {type: integer, minimum: 1, maximum: 2147483647}
+      responses:
+        '204':
+          description: Profile đã ngừng dùng; không body, GET lấy current_revision nếu cần
+          headers: {Cache-Control: {schema: {type: string, enum: [no-store]}}}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '404': {$ref: '#/components/responses/IdentityProfile404'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/{document_id}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - $ref: '#/components/parameters/RequestId'
+    get:
+      operationId: getDocument
+      tags: [documents]
+      summary: Metadata và trạng thái file
+      x-status: implemented
+      description: |
+        Chỉ owner. Không tồn tại/deleted/khác chủ đều 404, admin không vượt quyền.
+        Bản available bất biến; sha256 và size_bytes là bytes tại /content sau chuẩn hóa ảnh.
+        processing_job_id/status lấy attempt mới nhất, không lấy kết quả cũ khi job mới chưa xong.
+        Không trả storage_key, uploaded_sha256/request_hash hoặc signed URL trong metadata.
+      responses:
+        '200': {$ref: '#/components/responses/Document'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+    delete:
+      operationId: deleteDocument
+      tags: [documents]
+      summary: Xóa mềm file của tôi
+      x-status: implemented
+      description: |
+        Kiểm tra owner dưới khóa file; queued/processing trả 409, không chạy đua worker.
+        File là nguồn identity profile active ->409 PROFILE_SOURCE_IN_USE; unlink/thay profile trước.
+        Lặp DELETE file đã deleted của đúng chủ trả 204; khác chủ/không tồn tại 404.
+        Không xóa nháp/mẫu/snapshot ở Contract. Sau deleted, API không cấp link hoặc trả nội dung/kết quả.
+        Không hứa vô hiệu link signed đã cấp ngay: hết hạn tối đa 300 giây; link là bearer capability.
+        Dọn storage/results theo chính sách retention nhóm chốt; chưa hard-delete trong bước thiết kế.
+        Cookie request phải kiểm tra Origin/CSRF allowlist FE.
+      responses:
+        '204':
+          description: Đã xóa mềm, không có body
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/{document_id}/processing:
+    get:
+      operationId: getDocumentProcessing
+      tags: [documents]
+      summary: Trạng thái job xử lý mới nhất
+      x-status: implemented
+      description: |
+        Chỉ owner. queued -> processing -> completed/failed. Poll 2-3 giây, không giữ request để đợi OCR.
+        file_status và status độc lập: available+failed nghĩa file an toàn nhưng đọc/OCR lỗi.
+        Lỗi OCR không tự biến available thành rejected. Scan phát hiện nguy hiểm thì rejected+failed.
+        Completed chỉ sau result và job được commit cùng transaction; không có API retry thủ công ở phiên bản này.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Job mới nhất, kể cả queued/failed
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProcessingResponse'}
+              example:
+                data:
+                  document_id: 88888888-8888-4888-8888-888888888888
+                  job_id: 77777777-7777-4777-8777-777777777777
+                  attempt: 1
+                  status: completed
+                  file_status: available
+                  error_code: null
+                  created_at: '2026-10-08T02:00:00Z'
+                  started_at: '2026-10-08T02:00:01Z'
+                  completed_at: '2026-10-08T02:00:04Z'
+                  updated_at: '2026-10-08T02:00:04Z'
+                error: null
+                request_id: req-processing-demo
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/{document_id}/extraction:
+    get:
+      operationId: getDocumentExtraction
+      tags: [documents]
+      summary: Kết quả chữ, tọa độ và dữ liệu gợi ý
+      x-status: implemented
+      description: |
+        Chỉ owner và file available, attempt mới nhất completed.
+        Queued/processing -> 409 EXTRACTION_NOT_READY; failed -> 409 EXTRACTION_FAILED, chi tiết lỗi qua processing.
+        Rejected -> 409 FILE_REJECTED; không trả text file nguy hiểm.
+        source_sha256 bắt buộc khớp sha256 metadata/content. Kết quả chỉ là gợi ý, không xác minh CCCD.
+        DOCX text tham khảo, pages=[]; Contract tự parse cấu trúc từ /content.
+        T6 extracted_fields=[]; không tự gán phone/email/giá tiền hoặc tự lưu profile. User review thủ công.
+        PDF có chữ và ảnh trên cùng trang: giữ chữ gốc, warning vùng ảnh chưa OCR; mixed là trộn trang text/scan.
+        PDF text/scan/mixed và ảnh trả pages/blocks theo từng trang; không dựng DOCX trong Document.
+        Tọa độ chuẩn hóa 0..1, gốc trên-trái trang sau crop/rotation; page 1-based.
+        Text kết quả tối đa 1000000 ký tự, JSON kết quả tối đa 16 MiB; vượt giới hạn job failed
+        EXTRACTION_TOO_LARGE, không cắt nội dung âm thầm. Trang trắng có blocks=[] là hợp lệ.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Kết quả bất biến của job mới nhất completed
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ExtractionResponse'}
+              example:
+                data:
+                  document_id: 88888888-8888-4888-8888-888888888888
+                  job_id: 77777777-7777-4777-8777-777777777777
+                  schema_version: '1.0'
+                  source_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                  source_kind: pdf_text
+                  text: 'Bên A: ........'
+                  pages:
+                    - page: 1
+                      width_pt: 595
+                      height_pt: 842
+                      rotation_degrees: 0
+                      method: text
+                      blocks:
+                        - text: 'Bên A:'
+                          bbox: {x: 0.1, y: 0.2, width: 0.12, height: 0.03}
+                          confidence: null
+                  extracted_fields: []
+                  warnings: []
+                  engine_version: extractor-demo-1
+                  created_at: '2026-10-08T02:00:04Z'
+                error: null
+                request_id: req-extraction-demo
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /documents/{document_id}/download:
+    get:
+      operationId: getDocumentDownload
+      tags: [documents]
+      summary: Cấp link tải riêng tư có hạn cho user
+      x-status: implemented
+      description: |
+        Chỉ owner, file available; OCR failed vẫn cho tải file an toàn.
+        URL HTTPS private object signed tối đa 300 giây, không phải URL công khai.
+        Link có thể dùng bởi người cầm link trong thời hạn; không đưa vào log, DB, chat hoặc Notification.
+        Trả Cache-Control no-store; file attachment qua download query, filename đã sanitize.
+        Adapter cloud đã test attachment/nosniff với một PNG giả; không log link.
+        Contract không dùng API này để tải URL tùy ý; dùng /content cùng Document base URL đã cấu hình.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Link signed có hạn
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestId'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DownloadResponse'}
+              example:
+                data:
+                  document_id: 88888888-8888-4888-8888-888888888888
+                  download_url: https://storage.example.invalid/private/example.pdf?signature=demo
+                  expires_at: '2026-10-08T02:05:00Z'
+                  size_bytes: 204800
+                  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+                error: null
+                request_id: req-download-demo
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '504': {$ref: '#/components/responses/Error504'}
+  /documents/{document_id}/content:
+    get:
+      operationId: getDocumentContent
+      tags: [documents]
+      summary: Bytes file an toàn đã kiểm tra hash cho Contract
+      x-status: implemented
+      description: |
+        Chỉ owner, file available; không cần OCR completed để tải nhưng Contract import cần extraction completed.
+        Contract chuyển tiếp Bearer JWT user hoặc cookie access_token đã nhận, không gửi refresh token/cookie khác.
+        Không tin X-User-Id; token hết hạn -> 401, không lưu JWT để worker dùng lâu dài.
+        200 trả binary, không bọc data/error/request_id JSON. Lỗi vẫn JSON envelope.
+        Không redirect sang URL ngoài; Content-Length/hash phải khớp metadata bản immutable.
+        Đọc Storage có giới hạn tối đa 9 MiB, buffer và kiểm tra đủ size/hash trước khi trả binary 200.
+        Storage lỗi trả JSON 502/503/504 trước header binary; không trả partial như thành công.
+        Contract copy file và extraction vào private snapshot trước khi trả 202 analysis.
+      parameters:
+        - $ref: '#/components/parameters/DocumentId'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: Bytes bản an toàn, không phải bản OCR hoặc hợp đồng đã sinh
+          headers:
+            X-Request-ID: {$ref: '#/components/headers/RequestId'}
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+            Content-Length: {schema: {type: integer, minimum: 1, maximum: 9437184}}
+            X-Content-SHA256: {schema: {$ref: '#/components/schemas/Sha256'}}
+            Content-Disposition: {schema: {type: string}, description: Attachment với tên file đã sanitize}
+            X-Content-Type-Options: {schema: {type: string, enum: [nosniff]}}
+          content:
+            application/pdf: {schema: {type: string, format: binary}}
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: {schema: {type: string, format: binary}}
+            image/jpeg: {schema: {type: string, format: binary}}
+            image/png: {schema: {type: string, format: binary}}
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '504': {$ref: '#/components/responses/Error504'}
+  /documents/lawyer-card-ocr:
+    post:
+      operationId: createLawyerCardOcr
+      tags: [documents]
+      x-status: implemented
+      summary: Tải ảnh thẻ luật sư và đọc OCR (cho đơn xin làm luật sư)
+      description: |
+        Multipart một file `file`, JPEG/PNG tối đa 4 MiB, tổng body tối đa 10 MiB; Idempotency-Key bắt buộc.
+        Kiểm tra User internal status như upload (khóa → 403 ACCOUNT_LOCKED; User lỗi → 503).
+        Backend sửa orientation, bỏ EXIF/metadata, mã hóa lại thành JPEG mới (pixel mới, không giữ byte gốc) rồi lưu
+        private ở `safe/<owner>/lawyer-card/<card_id>.jpg`; DB chỉ lưu storage key, hash, JSON OCR.
+        OCR chạy sau interface `LawyerCardOcrProvider` (hiện Tesseract local giống identity-ocr, sau đổi được sang Gemini).
+        **OCR lỗi không làm hỏng upload**: ảnh mờ / không đọc được / OCR bận hoặc quá giờ vẫn trả 201 với
+        `ocr_status = failed`, `error_code` + `error_message` rõ ràng để FE báo người dùng tự nhập số thẻ.
+        Chỉ lỗi file (400/413/415/422) hoặc DB/Storage (502/503/504) mới không tạo ảnh.
+        Replay cùng key + cùng ảnh trả kết quả cũ, không chạy OCR lại; cùng key khác ảnh → 409 IDEMPOTENCY_CONFLICT.
+        Không xác minh thẻ thật/giả; admin đối chiếu khi duyệt đơn. `card_id` dùng làm `card_document_id`
+        trong Lawyer Service. Không trả storage key, raw OCR.
+      parameters:
+        - {$ref: '#/components/parameters/RequestId'}
+        - {$ref: '#/components/parameters/IdempotencyKey'}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        '201':
+          description: Đã lưu ảnh; OCR có thể completed hoặc failed
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LawyerCardOcrResponse'}
+              example:
+                data:
+                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                  ocr_status: failed
+                  fields: null
+                  warnings: []
+                  error_code: OCR_UNREADABLE
+                  error_message: Ảnh thẻ mờ hoặc không đọc được, vui lòng tự nhập số thẻ hoặc chụp lại rõ hơn.
+                  created_at: '2026-10-15T02:00:00Z'
+                error: null
+                request_id: req-lawyer-card-demo
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '409': {$ref: '#/components/responses/Error409'}
+        '413': {$ref: '#/components/responses/Error413'}
+        '415': {$ref: '#/components/responses/Error415'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '504': {$ref: '#/components/responses/Error504'}
+  /documents/lawyer-card-ocr/{card_id}:
+    get:
+      operationId: getLawyerCardOcr
+      tags: [documents]
+      x-status: implemented
+      summary: Chủ xem lại kết quả OCR thẻ luật sư
+      description: Owner-only lấy từ JWT; admin không bypass (admin xem qua Lawyer Service). Không trả storage key, raw OCR.
+      parameters:
+        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/RequestId'}
+      responses:
+        '200':
+          description: Kết quả OCR của ảnh thẻ thuộc chủ
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LawyerCardOcrResponse'}
+              example:
+                data:
+                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                  ocr_status: completed
+                  fields: {full_name: NGUYỄN VĂN A, bar_card_number: 12345/TP, bar_association: Đoàn Luật sư TP. Hồ Chí Minh, issue_date: '2020-05-12'}
+                  warnings: [OCR_REQUIRES_USER_REVIEW]
+                  error_code: null
+                  error_message: null
+                  created_at: '2026-10-15T02:00:00Z'
+                error: null
+                request_id: req-lawyer-card-detail
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /internal/v1/documents/lawyer-cards/{card_id}:
+    get:
+      operationId: getLawyerCardInternal
+      tags: [documents]
+      x-status: implemented
+      summary: Lawyer Service lấy chủ + JSON OCR của ảnh thẻ
+      description: |
+        Chỉ service khác gọi, header X-Internal-Token; Gateway không chuyển tiếp /internal/.
+        Lawyer Service gọi khi người dùng gắn `card_document_id` vào đơn: tự so `owner_user_id` với JWT sub của
+        người gửi, rồi lưu `ocr_result` (status, fields, warnings, error_code, engine) vào đơn.
+        Không tồn tại → 404 NOT_FOUND. Không trả storage key, raw OCR.
+      servers:
+        - {url: 'http://document-service:8000', description: Chỉ gọi được trong mạng Docker}
+      security:
+        - InternalToken: []
+      parameters:
+        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/RequestId'}
+      responses:
+        '200':
+          description: Chủ và JSON OCR
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LawyerCardInternalResponse'}
+              example:
+                data:
+                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                  owner_user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                  ocr_result:
+                    status: completed
+                    fields: {full_name: NGUYỄN VĂN A, bar_card_number: 12345/TP, bar_association: Đoàn Luật sư TP. Hồ Chí Minh, issue_date: '2020-05-12'}
+                    warnings: [OCR_REQUIRES_USER_REVIEW]
+                    error_code: null
+                    engine: tesseract-local
+                  created_at: '2026-10-15T02:00:00Z'
+                error: null
+                request_id: req-lawyer-card-internal
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '503': {$ref: '#/components/responses/Error503'}
+  /internal/v1/documents/lawyer-cards/{card_id}/view-url:
+    post:
+      operationId: createLawyerCardViewUrlInternal
+      tags: [documents]
+      x-status: implemented
+      summary: Lawyer Service xin link xem ảnh thẻ cho admin
+      description: |
+        Chỉ service khác gọi, header X-Internal-Token. Lawyer Service đã kiểm tra người gọi là admin và đơn có
+        `card_document_id` này. Trả signed URL Storage hạn 300 giây cho bản JPEG đã mã hóa lại trong `safe/`.
+        Không nhận body. Không tồn tại → 404.
+      servers:
+        - {url: 'http://document-service:8000', description: Chỉ gọi được trong mạng Docker}
+      security:
+        - InternalToken: []
+      parameters:
+        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {$ref: '#/components/parameters/RequestId'}
+      responses:
+        '200':
+          description: Link xem có hạn
+          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LawyerCardViewUrlResponse'}
+              example:
+                data:
+                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                  url: https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/sign/document-files/safe/5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e/lawyer-card/2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d.jpg?token=demo&download=lawyer-card.jpg
+                  expires_in: 300
+                error: null
+                request_id: req-lawyer-card-url
+        '401': {$ref: '#/components/responses/Error401'}
+        '404': {$ref: '#/components/responses/Error404'}
+        '422': {$ref: '#/components/responses/Error422'}
+        '502': {$ref: '#/components/responses/Error502'}
+        '503': {$ref: '#/components/responses/Error503'}
+        '504': {$ref: '#/components/responses/Error504'}
+components:
+  securitySchemes:
+    BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    CookieAuth: {type: apiKey, in: cookie, name: access_token, description: Cookie HttpOnly của hệ thống; write request cần Origin/CSRF check}
+    InternalToken: {type: apiKey, in: header, name: X-Internal-Token, description: 'INTERNAL_TOKEN trong .env, chỉ cho /internal/v1/...'}
+  headers:
+    RequestId: {schema: {type: string}, description: Mã lần gọi; truyền tiếp sang service khác}
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      schema: {type: string, minLength: 1, maxLength: 200}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: {type: string, format: uuid}
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema: {type: string, format: uuid}
+    Page:
+      name: page
+      in: query
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSize:
+      name: page_size
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+  schemas:
+    IdentityOcrResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string, minLength: 1, maxLength: 128}
+        data:
+          type: object
+          additionalProperties: false
+          required: [session_id, status, fields, warnings, verification_status, error_code, created_at, updated_at]
+          properties:
+            session_id: {type: string, format: uuid}
+            status: {type: string, enum: [processing, completed, failed]}
+            fields:
+              type: object
+              nullable: true
+              additionalProperties: false
+              required: [full_name, date_of_birth, identity_number, issue_date, issue_place, permanent_address]
+              properties:
+                full_name: {type: string, nullable: true, minLength: 1, maxLength: 200}
+                date_of_birth: {type: string, format: date, nullable: true}
+                identity_number: {type: string, nullable: true, pattern: '^[0-9]{12}$'}
+                issue_date: {type: string, format: date, nullable: true}
+                issue_place: {type: string, nullable: true, minLength: 1, maxLength: 500}
+                permanent_address: {type: string, nullable: true, minLength: 1, maxLength: 2000}
+            additional_fields:
+              type: object
+              description: Gợi ý OCR bổ sung cho form User; không gửi các trường này vào IdentityFields của Document profile. FE cần ánh xạ riêng và người dùng kiểm tra trước khi lưu.
+              additionalProperties: false
+              required: [sex, nationality, place_of_origin, expiry_date]
+              properties:
+                sex: {type: string, nullable: true, enum: [male, female]}
+                nationality: {type: string, nullable: true, maxLength: 100}
+                place_of_origin: {type: string, nullable: true, maxLength: 2000}
+                expiry_date: {type: string, format: date, nullable: true}
+                residence_address: {type: string, nullable: true, maxLength: 2000, description: Nơi cư trú trên thẻ căn cước mới; không mặc định là thường trú.}
+                registered_birth_place: {type: string, nullable: true, maxLength: 2000, description: Nơi đăng ký khai sinh trên thẻ căn cước mới; không mặc định là quê quán.}
+            warnings: {type: array, items: {type: string}}
+            verification_status: {type: string, enum: [not_performed]}
+            card_match_status:
+              type: string
+              enum: [matched, not_checked]
+              description: Chỉ đối chiếu hai mặt theo MRZ; không xác thực thẻ thật/giả, chip, ảnh chân dung hoặc chủ thẻ. Phiên cũ chưa kiểm tra là not_checked.
+            error_code: {type: string, nullable: true}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    AuthContextResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [user_id, role]
+          properties:
+            user_id: {type: string, format: uuid}
+            role: {type: string, enum: [citizen, lawyer, admin]}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string, minLength: 1, maxLength: 128}
+    IdentityFields:
+      type: object
+      additionalProperties: false
+      required: [full_name, date_of_birth, identity_number, issue_date, issue_place, permanent_address]
+      description: 'Whitelist CCCD v1. Thiếu gửi null, không suy đoán; không chứa giá tiền/thời hạn/phone/email hoặc thông tin bên còn lại.'
+      properties:
+        full_name: {type: string, nullable: true, minLength: 1, maxLength: 200}
+        date_of_birth: {type: string, format: date, nullable: true}
+        identity_number: {type: string, nullable: true, pattern: '^[0-9]{12}$'}
+        issue_date: {type: string, format: date, nullable: true}
+        issue_place: {type: string, nullable: true, minLength: 1, maxLength: 500}
+        permanent_address: {type: string, nullable: true, minLength: 1, maxLength: 2000}
+    IdentityProfile:
+      type: object
+      additionalProperties: false
+      required: [owner_user_id, source_session_id, source_document_id, revision, confirmed_at, updated_at, fields]
+      properties:
+        owner_user_id: {type: string, format: uuid}
+        source_session_id: {type: string, format: uuid, nullable: true}
+        source_document_id: {type: string, format: uuid, nullable: true}
+        revision: {type: integer, minimum: 1}
+        confirmed_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        fields: {$ref: '#/components/schemas/IdentityFields'}
+    IdentityProfileResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/IdentityProfile'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    Purpose: {type: string, enum: [contract_template, supporting_document]}
+    DocumentType: {type: string, enum: [contract, identity_card, other]}
+    FileStatus: {type: string, enum: [pending_check, available, rejected]}
+    ProcessingStatus: {type: string, enum: [queued, processing, completed, failed]}
+    Sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+    SuccessError: {type: object, nullable: true, enum: [null]}
+    LawyerCardFields:
+      type: object
+      nullable: true
+      additionalProperties: false
+      description: Gợi ý OCR từ thẻ luật sư; đọc không chắc thì null. Người dùng tự kiểm tra, admin đối chiếu.
+      required: [full_name, bar_card_number, bar_association, issue_date]
+      properties:
+        full_name: {type: string, nullable: true, minLength: 1, maxLength: 200}
+        bar_card_number: {type: string, nullable: true, minLength: 1, maxLength: 50}
+        bar_association: {type: string, nullable: true, minLength: 1, maxLength: 200, description: Đoàn luật sư}
+        issue_date: {type: string, format: date, nullable: true}
+    LawyerCardOcrStatus: {type: string, enum: [completed, failed]}
+    LawyerCardOcrResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string, minLength: 1, maxLength: 128}
+        data:
+          type: object
+          additionalProperties: false
+          required: [card_id, ocr_status, fields, warnings, error_code, error_message, created_at]
+          properties:
+            card_id: {type: string, format: uuid}
+            ocr_status: {$ref: '#/components/schemas/LawyerCardOcrStatus'}
+            fields: {$ref: '#/components/schemas/LawyerCardFields'}
+            warnings: {type: array, items: {type: string}}
+            error_code:
+              type: string
+              nullable: true
+              description: Chỉ có khi ocr_status = failed
+              enum: [OCR_UNREADABLE, OCR_TIMEOUT, OCR_BUSY, OCR_UNAVAILABLE, OCR_MODEL_UNAVAILABLE, OCR_BAD_RESPONSE, null]
+            error_message: {type: string, nullable: true, description: Câu tiếng Việt hiển thị cho người dùng khi OCR lỗi}
+            created_at: {type: string, format: date-time}
+    LawyerCardInternalResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string, minLength: 1, maxLength: 128}
+        data:
+          type: object
+          additionalProperties: false
+          required: [card_id, owner_user_id, ocr_result, created_at]
+          properties:
+            card_id: {type: string, format: uuid}
+            owner_user_id: {type: string, format: uuid}
+            ocr_result:
+              type: object
+              additionalProperties: false
+              required: [status, fields, warnings, error_code, engine]
+              properties:
+                status: {$ref: '#/components/schemas/LawyerCardOcrStatus'}
+                fields: {$ref: '#/components/schemas/LawyerCardFields'}
+                warnings: {type: array, items: {type: string}}
+                error_code: {type: string, nullable: true}
+                engine: {type: string, minLength: 1, maxLength: 100}
+            created_at: {type: string, format: date-time}
+    LawyerCardViewUrlResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string, minLength: 1, maxLength: 128}
+        data:
+          type: object
+          additionalProperties: false
+          required: [card_id, url, expires_in]
+          properties:
+            card_id: {type: string, format: uuid}
+            url: {type: string, format: uri, pattern: '^https://'}
+            expires_in: {type: integer, minimum: 1, maximum: 300}
+    Document:
+      type: object
+      additionalProperties: false
+      required: [document_id, owner_user_id, purpose, document_type, original_filename, media_type, uploaded_size_bytes, size_bytes, sha256, file_status, error_code, processing_job_id, processing_status, created_at, updated_at]
+      properties:
+        document_id: {type: string, format: uuid}
+        owner_user_id: {type: string, format: uuid}
+        purpose: {$ref: '#/components/schemas/Purpose'}
+        document_type: {$ref: '#/components/schemas/DocumentType'}
+        original_filename: {type: string, minLength: 1, maxLength: 255}
+        media_type:
+          type: string
+          enum: [application/pdf, application/vnd.openxmlformats-officedocument.wordprocessingml.document, image/jpeg, image/png]
+        uploaded_size_bytes: {type: integer, minimum: 1, maximum: 9437184}
+        size_bytes: {type: integer, nullable: true, minimum: 1, maximum: 9437184}
+        sha256: {type: string, nullable: true, pattern: '^[a-f0-9]{64}$'}
+        file_status: {$ref: '#/components/schemas/FileStatus'}
+        error_code: {type: string, nullable: true, maxLength: 100, description: 'Lỗi kiểm tra file; lỗi OCR riêng nằm trong processing.error_code'}
+        processing_job_id: {type: string, format: uuid}
+        processing_status: {$ref: '#/components/schemas/ProcessingStatus'}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Processing:
+      type: object
+      additionalProperties: false
+      required: [document_id, job_id, attempt, status, file_status, error_code, created_at, started_at, completed_at, updated_at]
+      properties:
+        document_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        attempt: {type: integer, minimum: 1}
+        status: {$ref: '#/components/schemas/ProcessingStatus'}
+        file_status: {$ref: '#/components/schemas/FileStatus'}
+        error_code: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time, nullable: true}
+        completed_at: {type: string, format: date-time, nullable: true}
+        updated_at: {type: string, format: date-time}
+    Bbox:
+      type: object
+      additionalProperties: false
+      required: [x, y, width, height]
+      description: 'Trên trang sau crop/rotation, gốc trên-trái. Server kiểm tra x+width<=1 và y+height<=1. Box phải trong trang, không dùng pixel.'
+      properties:
+        x: {type: number, minimum: 0, maximum: 1}
+        y: {type: number, minimum: 0, maximum: 1}
+        width: {type: number, minimum: 0, exclusiveMinimum: true, maximum: 1}
+        height: {type: number, minimum: 0, exclusiveMinimum: true, maximum: 1}
+    TextBlock:
+      type: object
+      additionalProperties: false
+      required: [text, bbox, confidence]
+      properties:
+        text: {type: string, maxLength: 10000}
+        bbox: {$ref: '#/components/schemas/Bbox'}
+        confidence: {type: number, nullable: true, minimum: 0, maximum: 1, description: 'null khi extract chữ gốc không có score; không tự gán 1'}
+    PageLayout:
+      type: object
+      additionalProperties: false
+      required: [page, width_pt, height_pt, rotation_degrees, method, blocks]
+      properties:
+        page: {type: integer, minimum: 1, maximum: 100}
+        width_pt: {type: number, minimum: 0, exclusiveMinimum: true}
+        height_pt: {type: number, minimum: 0, exclusiveMinimum: true}
+        rotation_degrees: {type: integer, enum: [0, 90, 180, 270], description: Góc nguồn đã được áp dụng vào width/height và tọa độ; FE không xoay thêm lần nữa}
+        method: {type: string, enum: [text, ocr]}
+        blocks: {type: array, maxItems: 5000, items: {$ref: '#/components/schemas/TextBlock'}}
+    ExtractedField:
+      type: object
+      additionalProperties: false
+      required: [key, value, confidence, source_page, source_bbox, is_review_required]
+      properties:
+        key:
+          type: string
+          enum: [full_name, date_of_birth, identity_number, issue_date, issue_place, permanent_address, contact_address, phone, email]
+          description: Key thông tin cá nhân chung, không phải tên field bên A/B của Contract.
+        value: {type: string, minLength: 1, maxLength: 2000, description: 'Ngày chắc định dạng -> YYYY-MM-DD; không chắc giữ text và warning, không suy đoán.'}
+        confidence: {type: number, nullable: true, minimum: 0, maximum: 1}
+        source_page: {type: integer, nullable: true, minimum: 1, maximum: 100}
+        source_bbox:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [x, y, width, height]
+          description: Giống Bbox; null cho DOCX không có tọa độ trang. Không dùng nullable bên cạnh ref vì OAS 3.0 bỏ qua sibling.
+          properties:
+            x: {type: number, minimum: 0, maximum: 1}
+            y: {type: number, minimum: 0, maximum: 1}
+            width: {type: number, minimum: 0, exclusiveMinimum: true, maximum: 1}
+            height: {type: number, minimum: 0, exclusiveMinimum: true, maximum: 1}
+        is_review_required: {type: boolean, enum: [true]}
+    Extraction:
+      type: object
+      additionalProperties: false
+      required: [document_id, job_id, schema_version, source_sha256, source_kind, text, pages, extracted_fields, warnings, engine_version, created_at]
+      properties:
+        document_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        schema_version: {type: string, enum: ['1.0']}
+        source_sha256: {$ref: '#/components/schemas/Sha256'}
+        source_kind: {type: string, enum: [docx, pdf_text, pdf_scan, pdf_mixed, image]}
+        text: {type: string, maxLength: 1000000}
+        pages: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/PageLayout'}}
+        extracted_fields: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/ExtractedField'}}
+        warnings: {type: array, maxItems: 100, items: {type: string, maxLength: 500}}
+        engine_version: {type: string, minLength: 1, maxLength: 100}
+        created_at: {type: string, format: date-time}
+    Pagination:
+      type: object
+      additionalProperties: false
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 100}
+        total: {type: integer, minimum: 0}
+        total_pages: {type: integer, minimum: 0}
+    DocumentResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Document'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    DocumentListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [items, pagination]
+          properties:
+            items: {type: array, items: {$ref: '#/components/schemas/Document'}}
+            pagination: {$ref: '#/components/schemas/Pagination'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    ProcessingResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Processing'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    ExtractionResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {$ref: '#/components/schemas/Extraction'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    DownloadResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          additionalProperties: false
+          required: [document_id, download_url, expires_at, size_bytes, sha256]
+          properties:
+            document_id: {type: string, format: uuid}
+            download_url: {type: string, format: uri, pattern: '^https://'}
+            expires_at: {type: string, format: date-time}
+            size_bytes: {type: integer, minimum: 1, maximum: 9437184}
+            sha256: {$ref: '#/components/schemas/Sha256'}
+        error: {$ref: '#/components/schemas/SuccessError'}
+        request_id: {type: string}
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [data, error, request_id]
+      properties:
+        data: {type: object, nullable: true, enum: [null]}
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            current_revision: {type: integer, minimum: 0, description: 'Chỉ lỗi identity profile CAS/not-found, giúp lưu lại row deleted; không nhận user_id khác.'}
+            details:
+              oneOf:
+                - type: array
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [field, message]
+                    properties:
+                      field: {type: string}
+                      message: {type: string}
+                - type: object
+                  additionalProperties: false
+                  required: [session_id]
+                  properties:
+                    session_id: {type: string, format: uuid}
+                    provider_http_status: {type: integer, enum: [404, 405], description: Legacy VNPT errors only}
+        request_id: {type: string}
+  responses:
+    IdentityProfile:
+      description: Hồ sơ CCCD current active, chỉ chủ đã xác nhận
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/IdentityProfileResponse'}
+          example:
+            data:
+              owner_user_id: 11111111-1111-4111-8111-111111111111
+              source_document_id: 66666666-6666-4666-8666-666666666666
+              source_session_id: null
+              revision: 1
+              confirmed_at: '2026-10-08T02:00:04Z'
+              updated_at: '2026-10-08T02:00:04Z'
+              fields: {full_name: '[Họ tên đã xác nhận]', date_of_birth: null, identity_number: '000000000000', issue_date: null, issue_place: null, permanent_address: null}
+            error: null
+            request_id: req-identity-demo
+    IdentityProfile404:
+      description: IDENTITY_PROFILE_NOT_FOUND, chưa có hoặc đã unlink; current_revision=0 nếu chưa từng có, còn lại revision row deleted. Thiếu CCCD không chặn điền tay hợp đồng.
+      headers: {Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+          example:
+            data: null
+            error: {code: IDENTITY_PROFILE_NOT_FOUND, message: 'Chưa có hồ sơ CCCD đã xác nhận.', current_revision: 0}
+            request_id: req-profile-missing
+    Document:
+      description: Metadata file
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/DocumentResponse'}
+    Error400:
+      description: 'BAD_REQUEST: multipart/body không đọc được'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error401:
+      description: 'UNAUTHORIZED: thiếu JWT, JWT sai/hết hạn'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error403:
+      description: 'FORBIDDEN: cookie mutation không qua Origin/CSRF check'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error404:
+      description: 'DOCUMENT_NOT_FOUND: không tồn tại, deleted hoặc khác chủ'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error409:
+      description: 'CONFLICT/IDEMPOTENCY_CONFLICT/FILE_NOT_READY/FILE_REJECTED/EXTRACTION_NOT_READY/EXTRACTION_FAILED/DOCUMENT_BUSY: sai trạng thái hoặc khác fingerprint'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+          example:
+            data: null
+            error: {code: EXTRACTION_NOT_READY, message: 'File đang xử lý, vui lòng thử lại sau.'}
+            request_id: req-error-demo
+    Error410:
+      description: 'DOCUMENT_DELETED: dùng lại upload key của file đã xóa; dùng key mới cho upload mới'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error413:
+      description: 'FILE_TOO_LARGE: file >9 MiB, JSON profile >16 KiB hoặc multipart vượt Gateway 10 MiB; Gateway có thể trả HTML 413, FE không giả định mọi lỗi proxy là JSON'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error415:
+      description: 'UNSUPPORTED_FILE_TYPE: không hỗ trợ MIME thực hoặc MIME không phù hợp purpose'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error422:
+      description: 'VALIDATION_ERROR/INVALID_FILE/ENCRYPTED_PDF/SIGNED_PDF/TOO_MANY_PAGES/UNSAFE_FILE: file hoặc trường gửi lên không hợp lệ'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error429:
+      description: 'RATE_LIMITED: vượt giới hạn upload/xử lý; quota cụ thể cần cấu hình trước khi triển khai'
+      headers:
+        X-Request-ID: {$ref: '#/components/headers/RequestId'}
+        Retry-After: {schema: {type: integer, minimum: 1}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error503:
+      description: 'DATABASE_UNAVAILABLE/STORAGE_UNAVAILABLE: không kết nối được DB/Storage, không trả raw lỗi'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error502:
+      description: 'STORAGE_BAD_RESPONSE: Storage trả 5xx/redirect hoặc dữ liệu sai'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}
+    Error504:
+      description: 'STORAGE_TIMEOUT: Storage quá thời gian phản hồi'
+      headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
+      content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}

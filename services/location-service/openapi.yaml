@@ -1,0 +1,124 @@
+openapi: 3.0.3
+
+info:
+  title: Location Service API
+  version: 0.1.0
+  description: |
+    API contract của **Location Service**: Bản đồ, định vị (Goong)
+    và tra cứu cơ quan tiếp nhận hồ sơ hành chính.
+  x-owner: "(điền tên người phụ trách Location Service)"
+
+servers:
+  - url: http://localhost:8080/api/v1/locations
+    description: Qua Gateway
+  - url: http://location-service:8000/api/v1
+    description: Nội bộ Docker
+
+tags:
+  - name: Offices
+    description: Tra cứu cơ quan tiếp nhận
+
+paths:
+  /offices:
+    get:
+      tags: [Offices]
+      operationId: listNearbyOffices
+      summary: Tìm cơ quan tiếp nhận gần nhất
+      description: Lấy danh sách cơ quan hỗ trợ một thủ tục cụ thể, sắp xếp theo khoảng cách nếu có truyền tọa độ.
+      x-status: planned
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: procedure_code
+          in: query
+          required: true
+          description: "Mã thủ tục (VD: LAND_GIFT) để lọc cơ quan có thẩm quyền."
+          schema: { type: string }
+        - name: lat
+          in: query
+          required: false
+          description: Vĩ độ của người dùng (tùy chọn, để tính khoảng cách)
+          schema: { type: number, format: double }
+        - name: lng
+          in: query
+          required: false
+          description: Kinh độ của người dùng
+          schema: { type: number, format: double }
+      responses:
+        "200":
+          description: Danh sách cơ quan
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OfficeListResponse" }
+              example:
+                data:
+                  items:
+                    - id: d1c2b3a4-e5f6-4a5b-8c9d-0e1f2a3b4c5d
+                      name: "UBND Phường Bến Nghé"
+                      office_type: "UBND Cấp Xã"
+                      address: "123 Lê Duẩn, Bến Nghé, Quận 1, TP.HCM"
+                      latitude: 10.7801
+                      longitude: 106.7001
+                      distance_meters: 1500
+                      working_hours: { "morning": "07:30 - 11:30", "afternoon": "13:00 - 17:00" }
+                error: null
+                request_id: req-loc-1
+        "422": { $ref: "#/components/responses/ValidationError" }
+
+components:
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      schema: { type: string }
+
+  headers:
+    RequestId:
+      schema: { type: string }
+
+  responses:
+    ValidationError:
+      description: Dữ liệu không hợp lệ
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    OfficeModel:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        office_type: { type: string }
+        address: { type: string }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        distance_meters:
+          type: integer
+          nullable: true
+          description: Khoảng cách (mét) tính từ tọa độ user truyền lên (nếu có).
+        working_hours: { type: object, nullable: true }
+
+    OfficeListResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/OfficeModel" }
+        error: { nullable: true }
+        request_id: { type: string }
+
+    ErrorResponse:
+      type: object
+      properties:
+        data: { nullable: true }
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        request_id: { type: string }

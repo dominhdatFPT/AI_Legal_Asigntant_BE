@@ -1,0 +1,9 @@
+.env
+.env.*
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+*.pem
+templates/.local-c2/
+templates/prepared/

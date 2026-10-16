@@ -1,0 +1,40 @@
+# Opt-in overlay: does not start/restart team services by itself.
+services:
+  document-worker:
+    build:
+      context: ./services/document-service
+      dockerfile: Dockerfile.worker
+      additional_contexts:
+        libs: ./libs
+    environment:
+      DOCUMENT_DATABASE_URL: ${DOCUMENT_DATABASE_URL:-}
+      DOCUMENT_DATABASE_POOLER_HOST: ${DOCUMENT_DATABASE_POOLER_HOST:-}
+      DOCUMENT_SUPABASE_URL: ${DOCUMENT_SUPABASE_URL:-}
+      DOCUMENT_SUPABASE_SERVICE_ROLE_KEY: ${DOCUMENT_SUPABASE_SERVICE_ROLE_KEY:-}
+      DOCUMENT_STORAGE_BUCKET: ${DOCUMENT_STORAGE_BUCKET:-document-files}
+      DOCUMENT_HTTP_TIMEOUT_SECONDS: ${DOCUMENT_HTTP_TIMEOUT_SECONDS:-20}
+      DOCUMENT_PADDLE_MODEL_DIR: /opt/document-ocr
+      DOCUMENT_PROCESSING_TIMEOUT_SECONDS: ${DOCUMENT_PROCESSING_TIMEOUT_SECONDS:-240}
+      DOCUMENT_CLAMAV_HOST: document-antivirus
+    depends_on:
+      document-antivirus:
+        condition: service_healthy
+    init: true
+    user: "65532:65532"
+    pids_limit: 256
+    restart: unless-stopped
+    mem_limit: 4g
+    cpus: 2
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+  document-antivirus:
+    image: clamav/clamav:stable@sha256:ebec5bc138401b36ae987caa1a3fa3c3b2a21ed3d51f0bfa5852825e663e67b0
+    volumes:
+      - document-clamav-signatures:/var/lib/clamav
+    restart: unless-stopped
+    mem_limit: 2g
+volumes:
+  document-clamav-signatures:

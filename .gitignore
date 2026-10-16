@@ -1,0 +1,37 @@
+# Secrets
+.env
+
+# Tài liệu ôn tập cá nhân, không commit
+ON-TAP-RAG.md
+.env.*
+!.env.example
+*.pem
+.keys/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.db
+
+# Node / build
+node_modules/
+dist/
+build/
+
+# Editor / OS / tools
+.idea/
+.vscode/
+.claude/
+.DS_Store
+Thumbs.db
+*.log
+*.lnk

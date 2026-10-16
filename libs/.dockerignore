@@ -1,0 +1,9 @@
+# Test caches are local-only and may have sandbox-specific permissions.
+**/.pytest_cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+.git
+.env
+**/*.pem

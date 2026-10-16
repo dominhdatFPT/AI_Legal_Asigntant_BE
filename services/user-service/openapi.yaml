@@ -1,0 +1,2000 @@
+openapi: 3.0.3
+
+info:
+  title: User Service API
+  version: 0.1.0
+  description: API tài khoản, đăng nhập Firebase (Google, email/mật khẩu), JWT, hồ sơ và vai trò người dùng.
+  x-owner: "Người 1 · Đạt"
+
+servers:
+  - url: http://localhost:8080/api
+    description: Qua Gateway (Frontend và Postman dùng địa chỉ này)
+  - url: http://localhost:8000/api/v1
+    description: Chạy riêng service bằng uvicorn trên máy
+  - url: http://user-service:8000/api/v1
+    description: Service khác gọi trong mạng Docker
+
+tags:
+  - name: Health
+    description: Kiểm tra service còn chạy
+  - name: Auth
+    description: Đăng nhập Firebase, làm mới token, đăng xuất
+  - name: Profile
+    description: Hồ sơ của người đang đăng nhập
+  - name: Admin
+    description: Quản lý người dùng (chỉ vai trò `admin`)
+  - name: Internal
+    description: API cho service khác gọi trong mạng Docker (không qua Gateway)
+
+paths:
+  /users/health:
+    get:
+      tags: [Health]
+      operationId: getUserHealth
+      summary: Kiểm tra service
+      description: Không dùng format `{data, error, request_id}` (ngoại lệ cho health check).
+      x-status: implemented
+      responses:
+        "200":
+          description: Service đang chạy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: user-service }
+
+  # ---------------------------------------------------------------- Auth
+  /users/auth/firebase:
+    post:
+      tags: [Auth]
+      operationId: loginWithFirebase
+      summary: Đăng nhập bằng Firebase (Google hoặc email/mật khẩu)
+      description: |
+        Nhận Firebase ID token (`user.getIdToken()` ở FE), kiểm tra chữ ký và `aud`
+        (= `FIREBASE_PROJECT_ID`). Lần đầu đăng nhập thì tạo user mới với vai trò `citizen`.
+        Mặc định không bắt xác thực email. Chỉ khi đặt `REQUIRE_EMAIL_VERIFICATION=true`
+        thì tài khoản email/mật khẩu chưa xác thực email mới bị trả 403 `EMAIL_NOT_VERIFIED`.
+        Tài khoản đang bị khóa thì trả 403 `ACCOUNT_LOCKED` (message có thời hạn và lý do khóa).
+        Tài khoản Google / email đã bị admin xóa mềm thì trả 403 `ACCOUNT_DELETED` (không tự đăng ký lại được).
+        Email trùng tài khoản tự đăng ký (`POST /users/auth/register`) và Firebase báo email đã xác minh
+        (`email_verified = true`, ví dụ Google) thì tự liên kết vào tài khoản đó (`is_new_user = false`):
+        gắn `firebase_uid`, xóa mật khẩu cũ và thu hồi mọi refresh token cũ (chống chiếm trước tài khoản).
+        Các trường hợp email trùng khác trả 409 `EMAIL_IN_USE`.
+        Thành công: token trả trong body (dùng với Bearer) và đồng thời được set vào 2 HttpOnly cookie
+        `access_token` (path `/`) và `refresh_token` (path `AUTH_REFRESH_COOKIE_PATH`, mặc định `/api`).
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FirebaseLoginRequest" }
+            example: { id_token: "eyJhbGciOiJSUzI1NiIsImtpZCI6..." }
+      responses:
+        "200":
+          description: Đăng nhập thành công
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+              example:
+                data:
+                  access_token: eyJhbGciOiJIUzI1NiJ9.access...
+                  refresh_token: 3f1c9a7e-refresh-token-value
+                  token_type: Bearer
+                  expires_in: 900
+                  is_new_user: false
+                  user:
+                    id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                    email: nguyenvana@gmail.com
+                    full_name: Nguyễn Văn A
+                    avatar_url: https://lh3.googleusercontent.com/a/abc
+                    phone: null
+                    role: citizen
+                    status: active
+                    locked_reason: null
+                    locked_at: null
+                    created_at: "2026-10-05T08:00:00Z"
+                    updated_at: "2026-10-05T08:00:00Z"
+                error: null
+                request_id: req-123
+        "401":
+          description: "`id_token` sai, hết hạn, không phải của dự án hoặc không có email"
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: INVALID_FIREBASE_TOKEN
+                  message: Đăng nhập không hợp lệ, vui lòng thử lại.
+                request_id: req-123
+        "403":
+          description: Tài khoản bị khóa, hoặc tài khoản email/mật khẩu chưa xác thực email
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                bi_khoa:
+                  summary: Tài khoản bị khóa
+                  value:
+                    data: null
+                    error:
+                      code: ACCOUNT_LOCKED
+                      message: Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.
+                    request_id: req-123
+                chua_xac_thuc_email:
+                  summary: Chưa xác thực email
+                  value:
+                    data: null
+                    error:
+                      code: EMAIL_NOT_VERIFIED
+                      message: Vui lòng xác thực email trước khi đăng nhập.
+                    request_id: req-123
+        "409":
+          description: Email đã thuộc một tài khoản khác
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: EMAIL_IN_USE
+                  message: Email này đã được dùng cho một tài khoản khác.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/auth/register:
+    post:
+      tags: [Auth]
+      operationId: registerWithPassword
+      summary: Tự đăng ký tài khoản bằng email + số điện thoại + mật khẩu
+      description: |
+        Tạo tài khoản `local` vai trò `citizen`, `username` = email (lưu chữ thường), mật khẩu lưu dạng bcrypt hash.
+        Không xác minh email / SĐT. Đăng ký xong là đăng nhập luôn: response và 2 HttpOnly cookie giống
+        `POST /users/auth/login`, `is_new_user = true`. Lần sau đăng nhập bằng `POST /users/auth/login` với email.
+        `confirm_password` khác `password` thì trả 422 `VALIDATION_ERROR`.
+        Email đã có tài khoản (kể cả tài khoản Google) trả 409 `EMAIL_IN_USE`; SĐT đã có tài khoản trả 409 `PHONE_IN_USE`.
+        Email thuộc tài khoản đã bị xóa mềm trả 403 `ACCOUNT_DELETED`.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RegisterRequest" }
+            example: { email: an.nguyen@gmail.com, phone: "0912345678", password: "matkhau123", confirm_password: "matkhau123" }
+      responses:
+        "201":
+          description: Đăng ký và đăng nhập thành công
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "403":
+          description: Email thuộc tài khoản đã bị xóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: ACCOUNT_DELETED
+                  message: Tài khoản này đã bị xóa. Vui lòng liên hệ quản trị viên để được khôi phục.
+                request_id: req-123
+        "409":
+          description: "`EMAIL_IN_USE` = email đã có tài khoản. `PHONE_IN_USE` = số điện thoại đã có tài khoản."
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                trung_email:
+                  summary: Email đã có tài khoản
+                  value:
+                    data: null
+                    error:
+                      code: EMAIL_IN_USE
+                      message: Email này đã được dùng cho một tài khoản khác.
+                    request_id: req-123
+                trung_sdt:
+                  summary: SĐT đã có tài khoản
+                  value:
+                    data: null
+                    error:
+                      code: PHONE_IN_USE
+                      message: Số điện thoại này đã được dùng cho một tài khoản khác.
+                    request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/auth/login:
+    post:
+      tags: [Auth]
+      operationId: loginWithPassword
+      summary: Đăng nhập bằng tên đăng nhập + mật khẩu (tài khoản lưu trong database)
+      description: |
+        Dùng cho tài khoản nội bộ có `username` và `password_hash` trong bảng `users`
+        (ví dụ tài khoản quản trị). Mật khẩu so khớp với bcrypt hash; username không phân biệt hoa thường.
+        Sai username hoặc mật khẩu đều trả 401 `INVALID_CREDENTIALS`. Tài khoản bị khóa trả 403 `ACCOUNT_LOCKED`.
+        Response giống `POST /users/auth/firebase` (`is_new_user` luôn là `false`).
+        Cũng set 2 HttpOnly cookie như `POST /users/auth/firebase`.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PasswordLoginRequest" }
+            example: { username: admin2026, password: "******" }
+      responses:
+        "200":
+          description: Đăng nhập thành công
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthResponse" }
+        "401":
+          description: Sai tên đăng nhập hoặc mật khẩu
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: Tên đăng nhập hoặc mật khẩu không chính xác.
+                request_id: req-123
+        "403":
+          description: Tài khoản bị khóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/auth/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshToken
+      summary: Làm mới access token
+      description: |
+        Đổi `refresh_token` còn hạn lấy cặp token mới. Refresh token cũ bị thu hồi ngay,
+        dùng lại sẽ bị 401. Khi vai trò đổi hoặc tài khoản bị khóa, mọi refresh token của
+        người đó bị thu hồi nên phải đăng nhập lại.
+
+        `refresh_token` lấy từ body nếu có, không thì từ HttpOnly cookie `refresh_token`
+        (trình duyệt không cần gửi body). Thành công: set lại cả 2 cookie. Thất bại: xoá cookie.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshTokenRequest" }
+            example: { refresh_token: "3f1c9a7e-refresh-token-value" }
+      responses:
+        "200":
+          description: Cặp token mới
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenPairResponse" }
+              example:
+                data:
+                  access_token: eyJhbGciOiJIUzI1NiJ9.new-access...
+                  refresh_token: 8a2d4b6f-new-refresh-token
+                  token_type: Bearer
+                  expires_in: 900
+                error: null
+                request_id: req-123
+        "401":
+          description: |
+            Refresh token sai, hết hạn hoặc đã bị thu hồi.
+            `ROLE_CHANGED_RELOGIN`: token bị thu hồi vì vai trò vừa đổi (admin đổi vai trò,
+            duyệt đơn luật sư). FE hiện `message` rồi chuyển về trang đăng nhập.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                het_han:
+                  summary: Token sai / hết hạn / đã thu hồi
+                  value:
+                    data: null
+                    error:
+                      code: INVALID_REFRESH_TOKEN
+                      message: Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.
+                    request_id: req-123
+                doi_vai_tro:
+                  summary: Vai trò vừa thay đổi
+                  value:
+                    data: null
+                    error:
+                      code: ROLE_CHANGED_RELOGIN
+                      message: Tài khoản của bạn đã được cập nhật quyền, vui lòng đăng nhập lại
+                    request_id: req-124
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Đăng xuất
+      description: |
+        Thu hồi `refresh_token` (lấy từ body, không có thì từ cookie) và xoá 2 HttpOnly cookie.
+        Gọi lại với token đã thu hồi vẫn trả 200.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RefreshTokenRequest" }
+      responses:
+        "200":
+          description: Đã đăng xuất
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogoutResponse" }
+              example:
+                data: { logged_out: true }
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Profile
+  /users/me:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      summary: Xem hồ sơ của tôi
+      description: |
+        Consultation Service gọi API này (chuyển tiếp JWT của luật sư) để kiểm tra luật sư còn
+        hoạt động trước thao tác nhạy cảm như nhận yêu cầu, gửi tin (API_GUIDELINES mục 7).
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Hồ sơ người đang đăng nhập
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    patch:
+      tags: [Profile]
+      operationId: updateMyProfile
+      summary: Sửa hồ sơ của tôi
+      description: |
+        Chỉ sửa được `full_name`, `phone`, `avatar_url`. Trường nào không gửi thì giữ nguyên.
+        Không đổi được `email`, `role`, `status` qua API này.
+      x-status: planned
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateProfileRequest" }
+            example: { full_name: Nguyễn Văn A, phone: "0901234567" }
+      responses:
+        "200":
+          description: Hồ sơ sau khi sửa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/me/citizen-profile:
+    get:
+      tags: [Profile]
+      operationId: getMyCitizenProfile
+      summary: Xem hồ sơ cá nhân (thông tin CCCD) của tôi
+      description: |
+        FE gọi khi mở trang hồ sơ để điền sẵn form. Người dùng chưa khai hồ sơ thì `data` là `null`.
+        `email` lấy từ tài khoản, chỉ để hiển thị.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Hồ sơ hiện tại, hoặc `data = null` nếu chưa khai
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CitizenProfileResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    put:
+      tags: [Profile]
+      operationId: upsertMyCitizenProfile
+      summary: Lưu hồ sơ cá nhân (thông tin CCCD) của tôi
+      description: |
+        Lưu cả form một lần (chưa có thì tạo, có rồi thì ghi đè). Luồng:
+        1. FE gửi 2 ảnh CCCD sang Document Service (eKYC) và nhận lại các trường đã đọc cùng `ekyc_id`.
+           Ảnh mờ/eKYC lỗi thì người dùng up lại ảnh hoặc tự nhập tay (`source = manual`, không có `ekyc_id`).
+        2. Người dùng xem lại, nhập thêm số điện thoại, dân tộc, mã số thuế…, tick đồng ý rồi bấm Lưu.
+        3. FE gọi API này.
+
+        Khi lưu thành công:
+        - `users.full_name` được đổi thành `full_name` trên CCCD.
+        - `users.phone` được đổi thành `phone`.
+
+        Số CCCD đã thuộc tài khoản khác thì trả 409 `CCCD_ALREADY_USED`, người dùng phải nhập lại.
+        Số điện thoại đã thuộc tài khoản khác thì trả 409 `PHONE_IN_USE`.
+        Chưa tick đủ 2 ô `declared` và `consented` thì trả 422 `VALIDATION_ERROR`.
+        Ràng buộc chi tiết từng trường (định dạng CCCD, ngày tháng…) sẽ bổ sung ở bước validate.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CitizenProfileRequest" }
+            example:
+              id_number: "001095012345"
+              full_name: NGUYỄN VĂN AN
+              date_of_birth: "1995-08-15"
+              gender: Nam
+              nationality: Việt Nam
+              place_of_origin: Xã Hải Châu, Huyện Hải Hậu, Tỉnh Nam Định
+              place_of_residence: Số 45 ngõ 120 Hoàng Hoa Thám, Phường Thụy Khuê, Quận Tây Hồ, Hà Nội
+              issue_date: "2021-09-20"
+              issue_place: Cục Cảnh sát QLHC về TTXH
+              expiry_date: "2035-08-15"
+              permanent_address: { detail: Số 45 ngõ 120 Hoàng Hoa Thám, ward: Phường Ngọc Hà, province: Thành phố Hà Nội }
+              current_same_as_permanent: true
+              current_address: null
+              phone: "0912345678"
+              ethnicity: Kinh
+              tax_code: null
+              source: ekyc
+              ekyc_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+              declared: true
+              consented: true
+      responses:
+        "200":
+          description: Hồ sơ sau khi lưu
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CitizenProfileResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "409":
+          description: "`CCCD_ALREADY_USED` = số CCCD đã gắn với tài khoản khác. `PHONE_IN_USE` = SĐT đã gắn với tài khoản khác."
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: CCCD_ALREADY_USED
+                  message: Số CCCD này đã được dùng cho một tài khoản khác.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Admin
+  /users:
+    get:
+      tags: [Admin]
+      operationId: listUsers
+      summary: Danh sách người dùng
+      description: |
+        Chỉ `admin`. Lọc theo vai trò, trạng thái; tìm theo tên, email, tên đăng nhập hoặc số điện thoại;
+        có phân trang, mới tạo xếp trước. Mặc định không có tài khoản đã xóa mềm; `deleted=true` để xem
+        riêng các tài khoản đã xóa (để khôi phục). Tài khoản hết hạn khóa được tự mở trước khi lọc.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: role
+          in: query
+          description: Lọc theo vai trò. Bỏ trống = tất cả.
+          schema: { $ref: "#/components/schemas/UserRole" }
+        - name: status
+          in: query
+          description: Lọc theo trạng thái. Bỏ trống = tất cả.
+          schema: { $ref: "#/components/schemas/UserStatus" }
+        - name: q
+          in: query
+          description: Tìm theo tên, email, tên đăng nhập, số điện thoại (không phân biệt hoa thường).
+          schema: { type: string, maxLength: 100 }
+        - name: deleted
+          in: query
+          description: "`true` = chỉ lấy tài khoản đã xóa mềm. Mặc định `false`."
+          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách người dùng (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+    post:
+      tags: [Admin]
+      operationId: createUser
+      summary: Admin tạo tài khoản
+      description: |
+        Chỉ `admin`. Tạo tài khoản đăng nhập bằng email + mật khẩu do admin đặt (không gửi email; admin tự
+        đưa thông tin cho người dùng, người dùng đổi mật khẩu sau). Email cũng là tên đăng nhập.
+        `account_type`: `citizen` | `admin`, lưu đúng vai trò đó.
+        Tạo tài khoản luật sư dùng Lawyer Service `POST /lawyers/accounts` (tạo kèm hồ sơ luật sư);
+        `account_type = lawyer` đã bỏ (gửi lên → 422).
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUserRequest" }
+            example: { email: nguyenvana@gmail.com, password: "matkhau123", full_name: Nguyễn Văn A, account_type: citizen }
+      responses:
+        "201":
+          description: Tài khoản vừa tạo
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: |
+            `EMAIL_IN_USE` = email đã có tài khoản. `EMAIL_DELETED` = email thuộc tài khoản đã xóa mềm,
+            dùng `POST /users/{user_id}/restore` thay vì tạo mới. `PHONE_IN_USE` = số điện thoại đã có tài khoản.
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/summary:
+    get:
+      tags: [Admin]
+      operationId: getUserSummary
+      summary: Số đếm cho các tab quản lý người dùng
+      description: |
+        Chỉ `admin`. `total`, `by_role`, `by_status` không tính tài khoản đã xóa mềm; `deleted` là số
+        tài khoản đã xóa mềm.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Số đếm
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserSummaryResponse" }
+              example:
+                data:
+                  total: 8
+                  by_role: { citizen: 5, lawyer: 2, admin: 1 }
+                  by_status: { active: 7, locked: 1 }
+                  deleted: 0
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/{user_id}:
+    get:
+      tags: [Admin]
+      operationId: getUser
+      summary: Chi tiết một người dùng
+      description: |
+        `admin` xem được mọi người, kể cả tài khoản đã xóa mềm (trả `AdminUser`); người khác chỉ xem được
+        chính mình (trả `User`). Route dùng convertor `{user_id:uuid}` nên không đè các route tĩnh
+        `/users/me`, `/users/health`, `/users/summary`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Thông tin người dùng
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+    delete:
+      tags: [Admin]
+      operationId: deleteUser
+      summary: Xóa mềm tài khoản
+      description: |
+        Chỉ `admin`. Đánh dấu `deleted_at`, giữ nguyên dữ liệu. Thu hồi mọi refresh token; người đó bị
+        chặn ngay ở User Service. Email không đăng ký lại được; admin khôi phục bằng `/restore`.
+        Luật sư bị xóa thì các cuộc tư vấn đang mở bị kết thúc (Consultation Service).
+        Không được tự xóa chính mình (409 `CANNOT_DELETE_SELF`); tài khoản đã xóa rồi → 409 `USER_DELETED`.
+
+        Xóa tài khoản vai trò `lawyer` thì **trước khi lưu** gọi Lawyer Service
+        `POST /internal/v1/lawyers/{user_id}/hide` (`reason = deleted`) để ẩn hồ sơ luật sư. Lawyer Service lỗi
+        → 502/503/504 `LAWYER_*`, tài khoản chưa bị xóa; admin thử lại sau.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204":
+          description: Đã xóa mềm, không có body
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tự xóa chính mình hoặc tài khoản đã bị xóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/LawyerBadResponse" }
+        "503": { $ref: "#/components/responses/LawyerUnavailable" }
+        "504": { $ref: "#/components/responses/LawyerTimeout" }
+
+  /users/{user_id}/restore:
+    post:
+      tags: [Admin]
+      operationId: restoreUser
+      summary: Khôi phục tài khoản đã xóa mềm
+      description: Chỉ `admin`. Tài khoản chưa bị xóa → 409 `USER_NOT_DELETED`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Thông tin người dùng sau khi khôi phục
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tài khoản chưa bị xóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/{user_id}/citizen-profile:
+    get:
+      tags: [Admin]
+      operationId: getUserCitizenProfile
+      summary: Admin xem hồ sơ CCCD của một người dùng
+      description: |
+        Chỉ `admin`. Dùng cho màn hình chi tiết người dùng. Người dùng chưa khai hồ sơ thì `data` là `null`.
+        Xem được cả tài khoản đã xóa mềm.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Hồ sơ CCCD (hoặc `null`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CitizenProfileResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/{user_id}/role:
+    put:
+      tags: [Admin]
+      operationId: changeUserRole
+      summary: Đổi vai trò người dùng
+      description: |
+        Chỉ `admin`. Đổi vai trò sẽ thu hồi mọi refresh token của người đó, nên họ phải đăng nhập lại để
+        nhận token có vai trò mới (API_GUIDELINES mục 7). Gửi đúng vai trò hiện tại thì không đổi gì (200).
+        Hạ vai trò luật sư thì các cuộc tư vấn đang mở bị kết thúc (Consultation Service).
+        Không tự đổi vai trò của mình (409 `CANNOT_CHANGE_OWN_ROLE`); tài khoản đã xóa → 409 `USER_DELETED`.
+
+        Chức năng Luật sư:
+        - Không đổi **lên** `lawyer` bằng API này → 409 `LAWYER_ROLE_VIA_LAWYER_SERVICE`. Luật sư chỉ có qua
+          Lawyer Service (admin tạo tài khoản luật sư hoặc duyệt đơn), để luôn có hồ sơ luật sư đi kèm.
+          Lawyer Service duyệt đơn gọi `PUT /internal/v1/users/{user_id}/role`, không gọi API này.
+        - Hạ `lawyer` → vai trò khác: **trước khi lưu** gọi Lawyer Service `POST /internal/v1/lawyers/{user_id}/hide`
+          (`reason = role_changed`). Lawyer Service lỗi → 502/503/504 `LAWYER_*`, vai trò chưa đổi.
+        - Refresh token bị thu hồi được đánh dấu lý do `role_changed`, lần refresh sau trả 401 `ROLE_CHANGED_RELOGIN`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangeRoleRequest" }
+            example: { role: citizen }
+      responses:
+        "200":
+          description: Thông tin người dùng sau khi đổi vai trò
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tự đổi vai trò của mình, tài khoản đã xóa, hoặc đổi lên `lawyer`
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                len_luat_su:
+                  summary: Đổi lên lawyer
+                  value:
+                    data: null
+                    error:
+                      code: LAWYER_ROLE_VIA_LAWYER_SERVICE
+                      message: Không đổi trực tiếp sang luật sư. Hãy tạo tài khoản luật sư hoặc duyệt đơn xin làm luật sư.
+                    request_id: req-123
+                tu_doi:
+                  summary: Tự đổi vai trò của mình
+                  value:
+                    data: null
+                    error:
+                      code: CANNOT_CHANGE_OWN_ROLE
+                      message: Bạn không thể tự đổi vai trò của mình.
+                    request_id: req-124
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/LawyerBadResponse" }
+        "503": { $ref: "#/components/responses/LawyerUnavailable" }
+        "504": { $ref: "#/components/responses/LawyerTimeout" }
+
+  /users/{user_id}/lock:
+    post:
+      tags: [Admin]
+      operationId: lockUser
+      summary: Khóa tài khoản
+      description: |
+        Chỉ `admin`. Bắt buộc lý do; `duration_days` bỏ trống = khóa vĩnh viễn, có giá trị thì hết hạn tự mở.
+        Thu hồi toàn bộ refresh token của người đó, nên họ không làm mới token được nữa; mọi API của
+        User Service chặn ngay (403 `ACCOUNT_LOCKED`, message có thời hạn và lý do).
+        Khóa luật sư thì các cuộc tư vấn đang mở bị kết thúc (Consultation Service).
+        Không được tự khóa chính mình; tài khoản đã xóa → 409 `USER_DELETED`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LockUserRequest" }
+            example: { reason: Đăng nội dung vi phạm nhiều lần, duration_days: 7 }
+      responses:
+        "200":
+          description: Thông tin người dùng sau khi khóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tài khoản đã bị khóa từ trước, hoặc admin tự khóa chính mình
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                da_khoa:
+                  summary: Đã khóa từ trước
+                  value:
+                    data: null
+                    error:
+                      code: USER_ALREADY_LOCKED
+                      message: Tài khoản này đã bị khóa.
+                    request_id: req-123
+                tu_khoa:
+                  summary: Tự khóa chính mình
+                  value:
+                    data: null
+                    error:
+                      code: CANNOT_LOCK_SELF
+                      message: Bạn không thể tự khóa tài khoản của mình.
+                    request_id: req-124
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /users/{user_id}/unlock:
+    post:
+      tags: [Admin]
+      operationId: unlockUser
+      summary: Mở khóa tài khoản
+      description: Chỉ `admin`. Xóa luôn lý do, người khóa, thời hạn khóa.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Thông tin người dùng sau khi mở khóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tài khoản không bị khóa
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: USER_NOT_LOCKED
+                  message: Tài khoản này không bị khóa.
+                request_id: req-123
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Internal
+  /internal/v1/users/search:
+    post:
+      tags: [Internal]
+      operationId: searchUsersInternal
+      summary: Lấy thông tin rút gọn của nhiều người dùng
+      description: |
+        Chỉ service khác gọi, kèm `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`.
+        Lawyer Service dùng để lấy tên, ảnh đại diện khi trả danh sách luật sư.
+        ID không tồn tại thì bỏ qua, không báo lỗi.
+      x-status: planned
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserSearchRequest" }
+            example: { ids: [5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e] }
+      responses:
+        "200":
+          description: Thông tin rút gọn
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserBriefListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      full_name: Trần Thị B
+                      avatar_url: null
+                      role: lawyer
+                      status: active
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/users:
+    post:
+      tags: [Internal]
+      operationId: createLawyerAccountInternal
+      summary: Tạo tài khoản luật sư (Lawyer Service gọi)
+      description: |
+        Chỉ Lawyer Service gọi khi admin tạo tài khoản luật sư (`POST /lawyers/accounts`), kèm `X-Internal-Token`.
+        Tạo tài khoản `local` đăng nhập bằng email + mật khẩu (email cũng là tên đăng nhập), vai trò `lawyer` ngay.
+        `role` chỉ nhận `lawyer`. `created_by` = `sub` của admin trong JWT mà Lawyer Service đã kiểm tra.
+        Lỗi trùng giống `POST /users`: 409 `EMAIL_IN_USE` / `EMAIL_DELETED` / `PHONE_IN_USE`.
+        Không log mật khẩu.
+      x-status: implemented
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InternalCreateUserRequest" }
+            example:
+              email: luatsu.c@gmail.com
+              password: matkhau123
+              full_name: Lê Văn C
+              role: lawyer
+              created_by: 1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b
+      responses:
+        "201":
+          description: Tài khoản vừa tạo
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409":
+          description: Email / số điện thoại đã được dùng
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: EMAIL_IN_USE
+                  message: Email này đã được dùng cho một tài khoản khác.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/users/{user_id}:
+    delete:
+      tags: [Internal]
+      operationId: hardDeleteUserInternal
+      summary: Xóa cứng tài khoản vừa tạo (bù trừ khi Lawyer Service lưu hồ sơ lỗi)
+      description: |
+        Chỉ Lawyer Service gọi, kèm `X-Internal-Token`. Xóa hẳn dòng `users` (không xóa mềm, để email đăng ký
+        lại được). Chỉ cho xóa tài khoản an toàn để xóa: do admin tạo (`created_by` khác null), chưa đăng nhập
+        lần nào (không có refresh token) và chưa khai CCCD; không thì 409 `HARD_DELETE_NOT_ALLOWED`.
+        Không tồn tại → 404 (Lawyer Service coi như đã xóa xong). Gọi lại an toàn.
+      x-status: implemented
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "204":
+          description: Đã xóa cứng, không có body
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tài khoản đã được dùng, không được xóa cứng
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: HARD_DELETE_NOT_ALLOWED
+                  message: Tài khoản này đã được sử dụng nên không thể xóa hẳn.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/users/{user_id}/role:
+    put:
+      tags: [Internal]
+      operationId: changeUserRoleInternal
+      summary: Đổi vai trò sang luật sư khi duyệt đơn (Lawyer Service gọi)
+      description: |
+        Chỉ Lawyer Service gọi khi admin duyệt đơn xin làm luật sư, kèm `X-Internal-Token`.
+        `role` chỉ nhận `lawyer`. Chỉ đổi từ `citizen`: tài khoản `admin` → 409 `ROLE_CHANGE_NOT_ALLOWED`;
+        đã xóa mềm → 409 `USER_DELETED`; không tồn tại → 404. Đã là `lawyer` thì trả 200, không đổi gì
+        (gọi lại an toàn khi Lawyer Service duyệt lại sau lỗi).
+        Đổi thật thì thu hồi mọi refresh token với lý do `role_changed` → lần refresh sau trả
+        401 `ROLE_CHANGED_RELOGIN`.
+      x-status: implemented
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InternalChangeRoleRequest" }
+            example: { role: lawyer }
+      responses:
+        "200":
+          description: Thông tin người dùng sau khi đổi vai trò
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "409":
+          description: Tài khoản đã xóa hoặc là admin
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                da_xoa:
+                  summary: Tài khoản đã xóa mềm
+                  value:
+                    data: null
+                    error:
+                      code: USER_DELETED
+                      message: Tài khoản này đã bị xóa, hãy khôi phục trước khi thao tác.
+                    request_id: req-123
+                la_admin:
+                  summary: Tài khoản admin
+                  value:
+                    data: null
+                    error:
+                      code: ROLE_CHANGE_NOT_ALLOWED
+                      message: Không thể đổi vai trò của tài khoản này sang luật sư.
+                    request_id: req-124
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/users/{user_id}/citizen-profile:
+    get:
+      tags: [Internal]
+      operationId: getCitizenProfileInternal
+      summary: Lấy hồ sơ cá nhân của một người dùng (cho service khác)
+      description: |
+        Chỉ service khác gọi, kèm `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`.
+        Contract Service dùng để điền sẵn thông tin người dùng vào mẫu đơn, hợp đồng.
+        Người dùng chưa khai hồ sơ thì `data` là `null`.
+      x-status: implemented
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Hồ sơ của người dùng, hoặc `data = null` nếu chưa khai
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CitizenProfileResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/users/{user_id}/status:
+    get:
+      tags: [Internal]
+      operationId: getUserStatusInternal
+      summary: Trạng thái tài khoản, có được tạo bộ hồ sơ không (cho service khác)
+      description: |
+        Chỉ service khác gọi, kèm `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`.
+        Contract Service gọi trước khi tạo bộ hồ sơ: lấy `user_id` từ `sub` trong JWT rồi gọi API này.
+        `can_create_dossier = false` thì trả 403 cho FE, dùng `block_reason` làm mã lỗi và
+        `block_message` làm câu thông báo.
+
+        Luật hiện tại (gom ở User Service, Contract Service không phải tự kiểm tra lại):
+        - Tài khoản đang bị khóa → `ACCOUNT_LOCKED` (ưu tiên báo trước). Khóa đã hết hạn thì tự mở.
+        - Chưa khai hồ sơ CCCD → `PROFILE_NOT_SUBMITTED`.
+
+        Chưa có chức năng admin duyệt hồ sơ, nên khai xong hồ sơ thì `profile_status` tạm là `approved`.
+        Khi có chức năng duyệt sẽ thêm `pending` / `rejected`; các field khác giữ nguyên.
+        Tài khoản đã xóa mềm trả 404 như không tồn tại.
+      x-status: implemented
+      servers:
+        - url: http://user-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/UserId"
+      responses:
+        "200":
+          description: Trạng thái tài khoản
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserStatusResponse" }
+              examples:
+                duoc_tao:
+                  summary: Được tạo bộ hồ sơ
+                  value:
+                    data:
+                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      role: citizen
+                      status: active
+                      is_locked: false
+                      locked_until: null
+                      has_citizen_profile: true
+                      profile_status: approved
+                      can_create_dossier: true
+                      block_reason: null
+                      block_message: null
+                    error: null
+                    request_id: req-123
+                chua_khai_ho_so:
+                  summary: Chưa khai hồ sơ CCCD
+                  value:
+                    data:
+                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      role: citizen
+                      status: active
+                      is_locked: false
+                      locked_until: null
+                      has_citizen_profile: false
+                      profile_status: not_submitted
+                      can_create_dossier: false
+                      block_reason: PROFILE_NOT_SUBMITTED
+                      block_message: Bạn cần khai hồ sơ cá nhân (CCCD) trước khi tạo bộ hồ sơ.
+                    error: null
+                    request_id: req-123
+                bi_khoa:
+                  summary: Tài khoản đang bị khóa
+                  value:
+                    data:
+                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      role: citizen
+                      status: locked
+                      is_locked: true
+                      locked_until: "2026-10-12T03:00:00Z"
+                      has_citizen_profile: true
+                      profile_status: approved
+                      can_create_dossier: false
+                      block_reason: ACCOUNT_LOCKED
+                      block_message: "Tài khoản của bạn đã bị khóa đến 10:00 12/10/2026. Lý do: Spam. Vui lòng liên hệ quản trị viên nếu cần hỗ trợ."
+                    error: null
+                    request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/UserNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "`access_token` lấy từ `POST /users/auth/firebase`, `POST /users/auth/login` hoặc `POST /users/auth/refresh`."
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: access_token
+      description: |
+        HttpOnly cookie do BE set khi đăng nhập / refresh (dùng cho trình duyệt, FE gọi API với
+        `credentials: "include"`). Chạy song song với BearerAuth: có header `Authorization` thì
+        header được ưu tiên, không có mới đọc cookie.
+    InternalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: Giá trị `INTERNAL_TOKEN` trong `.env`, chỉ dùng cho `/internal/v1/...`.
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Mã lần gọi. Gateway tự tạo; gọi trực tiếp không có thì service tự tạo.
+      schema: { type: string, example: req-123 }
+    Page:
+      name: page
+      in: query
+      description: Trang cần lấy, bắt đầu từ 1.
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      description: Số dòng mỗi trang.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    UserId:
+      name: user_id
+      in: path
+      required: true
+      description: ID người dùng (UUID)
+      schema: { type: string, format: uuid }
+
+  headers:
+    RequestId:
+      description: Mã lần gọi, giống `request_id` trong body.
+      schema: { type: string }
+
+  responses:
+    LawyerBadResponse:
+      description: Lawyer Service trả lỗi 5xx hoặc dữ liệu sai cấu trúc khi ẩn hồ sơ luật sư
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_BAD_RESPONSE
+              message: Hệ thống luật sư đang gặp lỗi, chưa thay đổi gì. Vui lòng thử lại sau.
+            request_id: req-123
+    LawyerUnavailable:
+      description: Không kết nối được Lawyer Service khi ẩn hồ sơ luật sư
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_UNAVAILABLE
+              message: Hệ thống luật sư tạm thời không phản hồi, chưa thay đổi gì. Vui lòng thử lại sau.
+            request_id: req-123
+    LawyerTimeout:
+      description: Lawyer Service quá 5 giây khi ẩn hồ sơ luật sư
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_TIMEOUT
+              message: Hệ thống luật sư phản hồi quá chậm, chưa thay đổi gì. Vui lòng thử lại sau.
+            request_id: req-123
+    ValidationError:
+      description: Dữ liệu gửi lên không hợp lệ
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: VALIDATION_ERROR
+              message: Dữ liệu gửi lên không hợp lệ.
+              details:
+                - field: phone
+                  message: Số điện thoại phải có 10 chữ số, bắt đầu bằng 0.
+            request_id: req-123
+    Unauthorized:
+      description: Thiếu token, token sai hoặc đã hết hạn
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          examples:
+            thieu_token:
+              summary: Thiếu hoặc sai token
+              value:
+                data: null
+                error:
+                  code: UNAUTHORIZED
+                  message: Bạn cần đăng nhập để tiếp tục.
+                request_id: req-123
+            het_han:
+              summary: Token hết hạn (FE gọi /users/auth/refresh rồi thử lại)
+              value:
+                data: null
+                error:
+                  code: TOKEN_EXPIRED
+                  message: Phiên đăng nhập đã hết hạn.
+                request_id: req-124
+    Forbidden:
+      description: Đã đăng nhập nhưng không đủ quyền
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: FORBIDDEN
+              message: Bạn không có quyền thực hiện thao tác này.
+            request_id: req-123
+    AccountLocked:
+      description: Tài khoản đang bị khóa
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: ACCOUNT_LOCKED
+              message: Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.
+            request_id: req-123
+    UserNotFound:
+      description: Không có người dùng với ID này
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: USER_NOT_FOUND
+              message: Không tìm thấy người dùng.
+            request_id: req-123
+    InternalError:
+      description: Lỗi Backend không lường trước
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: INTERNAL_ERROR
+              message: Hệ thống đang gặp lỗi, vui lòng thử lại sau.
+            request_id: req-123
+
+  schemas:
+    # ---------- Kiểu dùng chung ----------
+    RequestIdValue:
+      type: string
+      description: Mã lần gọi API
+      example: req-123
+
+    NoError:
+      description: Luôn `null` khi thành công
+      nullable: true
+      enum: [null]
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1, example: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        total: { type: integer, minimum: 0, example: 1 }
+        total_pages: { type: integer, minimum: 0, example: 1 }
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Mã lỗi cố định, FE dùng để xử lý (xem API_GUIDELINES mục 5)
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          description: Câu báo lỗi tiếng Việt, hiển thị được cho người dùng
+        details:
+          type: array
+          description: Lỗi theo từng trường (chỉ có khi `VALIDATION_ERROR`)
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string, example: phone }
+              message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          description: Luôn `null` khi lỗi
+          nullable: true
+          enum: [null]
+        error: { $ref: "#/components/schemas/ErrorBody" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    # ---------- Người dùng ----------
+    UserRole:
+      type: string
+      description: "Vai trò: `citizen` = người dân, `lawyer` = luật sư, `admin` = quản trị viên"
+      enum: [citizen, lawyer, admin]
+
+    UserStatus:
+      type: string
+      description: "Trạng thái: `active` = đang hoạt động, `locked` = bị khóa"
+      enum: [active, locked]
+
+    User:
+      type: object
+      required: [id, email, role, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid, example: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e }
+        email: { type: string, format: email, example: nguyenvana@gmail.com }
+        username:
+          type: string
+          nullable: true
+          description: Tên đăng nhập (chỉ có với tài khoản đăng nhập bằng mật khẩu)
+          example: admin2026
+        full_name: { type: string, nullable: true, example: Nguyễn Văn A }
+        avatar_url: { type: string, format: uri, nullable: true }
+        phone: { type: string, nullable: true, example: "0901234567" }
+        role: { $ref: "#/components/schemas/UserRole" }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        locked_reason:
+          type: string
+          nullable: true
+          description: Lý do khóa. Chỉ có khi `status` = `locked`.
+        locked_at: { type: string, format: date-time, nullable: true }
+        locked_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Hết thời điểm này thì tự mở khóa. `null` khi `status` = `locked` nghĩa là khóa vĩnh viễn.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AdminUser:
+      description: Thông tin người dùng cho admin (thêm các trường quản trị)
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          required: [has_citizen_profile]
+          description: |
+            Đã bỏ trường `created_as_lawyer` (cột bị xóa ở `007_lawyer_role.sql`; tài khoản admin tạo cho
+            luật sư có vai trò `lawyer` ngay).
+          properties:
+            auth_provider: { type: string, nullable: true, example: local }
+            locked_by: { type: string, format: uuid, nullable: true, description: Admin đã khóa }
+            created_by: { type: string, format: uuid, nullable: true, description: Admin đã tạo (null = tự đăng ký) }
+            deleted_at: { type: string, format: date-time, nullable: true, description: Khác null = đã xóa mềm }
+            deleted_by: { type: string, format: uuid, nullable: true }
+            has_citizen_profile: { type: boolean, description: Đã khai hồ sơ cá nhân (CCCD) chưa }
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type, expires_in]
+      properties:
+        access_token: { type: string, description: JWT dùng trong header `Authorization` }
+        refresh_token: { type: string, description: Chuỗi ngẫu nhiên; server chỉ lưu bản hash }
+        token_type: { type: string, enum: [Bearer] }
+        expires_in:
+          type: integer
+          description: Số giây còn lại của `access_token`
+          example: 900
+
+    AuthResult:
+      allOf:
+        - $ref: "#/components/schemas/TokenPair"
+        - type: object
+          required: [user, is_new_user]
+          properties:
+            user: { $ref: "#/components/schemas/User" }
+            is_new_user:
+              type: boolean
+              description: "`true` nếu đây là lần đăng nhập đầu tiên (FE có thể mở màn hình bổ sung hồ sơ)"
+
+    # ---------- Body gửi lên ----------
+    PasswordLoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 255, example: admin2026 }
+        password: { type: string, minLength: 1, maxLength: 128, format: password }
+
+    RegisterRequest:
+      type: object
+      required: [email, phone, password, confirm_password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 255, description: Cũng là tên đăng nhập (lưu chữ thường) }
+        phone:
+          type: string
+          pattern: '^0\d{9}$'
+          description: 10 chữ số bắt đầu bằng 0, không trùng tài khoản khác; dấu chấm, khoảng trắng, gạch ngang được bỏ đi trước khi kiểm tra
+        password: { type: string, minLength: 8, maxLength: 128, format: password }
+        confirm_password: { type: string, maxLength: 128, format: password, description: Phải giống `password` }
+
+    FirebaseLoginRequest:
+      type: object
+      required: [id_token]
+      properties:
+        id_token:
+          type: string
+          minLength: 1
+          description: Firebase ID token, FE lấy bằng `await user.getIdToken()` sau khi đăng nhập Firebase
+
+    RefreshTokenRequest:
+      type: object
+      description: Không bắt buộc khi trình duyệt đã có HttpOnly cookie `refresh_token`.
+      properties:
+        refresh_token: { type: string, minLength: 1 }
+
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        full_name: { type: string, minLength: 1, maxLength: 255, pattern: '\S' }
+        phone:
+          type: string
+          nullable: true
+          pattern: '^0\d{9}$'
+          description: 10 chữ số, bắt đầu bằng 0. Gửi `null` để xóa.
+        avatar_url: { type: string, format: uri, nullable: true, maxLength: 2000 }
+
+    ChangeRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role: { $ref: "#/components/schemas/UserRole" }
+
+    LockUserRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: '\S'
+          description: Lý do khóa, người bị khóa sẽ thấy câu này
+        duration_days:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          nullable: true
+          description: Số ngày khóa. Bỏ trống hoặc `null` = khóa vĩnh viễn (đến khi admin mở).
+
+    CreateUserRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 255, description: Cũng là tên đăng nhập (lưu chữ thường) }
+        password: { type: string, minLength: 8, maxLength: 128, description: Mật khẩu do admin đặt }
+        full_name: { type: string, maxLength: 255, nullable: true }
+        phone:
+          type: string
+          nullable: true
+          pattern: '^0\d{9}$'
+          description: 10 chữ số bắt đầu bằng 0; dấu chấm, khoảng trắng, gạch ngang được bỏ đi trước khi kiểm tra
+        account_type:
+          type: string
+          enum: [citizen, admin]
+          default: citizen
+          description: Tài khoản luật sư tạo qua Lawyer Service `POST /lawyers/accounts`
+
+    InternalCreateUserRequest:
+      type: object
+      required: [email, password, full_name, role, created_by]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 255, description: Cũng là tên đăng nhập (lưu chữ thường) }
+        password: { type: string, minLength: 8, maxLength: 128, description: Mật khẩu do admin đặt }
+        full_name: { type: string, minLength: 1, maxLength: 255 }
+        phone:
+          type: string
+          nullable: true
+          pattern: '^0\d{9}$'
+        role: { type: string, enum: [lawyer] }
+        created_by: { type: string, format: uuid, description: Admin đã tạo (lấy từ JWT ở Lawyer Service) }
+
+    InternalChangeRoleRequest:
+      type: object
+      required: [role]
+      additionalProperties: false
+      properties:
+        role: { type: string, enum: [lawyer] }
+
+    UserSummaryResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [total, by_role, by_status, deleted]
+          properties:
+            total: { type: integer, minimum: 0 }
+            by_role:
+              type: object
+              properties:
+                citizen: { type: integer }
+                lawyer: { type: integer }
+                admin: { type: integer }
+            by_status:
+              type: object
+              properties:
+                active: { type: integer }
+                locked: { type: integer }
+            deleted: { type: integer, minimum: 0 }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    # ---------- Kết quả từng API ----------
+    AuthResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/AuthResult" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    TokenPairResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/TokenPair" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    LogoutResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [logged_out]
+          properties:
+            logged_out: { type: boolean, example: true }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    UserResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/User" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    AdminUserResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/AdminUser" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    AdminUserListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/AdminUser" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    UserListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/User" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    UserSearchRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+
+    UserBrief:
+      type: object
+      required: [id, role, status]
+      properties:
+        id: { type: string, format: uuid }
+        full_name: { type: string, nullable: true }
+        avatar_url: { type: string, format: uri, nullable: true }
+        role: { $ref: "#/components/schemas/UserRole" }
+        status: { $ref: "#/components/schemas/UserStatus" }
+
+    UserBriefListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/UserBrief" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    Address:
+      type: object
+      description: Địa chỉ theo mẫu đơn mới (2 cấp hành chính)
+      required: [detail, ward, province]
+      properties:
+        detail: { type: string, description: "Số nhà, đường, thôn/xóm", example: Số 45 ngõ 120 Hoàng Hoa Thám }
+        ward: { type: string, description: Xã/Phường/Đặc khu, example: Phường Ngọc Hà }
+        province: { type: string, description: Tỉnh/Thành phố, example: Thành phố Hà Nội }
+
+    CitizenProfileRequest:
+      type: object
+      description: |
+        Các trường thông tin CCCD trùng tên với kết quả eKYC của Document Service
+        (`id` của eKYC đổi thành `id_number`).
+      required:
+        - id_number
+        - full_name
+        - date_of_birth
+        - gender
+        - nationality
+        - issue_date
+        - issue_place
+        - permanent_address
+        - current_same_as_permanent
+        - phone
+        - source
+        - declared
+        - consented
+      properties:
+        id_number: { type: string, description: Số định danh cá nhân (12 số) }
+        full_name: { type: string, description: "Họ và tên theo CCCD, ghi đè tên tài khoản" }
+        date_of_birth: { type: string, format: date }
+        gender: { type: string, description: Nam hoặc Nữ }
+        nationality: { type: string, example: Việt Nam }
+        place_of_origin: { type: string, nullable: true, description: Quê quán / nơi đăng ký khai sinh }
+        place_of_residence: { type: string, nullable: true, description: Nơi thường trú đúng như in trên thẻ (tham khảo) }
+        issue_date: { type: string, format: date }
+        issue_place: { type: string }
+        expiry_date: { type: string, format: date, nullable: true }
+        permanent_address: { $ref: "#/components/schemas/Address" }
+        current_same_as_permanent: { type: boolean, description: "true thì bỏ qua current_address" }
+        current_address:
+          allOf: [{ $ref: "#/components/schemas/Address" }]
+          nullable: true
+        phone: { type: string, description: Lưu vào tài khoản (users.phone) }
+        ethnicity: { type: string, nullable: true, description: "Dân tộc (CCCD không in, nhập tay)" }
+        tax_code: { type: string, nullable: true, description: Mã số thuế cá nhân (nếu có) }
+        source: { type: string, enum: [ekyc, manual] }
+        ekyc_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Mã bản đọc eKYC do Document Service trả về (chỉ có khi source = ekyc)
+        declared: { type: boolean, description: Người dùng cam đoan thông tin đúng sự thật (phải là true) }
+        consented: { type: boolean, description: Người dùng đồng ý lưu và dùng thông tin cá nhân (phải là true) }
+
+    CitizenProfile:
+      type: object
+      required:
+        - user_id
+        - id_number
+        - full_name
+        - date_of_birth
+        - gender
+        - nationality
+        - issue_date
+        - issue_place
+        - permanent_address
+        - current_same_as_permanent
+        - email
+        - source
+        - declared_at
+        - consented_at
+        - updated_at
+      properties:
+        user_id: { type: string, format: uuid }
+        id_number: { type: string }
+        full_name: { type: string }
+        date_of_birth: { type: string, format: date }
+        gender: { type: string }
+        nationality: { type: string }
+        place_of_origin: { type: string, nullable: true }
+        place_of_residence: { type: string, nullable: true }
+        issue_date: { type: string, format: date }
+        issue_place: { type: string }
+        expiry_date: { type: string, format: date, nullable: true }
+        permanent_address: { $ref: "#/components/schemas/Address" }
+        current_same_as_permanent: { type: boolean }
+        current_address:
+          allOf: [{ $ref: "#/components/schemas/Address" }]
+          nullable: true
+        phone: { type: string, nullable: true }
+        email: { type: string, format: email, description: "Email đăng nhập, chỉ hiển thị" }
+        ethnicity: { type: string, nullable: true }
+        tax_code: { type: string, nullable: true }
+        source: { type: string, enum: [ekyc, manual] }
+        ekyc_id: { type: string, format: uuid, nullable: true }
+        declared_at: { type: string, format: date-time }
+        consented_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    UserStatusResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [user_id, role, status, is_locked, locked_until, has_citizen_profile, profile_status,
+                     can_create_dossier, block_reason, block_message]
+          properties:
+            user_id: { type: string, format: uuid }
+            role: { $ref: "#/components/schemas/UserRole" }
+            status: { $ref: "#/components/schemas/UserStatus" }
+            is_locked: { type: boolean, description: Đang bị khóa thật (khóa hết hạn thì đã tự mở) }
+            locked_until:
+              type: string
+              format: date-time
+              nullable: true
+              description: Thời điểm hết khóa; `null` khi không khóa hoặc khóa vĩnh viễn
+            has_citizen_profile: { type: boolean, description: Đã khai hồ sơ CCCD chưa }
+            profile_status:
+              type: string
+              enum: [not_submitted, approved]
+              description: Chưa có chức năng duyệt nên khai xong là `approved`; sau này thêm `pending`, `rejected`
+            can_create_dossier: { type: boolean, description: Được tạo bộ hồ sơ (đơn từ) hay không }
+            block_reason:
+              type: string
+              enum: [ACCOUNT_LOCKED, PROFILE_NOT_SUBMITTED]
+              nullable: true
+              description: Lý do không được tạo; `null` khi được phép
+            block_message:
+              type: string
+              nullable: true
+              description: Câu thông báo tiếng Việt để FE hiện cho người dùng
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    CitizenProfileResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          allOf: [{ $ref: "#/components/schemas/CitizenProfile" }]
+          nullable: true
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }

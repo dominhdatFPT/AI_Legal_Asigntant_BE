@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 libgl1 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+COPY --from=libs common_auth /libs/common_auth
+RUN pip install --no-cache-dir /libs/common_auth
+COPY requirements.txt requirements-worker.txt ./
+RUN pip install --no-cache-dir -r requirements-worker.txt
+COPY scripts/download_worker_models.py /app/scripts/
+RUN python scripts/download_worker_models.py
+COPY app ./app
+COPY scripts/check_document_worker.py /app/scripts/
+COPY scripts/setup_identity_profile.py scripts/setup_document_outbox.py scripts/check_release.py /app/scripts/
+ENV DOCUMENT_PADDLE_MODEL_DIR=/opt/document-ocr
+CMD ["python", "-m", "app.worker"]

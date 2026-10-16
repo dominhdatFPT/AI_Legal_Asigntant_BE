@@ -1,0 +1,1106 @@
+"openapi": "3.0.3"
+"info":
+  "title": "notification-service API"
+  "version": "0.2.0"
+  "description": "Đã gắn JWT RS256 qua libs/common_auth vào router API user ngày 07/10/2026. Health công khai; GET /notifications/me kiểm tra access token đã có code. x-status: planned vẫn chưa triển khai DB/nghiệp vụ. Dữ liệu ví dụ giả."
+  "x-owner": "Hiền"
+"servers":
+  - "url": "http://localhost:8080/api"
+    "description": "FE/Postman qua Gateway."
+  - "url": "http://127.0.0.1:8009/api/v1"
+    "description": "Test riêng Notification bằng docker-compose.jwt-local.yml; chỉ localhost."
+  - "url": "http://notification-service:8000/api/v1"
+    "description": "Service khác gọi trong Docker."
+"security":
+  - "BearerAuth": []
+"paths":
+  "/notifications/me":
+    "get":
+      "operationId": "getNotificationAuthContext"
+      "tags": ["notifications"]
+      "summary": "Kiểm tra access token của người đang gọi"
+      "description": "Trả user_id từ JWT sub và role. Không phải API hồ sơ, không truy vấn DB và không xác nhận trạng thái khóa tài khoản tức thời."
+      "x-status": "implemented"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+      "responses":
+        "200":
+          "description": "Access token hợp lệ."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/AuthContextResponse"
+              "example":
+                "data":
+                  "user_id": "11111111-1111-4111-8111-111111111111"
+                  "role": "citizen"
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+  "/notifications/health":
+    "get":
+      "operationId": "getNotificationHealth"
+      "tags":
+        - "notifications"
+      "summary": "Kiểm tra service"
+      "description": "Không cần đăng nhập. Health chỉ kiểm tra tiến trình, không đảm bảo DB/OCR đã kết nối."
+      "x-status": "implemented"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+      "responses":
+        "200":
+          "description": "Service đang chạy."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/Health"
+              "example":
+                "status": "ok"
+                "service": "notification-service"
+      "security": []
+  "/notifications":
+    "get":
+      "operationId": "listNotifications"
+      "tags":
+        - "notifications"
+      "summary": "Thông báo của tôi"
+      "description": "Mọi role; người nhận lấy từ JWT sub. Không trả thông báo của user khác. Mặc định include_suppressed=false, sort created_at giảm dần/id phụ. Muted vẫn thấy trong danh sách; suppressed chỉ thấy khi include_suppressed=true. Không nhận user_id từ FE."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+        - "$ref": "#/components/parameters/Page"
+        - "$ref": "#/components/parameters/PageSize"
+        - "name": "is_read"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+        - "name": "include_suppressed"
+          "in": "query"
+          "required": false
+          "schema":
+            "type": "boolean"
+            "default": false
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationListResponse"
+              "example":
+                "data":
+                  "items":
+                    - "id": "88888888-8888-4888-8888-888888888888"
+                      "event_id": "77777777-7777-4777-8777-777777777777"
+                      "event_type": "contract.generated"
+                      "title": "Hợp đồng đã tạo xong"
+                      "message": "File hợp đồng của bạn đã sẵn sàng."
+                      "resource_type": "contract"
+                      "resource_id": "55555555-5555-4555-8555-555555555555"
+                      "is_read": false
+                      "is_muted": false
+                      "is_suppressed": false
+                      "created_at": "2026-10-06T02:00:00Z"
+                      "read_at": null
+                  "pagination":
+                    "page": 1
+                    "page_size": 20
+                    "total": 1
+                    "total_pages": 1
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+  "/notifications/unread-count":
+    "get":
+      "operationId": "getUnreadCount"
+      "tags":
+        - "notifications"
+      "summary": "Đếm chưa đọc"
+      "description": "Chỉ thông báo chưa đọc và không suppressed. Muted vẫn tính vào số chưa đọc."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/UnreadResponse"
+              "example":
+                "data":
+                  "unread_count": 1
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "500":
+          "$ref": "#/components/responses/Error500"
+  "/notifications/{notification_id}/read":
+    "patch":
+      "operationId": "markNotificationRead"
+      "tags":
+        - "notifications"
+      "summary": "Đánh dấu đã đọc"
+      "description": "Chỉ người nhận; gọi lại trả 200 cùng bản ghi, không đổi read_at đã có."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+        - "name": "notification_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/NotificationResponse"
+              "example":
+                "data":
+                  "id": "88888888-8888-4888-8888-888888888888"
+                  "event_id": "77777777-7777-4777-8777-777777777777"
+                  "event_type": "contract.generated"
+                  "title": "Hợp đồng đã tạo xong"
+                  "message": "File hợp đồng của bạn đã sẵn sàng."
+                  "resource_type": "contract"
+                  "resource_id": "55555555-5555-4555-8555-555555555555"
+                  "is_read": true
+                  "is_muted": false
+                  "is_suppressed": false
+                  "created_at": "2026-10-06T02:00:00Z"
+                  "read_at": "2026-10-06T02:00:00Z"
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+  "/notifications/read-all":
+    "post":
+      "operationId": "markAllRead"
+      "tags":
+        - "notifications"
+      "summary": "Đánh dấu tất cả đã đọc"
+      "description": "Chỉ JWT sub. Đánh dấu các bản ghi hiện có, kể cả suppressed; thông báo tới sau transaction vẫn chưa đọc. Gọi lại trả updated_count=0."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReadAllResponse"
+              "example":
+                "data":
+                  "updated_count": 1
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "500":
+          "$ref": "#/components/responses/Error500"
+  "/notifications/consultation-preferences/{consultation_id}":
+    "get":
+      "operationId": "getConsultationPreference"
+      "tags":
+        - "notifications"
+      "summary": "Xem mute/cảnh báo của phòng"
+      "description": "User phải là thành viên phòng, kiểm tra Consultation bằng JWT. Chưa có lựa chọn mute thì is_muted=false. is_suppressed lấy từ warning của Consultation; chưa xác minh được warning thì true (fail-closed). API warning là phụ thuộc chưa có trên develop."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+        - "name": "consultation_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PreferenceResponse"
+              "example":
+                "data":
+                  "consultation_id": "99999999-9999-4999-8999-999999999999"
+                  "is_muted": false
+                  "is_suppressed": false
+                  "updated_at": "2026-10-06T02:00:00Z"
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+        "503":
+          "$ref": "#/components/responses/Error503"
+    "put":
+      "operationId": "setConsultationMute"
+      "tags":
+        - "notifications"
+      "summary": "Bật/tắt mute phòng cho tôi"
+      "description": "Chỉ thành viên phòng. body chỉ nhận is_muted. User không được sửa is_suppressed: warning do Consultation quản lý. Mute ngăn popup nhưng không xóa thông báo và không đổi trạng thái phòng."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+        - "name": "consultation_id"
+          "in": "path"
+          "required": true
+          "schema":
+            "type": "string"
+            "format": "uuid"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/PreferenceResponse"
+              "example":
+                "data":
+                  "consultation_id": "99999999-9999-4999-8999-999999999999"
+                  "is_muted": true
+                  "is_suppressed": false
+                  "updated_at": "2026-10-06T02:00:00Z"
+                "error": null
+                "request_id": "req-demo-001"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+        "503":
+          "$ref": "#/components/responses/Error503"
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "type": "object"
+              "additionalProperties": false
+              "required":
+                - "is_muted"
+              "properties":
+                "is_muted":
+                  "type": "boolean"
+            "example":
+              "is_muted": true
+  "/internal/v1/notifications/events":
+    "post":
+      "operationId": "receiveNotificationEvent"
+      "tags":
+        - "internal"
+      "summary": "Service gửi một sự kiện thông báo"
+      "description": "Chỉ hệ thống với X-Internal-Token; không đi qua Gateway, FE không gọi. source_service/event_type/resource_type phải khớp bảng trong NOTIFICATION_INTEGRATION.md. recipient_user_ids đầy đủ và đúng quyền do producer xác định. Trong một transaction lưu event + tất cả notifications; unique(event_id) và unique(event_id, recipient_user_id). Trùng event/body trả is_duplicate=true, created_count=0; cùng event_id khác body: 409. warning_changed chỉ cập nhật suppression, created_count=0; payload phải có is_warning/resource_version, chỉ áp dụng version mới hơn. 200 sau commit; không hứa popup đã hiện."
+      "x-status": "planned"
+      "parameters":
+        - "$ref": "#/components/parameters/RequestId"
+      "responses":
+        "200":
+          "description": "Thành công."
+          "headers":
+            "X-Request-ID":
+              "schema":
+                "type": "string"
+              "description": "Mã lần gọi."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/EventResponse"
+              "example":
+                "data":
+                  "event_id": "77777777-7777-4777-8777-777777777777"
+                  "is_duplicate": false
+                  "created_count": 1
+                "error": null
+                "request_id": "req-demo-001"
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "401":
+          "$ref": "#/components/responses/Error401"
+        "403":
+          "$ref": "#/components/responses/Error403"
+        "409":
+          "$ref": "#/components/responses/EventConflict"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+        "503":
+          "$ref": "#/components/responses/Error503"
+      "security":
+        - "InternalToken": []
+      "servers":
+        - "url": "http://notification-service:8000"
+          "description": "Chỉ Docker nội bộ, không ghép /api/v1 phía trước."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/Event"
+            "example":
+              "event_id": "77777777-7777-4777-8777-777777777777"
+              "event_type": "contract.generated"
+              "source_service": "contract-service"
+              "occurred_at": "2026-10-06T02:00:00Z"
+              "recipient_user_ids":
+                - "11111111-1111-4111-8111-111111111111"
+              "resource_type": "contract"
+              "resource_id": "55555555-5555-4555-8555-555555555555"
+              "payload":
+                "generation_id": "66666666-6666-4666-8666-666666666666"
+"components":
+  "securitySchemes":
+    "BearerAuth":
+      "type": "http"
+      "scheme": "bearer"
+      "bearerFormat": "JWT"
+      "description": "Access token RS256 của user-service, kiểm tra bằng libs/common_auth/public key. sub là người nhận đang đăng nhập, role là citizen/lawyer/admin. JWT user không thay thế X-Internal-Token khi gửi event hệ thống."
+    "InternalToken":
+      "type": "apiKey"
+      "in": "header"
+      "name": "X-Internal-Token"
+      "description": "Token hệ thống; không dùng JWT user và không đưa vào FE."
+  "parameters":
+    "RequestId":
+      "name": "X-Request-ID"
+      "in": "header"
+      "required": false
+      "schema":
+        "type": "string"
+        "maxLength": 128
+    "Page":
+      "name": "page"
+      "in": "query"
+      "schema":
+        "type": "integer"
+        "minimum": 1
+        "default": 1
+    "PageSize":
+      "name": "page_size"
+      "in": "query"
+      "schema":
+        "type": "integer"
+        "minimum": 1
+        "maximum": 100
+        "default": 20
+  "schemas":
+    "AuthContextResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required": ["data", "error", "request_id"]
+      "properties":
+        "data":
+          "type": "object"
+          "additionalProperties": false
+          "required": ["user_id", "role"]
+          "properties":
+            "user_id":
+              "type": "string"
+              "format": "uuid"
+            "role":
+              "type": "string"
+              "enum": ["citizen", "lawyer", "admin"]
+        "error":
+          "type": "object"
+          "nullable": true
+          "enum": [null]
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "Pagination":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "page"
+        - "page_size"
+        - "total"
+        - "total_pages"
+      "properties":
+        "page":
+          "type": "integer"
+          "minimum": 1
+        "page_size":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 100
+        "total":
+          "type": "integer"
+          "minimum": 0
+        "total_pages":
+          "type": "integer"
+          "minimum": 0
+    "ErrorResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "error":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "code"
+            - "message"
+          "properties":
+            "code":
+              "type": "string"
+              "minLength": 1
+              "maxLength": 100
+            "message":
+              "type": "string"
+              "minLength": 1
+              "maxLength": 2000
+            "details":
+              "type": "array"
+              "items":
+                "type": "object"
+                "additionalProperties": false
+                "required":
+                  - "field"
+                  - "message"
+                "properties":
+                  "field":
+                    "type": "string"
+                    "minLength": 1
+                    "maxLength": 200
+                  "message":
+                    "type": "string"
+                    "minLength": 1
+                    "maxLength": 2000
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "Health":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "status"
+        - "service"
+      "properties":
+        "status":
+          "type": "string"
+          "enum":
+            - "ok"
+        "service":
+          "type": "string"
+          "enum":
+            - "notification-service"
+    "Notification":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "id"
+        - "event_id"
+        - "event_type"
+        - "title"
+        - "message"
+        - "resource_type"
+        - "resource_id"
+        - "is_read"
+        - "is_muted"
+        - "is_suppressed"
+        - "created_at"
+        - "read_at"
+      "properties":
+        "id":
+          "type": "string"
+          "format": "uuid"
+        "event_id":
+          "type": "string"
+          "format": "uuid"
+        "event_type":
+          "type": "string"
+          "enum":
+            - "document.ocr_completed"
+            - "document.ocr_failed"
+            - "contract.generated"
+            - "contract.generation_failed"
+            - "consultation.requested"
+            - "consultation.accepted"
+            - "consultation.message_created"
+            - "consultation.warning_changed"
+            - "lawyer.approved"
+            - "lawyer.rejected"
+            - "user.blocked"
+        "title":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 200
+        "message":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 1000
+        "resource_type":
+          "type": "string"
+          "enum":
+            - "document"
+            - "contract"
+            - "consultation"
+            - "lawyer"
+            - "user"
+        "resource_id":
+          "type": "string"
+          "format": "uuid"
+        "is_read":
+          "type": "boolean"
+        "is_muted":
+          "type": "boolean"
+        "is_suppressed":
+          "type": "boolean"
+        "created_at":
+          "type": "string"
+          "format": "date-time"
+        "read_at":
+          "type": "string"
+          "format": "date-time"
+          "nullable": true
+    "NotificationResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "$ref": "#/components/schemas/Notification"
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "NotificationListResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "items"
+            - "pagination"
+          "properties":
+            "items":
+              "type": "array"
+              "items":
+                "$ref": "#/components/schemas/Notification"
+            "pagination":
+              "$ref": "#/components/schemas/Pagination"
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "UnreadResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "unread_count"
+          "properties":
+            "unread_count":
+              "type": "integer"
+              "minimum": 0
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "ReadAllResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "updated_count"
+          "properties":
+            "updated_count":
+              "type": "integer"
+              "minimum": 0
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "Preference":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "consultation_id"
+        - "is_muted"
+        - "is_suppressed"
+        - "updated_at"
+      "properties":
+        "consultation_id":
+          "type": "string"
+          "format": "uuid"
+        "is_muted":
+          "type": "boolean"
+        "is_suppressed":
+          "type": "boolean"
+        "updated_at":
+          "type": "string"
+          "format": "date-time"
+    "PreferenceResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "$ref": "#/components/schemas/Preference"
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+    "Event":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "event_id"
+        - "event_type"
+        - "source_service"
+        - "occurred_at"
+        - "recipient_user_ids"
+        - "resource_type"
+        - "resource_id"
+        - "payload"
+      "properties":
+        "event_id":
+          "type": "string"
+          "format": "uuid"
+        "event_type":
+          "type": "string"
+          "enum":
+            - "document.ocr_completed"
+            - "document.ocr_failed"
+            - "contract.generated"
+            - "contract.generation_failed"
+            - "consultation.requested"
+            - "consultation.accepted"
+            - "consultation.message_created"
+            - "consultation.warning_changed"
+            - "lawyer.approved"
+            - "lawyer.rejected"
+            - "user.blocked"
+        "source_service":
+          "type": "string"
+          "enum":
+            - "document-service"
+            - "contract-service"
+            - "consultation-service"
+            - "lawyer-service"
+            - "user-service"
+        "occurred_at":
+          "type": "string"
+          "format": "date-time"
+        "recipient_user_ids":
+          "type": "array"
+          "items":
+            "type": "string"
+            "format": "uuid"
+          "minItems": 1
+          "maxItems": 100
+          "uniqueItems": true
+        "resource_type":
+          "type": "string"
+          "enum":
+            - "document"
+            - "contract"
+            - "consultation"
+            - "lawyer"
+            - "user"
+        "resource_id":
+          "type": "string"
+          "format": "uuid"
+        "payload":
+          "type": "object"
+          "additionalProperties": false
+          "properties":
+            "generation_id":
+              "type": "string"
+              "format": "uuid"
+            "is_warning":
+              "type": "boolean"
+            "resource_version":
+              "type": "integer"
+              "minimum": 1
+      "oneOf":
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "document-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "document.ocr_completed"
+                - "document.ocr_failed"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "document"
+            "payload":
+              "type": "object"
+              "maxProperties": 0
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "contract-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "contract.generated"
+                - "contract.generation_failed"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "contract"
+            "payload":
+              "type": "object"
+              "required":
+                - "generation_id"
+              "maxProperties": 1
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "consultation-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "consultation.requested"
+                - "consultation.accepted"
+                - "consultation.message_created"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "consultation"
+            "payload":
+              "type": "object"
+              "maxProperties": 0
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "consultation-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "consultation.warning_changed"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "consultation"
+            "payload":
+              "type": "object"
+              "required":
+                - "is_warning"
+                - "resource_version"
+              "maxProperties": 2
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "lawyer-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "lawyer.approved"
+                - "lawyer.rejected"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "lawyer"
+            "payload":
+              "type": "object"
+              "maxProperties": 0
+        - "type": "object"
+          "properties":
+            "source_service":
+              "type": "string"
+              "enum":
+                - "user-service"
+            "event_type":
+              "type": "string"
+              "enum":
+                - "user.blocked"
+            "resource_type":
+              "type": "string"
+              "enum":
+                - "user"
+            "payload":
+              "type": "object"
+              "maxProperties": 0
+    "EventResponse":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "data"
+        - "error"
+        - "request_id"
+      "properties":
+        "data":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "event_id"
+            - "is_duplicate"
+            - "created_count"
+          "properties":
+            "event_id":
+              "type": "string"
+              "format": "uuid"
+            "is_duplicate":
+              "type": "boolean"
+            "created_count":
+              "type": "integer"
+              "minimum": 0
+        "error":
+          "type": "object"
+          "nullable": true
+          "example": null
+        "request_id":
+          "type": "string"
+          "minLength": 1
+          "maxLength": 128
+  "responses":
+    "Error400":
+      "description": "JSON không hợp lệ."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "BAD_REQUEST"
+              "message": "JSON không hợp lệ."
+            "request_id": "req-demo-001"
+    "Error401":
+      "description": "UNAUTHORIZED khi thiếu/sai token; TOKEN_EXPIRED khi JWT user hết hạn. API nội bộ dùng X-Internal-Token, không refresh JWT."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "UNAUTHORIZED"
+              "message": "Thiếu hoặc sai token."
+            "request_id": "req-demo-001"
+    "Error403":
+      "description": "Không có quyền."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "FORBIDDEN"
+              "message": "Không có quyền."
+            "request_id": "req-demo-001"
+    "Error404":
+      "description": "Không tìm thấy hoặc không thuộc người đang gọi."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "NOT_FOUND"
+              "message": "Không tìm thấy hoặc không thuộc người đang gọi."
+            "request_id": "req-demo-001"
+    "Error409":
+      "description": "Dữ liệu trùng hoặc trạng thái không cho phép."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "CONFLICT"
+              "message": "Dữ liệu trùng hoặc trạng thái không cho phép."
+            "request_id": "req-demo-001"
+    "Error413":
+      "description": "File hoặc toàn bộ multipart vượt giới hạn."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "FILE_TOO_LARGE"
+              "message": "File hoặc toàn bộ multipart vượt giới hạn."
+            "request_id": "req-demo-001"
+    "Error415":
+      "description": "Định dạng file không hỗ trợ."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "UNSUPPORTED_FILE_TYPE"
+              "message": "Định dạng file không hỗ trợ."
+            "request_id": "req-demo-001"
+    "Error422":
+      "description": "Dữ liệu gửi sai."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "VALIDATION_ERROR"
+              "message": "Dữ liệu gửi sai."
+            "request_id": "req-demo-001"
+    "Error500":
+      "description": "Lỗi xử lý phía server."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "INTERNAL_ERROR"
+              "message": "Lỗi xử lý phía server."
+            "request_id": "req-demo-001"
+    "Error503":
+      "description": "Dịch vụ phụ chưa sẵn sàng."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "SERVICE_UNAVAILABLE"
+              "message": "Dịch vụ phụ chưa sẵn sàng."
+            "request_id": "req-demo-001"
+    "EventConflict":
+      "description": "Cùng event_id nhưng body đã thay đổi."
+      "content":
+        "application/json":
+          "schema":
+            "$ref": "#/components/schemas/ErrorResponse"
+          "example":
+            "data": null
+            "error":
+              "code": "EVENT_ID_CONFLICT"
+              "message": "event_id đã dùng cho nội dung khác."
+            "request_id": "req-demo-001"

@@ -1,0 +1,1174 @@
+openapi: 3.0.3
+
+info:
+  title: Consultation Service API
+  version: 0.1.0
+  description: API yêu cầu tư vấn và chat giữa citizen với luật sư.
+  x-owner: "Người 1 · Đạt"
+
+servers:
+  - url: http://localhost:8080/api
+    description: Qua Gateway (Frontend và Postman dùng địa chỉ này)
+  - url: http://localhost:8000/api/v1
+    description: Chạy riêng service bằng uvicorn trên máy
+  - url: http://consultation-service:8000/api/v1
+    description: Service khác gọi trong mạng Docker
+
+# OpenAPI 3.0 không mô tả được WebSocket; phần này ghi lại quy ước ở API_GUIDELINES mục 10.
+x-websocket:
+  x-status: planned
+  url: ws://localhost:8080/ws/consultations/{channel}
+  channels:
+    lobby: Phòng chờ, chỉ luật sư đã duyệt. Nhận yêu cầu mới và yêu cầu vừa có người nhận.
+    "{consultation_id}": Box chat riêng, chỉ citizen và luật sư của cuộc tư vấn.
+  auth: 'Tin đầu tiên sau khi kết nối: {"type": "auth", "data": {"token": "<JWT>"}}. Quá 5 giây không gửi thì server đóng kết nối.'
+  receive_only: WebSocket chỉ để nhận. Gửi tin nhắn bằng REST `POST /consultations/{consultation_id}/messages`.
+  events:
+    consultation.created: "Kênh lobby. data: Consultation"
+    consultation.accepted: "Kênh lobby và kênh của cuộc tư vấn. data: {consultation_id, lawyer_id}"
+    consultation.closed: "Kênh của cuộc tư vấn. data: Consultation"
+    message.created: "Kênh của cuộc tư vấn. data: Message"
+    error: "data: {code, message}"
+  close_codes:
+    "4401": Chưa xác thực hoặc token sai
+    "4403": Không có quyền vào kênh
+    "4404": Không tìm thấy cuộc tư vấn
+  reconnect: FE tự kết nối lại (chờ 1, 2, 4… tối đa 30 giây), rồi gọi `GET /consultations/{consultation_id}/messages?after=<id tin cuối>` lấy tin bị lỡ.
+
+tags:
+  - name: Health
+    description: Kiểm tra service còn chạy
+  - name: Consultations
+    description: Tạo, xem, hủy, đóng cuộc tư vấn
+  - name: Lobby
+    description: Phòng chờ của luật sư, nhận/từ chối yêu cầu
+  - name: Messages
+    description: Tin nhắn trong cuộc tư vấn
+  - name: Reports
+    description: Báo cáo vi phạm và xử lý của admin
+  - name: Stats
+    description: Thống kê cho luật sư
+
+paths:
+  /consultations/health:
+    get:
+      tags: [Health]
+      operationId: getConsultationHealth
+      summary: Kiểm tra service
+      description: Không dùng format `{data, error, request_id}` (ngoại lệ cho health check).
+      x-status: implemented
+      responses:
+        "200":
+          description: Service đang chạy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string, example: consultation-service }
+
+  # ---------------------------------------------------------------- Consultations
+  /consultations:
+    post:
+      tags: [Consultations]
+      operationId: createConsultation
+      summary: Tạo yêu cầu tư vấn
+      description: |
+        Chỉ `citizen`. Hai cách tạo:
+        - `ai_escalation`: AI không trả lời được, câu hỏi vào phòng chờ chung; luật sư đúng lĩnh vực
+          đang Online đều thấy. Gửi kèm `agent_session_id`.
+        - `direct`: nhắn thẳng một luật sư, gửi kèm `target_lawyer_id`; chỉ luật sư đó thấy.
+          Consultation Service gọi Lawyer Service `GET /lawyers/{lawyer_id}` (chuyển tiếp JWT) để
+          kiểm tra luật sư tồn tại và đã duyệt; không có thì trả 422.
+
+        Mỗi citizen có tối đa 1 cuộc tư vấn `waiting` cùng lúc. Tạo xong thì đẩy sự kiện
+        `consultation.created` lên kênh lobby.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateConsultationRequest" }
+            examples:
+              tu_ai:
+                summary: Chuyển từ AI sang luật sư
+                value:
+                  specialization_code: land
+                  question: Tôi mua đất bằng giấy viết tay năm 2010, giờ làm sổ được không?
+                  source: ai_escalation
+                  agent_session_id: 6f1d2c3b-4a5e-4f60-9b7c-8d9e0f1a2b3c
+              truc_tiep:
+                summary: Nhắn thẳng một luật sư
+                value:
+                  specialization_code: business
+                  question: Hộ kinh doanh của tôi muốn đổi ngành nghề thì làm thế nào?
+                  source: direct
+                  target_lawyer_id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
+      responses:
+        "201":
+          description: Đã tạo, đang chờ luật sư nhận
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationResponse" }
+              example:
+                data:
+                  id: 1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e
+                  citizen_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                  lawyer_id: null
+                  specialization_code: land
+                  question: Tôi mua đất bằng giấy viết tay năm 2010, giờ làm sổ được không?
+                  source: ai_escalation
+                  agent_session_id: 6f1d2c3b-4a5e-4f60-9b7c-8d9e0f1a2b3c
+                  target_lawyer_id: null
+                  status: waiting
+                  accepted_at: null
+                  closed_by: null
+                  closed_at: null
+                  last_message: null
+                  unread_count: 0
+                  created_at: "2026-10-05T09:00:00Z"
+                  updated_at: "2026-10-05T09:00:00Z"
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Đã có một cuộc tư vấn đang chờ
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: WAITING_CONSULTATION_EXISTS
+                  message: Bạn đang có một yêu cầu chờ luật sư nhận.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
+    get:
+      tags: [Consultations]
+      operationId: listMyConsultations
+      summary: Danh sách cuộc tư vấn của tôi
+      description: |
+        `citizen` thấy cuộc tư vấn mình tạo; `lawyer` thấy cuộc mình đã nhận; `admin` thấy tất cả.
+        Không trả cuộc đã xóa mềm. Sắp xếp theo `updated_at` giảm dần (mới hoạt động nhất lên trước).
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: status
+          in: query
+          description: Lọc theo trạng thái. Bỏ trống = tất cả.
+          schema: { $ref: "#/components/schemas/ConsultationStatus" }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /consultations/{consultation_id}:
+    get:
+      tags: [Consultations]
+      operationId: getConsultation
+      summary: Chi tiết cuộc tư vấn
+      description: |
+        Chỉ citizen, luật sư của cuộc tư vấn và `admin` xem được; người khác nhận 404.
+        Riêng cuộc `waiting` thì luật sư thấy được trong lobby cũng xem được.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "200":
+          description: Thông tin cuộc tư vấn
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    delete:
+      tags: [Reports]
+      operationId: softDeleteConsultation
+      summary: Xóa mềm cuộc tư vấn
+      description: |
+        Chỉ `admin`, thường dùng sau khi xử lý báo cáo vi phạm. Chỉ đặt `deleted_at`;
+        cuộc tư vấn và tin nhắn không bị xóa thật, nhưng không còn hiện với citizen và luật sư.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "204":
+          description: Đã xóa mềm, không có body
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /consultations/{consultation_id}/cancel:
+    post:
+      tags: [Consultations]
+      operationId: cancelConsultation
+      summary: Hủy yêu cầu
+      description: Chỉ citizen tạo ra cuộc tư vấn, chỉ hủy được khi còn `waiting`.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "200":
+          description: Cuộc tư vấn sau khi hủy
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "409": { $ref: "#/components/responses/InvalidStatus" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /consultations/{consultation_id}/close:
+    post:
+      tags: [Consultations]
+      operationId: closeConsultation
+      summary: Đóng cuộc tư vấn
+      description: |
+        Citizen hoặc luật sư của cuộc tư vấn đóng khi tư vấn xong; chỉ đóng được khi `in_progress`.
+        Đóng rồi vẫn xem được lịch sử nhưng không nhắn thêm được. Đẩy sự kiện `consultation.closed`.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "200":
+          description: Cuộc tư vấn sau khi đóng
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "409": { $ref: "#/components/responses/InvalidStatus" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Lobby
+  /consultations/lobby:
+    get:
+      tags: [Lobby]
+      operationId: getLobby
+      summary: Phòng chờ của luật sư
+      description: |
+        Chỉ luật sư đã duyệt và đang Online. Consultation Service gọi Lawyer Service
+        `GET /lawyers/me` (chuyển tiếp JWT) để lấy trạng thái duyệt, Online và lĩnh vực.
+        Trả các cuộc `waiting`:
+        - `ai_escalation` thuộc lĩnh vực của luật sư, trừ cuộc luật sư đã bấm từ chối;
+        - `direct` gửi riêng cho luật sư này.
+
+        Sắp xếp theo `created_at` tăng dần (cũ nhất lên trước). Yêu cầu mới đến qua WebSocket kênh `lobby`.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách đang chờ (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotApprovedLawyer" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
+
+  /consultations/{consultation_id}/accept:
+    post:
+      tags: [Lobby]
+      operationId: acceptConsultation
+      summary: Luật sư nhận yêu cầu
+      description: |
+        Chỉ luật sư đã duyệt. Trước khi nhận, kiểm tra luật sư còn hoạt động qua User Service
+        `GET /users/me` và Lawyer Service `GET /lawyers/me` (chuyển tiếp JWT), theo API_GUIDELINES mục 7.
+
+        Cập nhật có điều kiện `UPDATE ... SET status = 'in_progress', lawyer_id = ? WHERE id = ? AND status = 'waiting'`:
+        hai luật sư bấm cùng lúc thì chỉ một người nhận được, người còn lại nhận 409.
+        Nhận xong thì đẩy `consultation.accepted` lên kênh lobby và kênh của cuộc tư vấn.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "200":
+          description: Đã nhận, cuộc tư vấn chuyển sang `in_progress`
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConsultationResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotApprovedLawyer" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "409":
+          description: Đã có luật sư khác nhận, hoặc yêu cầu đã bị hủy
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                da_co_nguoi_nhan:
+                  summary: Luật sư khác đã nhận
+                  value:
+                    data: null
+                    error:
+                      code: CONSULTATION_ALREADY_ACCEPTED
+                      message: Yêu cầu này đã có luật sư khác nhận.
+                    request_id: req-123
+                da_huy:
+                  summary: Citizen đã hủy
+                  value:
+                    data: null
+                    error:
+                      code: CONSULTATION_INVALID_STATUS
+                      message: Yêu cầu này không còn chờ xử lý.
+                    request_id: req-124
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
+
+  /consultations/{consultation_id}/decline:
+    post:
+      tags: [Lobby]
+      operationId: declineConsultation
+      summary: Luật sư từ chối yêu cầu
+      description: |
+        Ẩn yêu cầu khỏi lobby của luật sư này; luật sư khác vẫn thấy.
+        Với yêu cầu `direct`, từ chối thì cuộc tư vấn chuyển sang `cancelled`.
+        Gọi lại nhiều lần vẫn trả 200.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      responses:
+        "200":
+          description: Đã từ chối
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeclineResponse" }
+              example:
+                data: { consultation_id: 1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e, is_declined: true }
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/NotApprovedLawyer" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "409": { $ref: "#/components/responses/InvalidStatus" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Messages
+  /consultations/{consultation_id}/messages:
+    get:
+      tags: [Messages]
+      operationId: listMessages
+      summary: Lịch sử tin nhắn
+      description: |
+        Chỉ citizen và luật sư của cuộc tư vấn. Sắp xếp theo `created_at` tăng dần.
+        - Mở box chat: không truyền `after`/`before`, nhận `limit` tin mới nhất.
+        - Cuộn lên xem tin cũ: `before=<id tin cũ nhất đang có>`.
+        - Kết nối lại WebSocket: `after=<id tin cuối>` để lấy tin bị lỡ.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+        - name: after
+          in: query
+          description: Chỉ lấy tin gửi sau tin có ID này.
+          schema: { type: string, format: uuid }
+        - name: before
+          in: query
+          description: Chỉ lấy tin gửi trước tin có ID này. Không dùng chung với `after`.
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          description: Số tin tối đa mỗi lần.
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
+      responses:
+        "200":
+          description: Danh sách tin nhắn
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 7e8f9a0b-1c2d-4e3f-8a9b-0c1d2e3f4a5b
+                      consultation_id: 1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e
+                      sender_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      content: Chào luật sư, tôi cần hỏi về giấy viết tay.
+                      is_read: false
+                      created_at: "2026-10-05T09:05:00Z"
+                  has_more: false
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+    post:
+      tags: [Messages]
+      operationId: sendMessage
+      summary: Gửi tin nhắn
+      description: |
+        Chỉ citizen và luật sư của cuộc tư vấn, chỉ gửi được khi `in_progress`.
+        Luật sư gửi tin thì kiểm tra thêm qua User Service `GET /users/me` (chuyển tiếp JWT) để
+        luật sư bị khóa mất quyền ngay. Lưu xong thì đẩy `message.created` lên kênh của cuộc tư vấn.
+        Không tự retry API này (API_GUIDELINES mục 8).
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
+            example: { content: Chào luật sư, tôi cần hỏi về giấy viết tay. }
+      responses:
+        "201":
+          description: Tin nhắn đã lưu
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MessageResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/AccountLocked" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "409": { $ref: "#/components/responses/InvalidStatus" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
+
+  # ---------------------------------------------------------------- Reports
+  /consultations/{consultation_id}/reports:
+    post:
+      tags: [Reports]
+      operationId: reportConsultation
+      summary: Báo cáo vi phạm
+      description: Citizen hoặc luật sư của cuộc tư vấn báo cáo người còn lại. Admin xử lý ở `GET /consultations/reports`.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConsultationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReportRequest" }
+            example: { reason: Luật sư dùng lời lẽ xúc phạm. }
+      responses:
+        "201":
+          description: Đã gửi báo cáo
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/ConsultationNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /consultations/reports:
+    get:
+      tags: [Reports]
+      operationId: listReports
+      summary: Danh sách báo cáo vi phạm
+      description: Chỉ `admin`. Sắp xếp theo `created_at` tăng dần (cũ nhất lên trước).
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: status
+          in: query
+          description: Lọc theo trạng thái báo cáo. Mặc định `pending`.
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/ReportStatus"
+            default: pending
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách báo cáo (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportListResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /consultations/reports/{report_id}/resolve:
+    post:
+      tags: [Reports]
+      operationId: resolveReport
+      summary: Xử lý báo cáo
+      description: |
+        Chỉ `admin`, chỉ xử lý được báo cáo `pending`.
+        `resolved` = báo cáo đúng (admin tự khóa tài khoản ở User Service hoặc xóa mềm cuộc tư vấn nếu cần);
+        `dismissed` = bỏ qua báo cáo.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: report_id
+          in: path
+          required: true
+          description: ID báo cáo (UUID)
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ResolveReportRequest" }
+            example: { status: resolved }
+      responses:
+        "200":
+          description: Báo cáo sau khi xử lý
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Không có báo cáo với ID này
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: REPORT_NOT_FOUND
+                  message: Không tìm thấy báo cáo.
+                request_id: req-123
+        "409":
+          description: Báo cáo đã được xử lý trước đó
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: REPORT_ALREADY_HANDLED
+                  message: Báo cáo này đã được xử lý.
+                request_id: req-123
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  # ---------------------------------------------------------------- Stats
+  /consultations/stats:
+    get:
+      tags: [Stats]
+      operationId: getMyConsultationStats
+      summary: Thống kê tư vấn của tôi
+      description: |
+        Chỉ `lawyer`, số liệu của chính người gọi (lấy từ `sub` trong token).
+        Lawyer Service gọi API này (chuyển tiếp JWT) để trả `GET /lawyers/me/stats`.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Số liệu thống kê
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StatsResponse" }
+              example:
+                data:
+                  accepted_count: 12
+                  in_progress_count: 2
+                  closed_count: 10
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "`access_token` lấy từ User Service (`POST /users/auth/firebase` hoặc `POST /users/auth/refresh`)."
+
+  parameters:
+    RequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Mã lần gọi. Gateway tự tạo; gọi trực tiếp không có thì service tự tạo.
+      schema: { type: string, example: req-123 }
+    Page:
+      name: page
+      in: query
+      description: Trang cần lấy, bắt đầu từ 1.
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      description: Số dòng mỗi trang.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    ConsultationId:
+      name: consultation_id
+      in: path
+      required: true
+      description: ID cuộc tư vấn (UUID)
+      schema: { type: string, format: uuid }
+
+  headers:
+    RequestId:
+      description: Mã lần gọi, giống `request_id` trong body.
+      schema: { type: string }
+
+  responses:
+    ValidationError:
+      description: Dữ liệu gửi lên không hợp lệ
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: VALIDATION_ERROR
+              message: Dữ liệu gửi lên không hợp lệ.
+              details:
+                - field: question
+                  message: Phải có 1–2000 ký tự, không chỉ chứa khoảng trắng.
+            request_id: req-123
+    Unauthorized:
+      description: Thiếu token, token sai hoặc đã hết hạn
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: UNAUTHORIZED
+              message: Bạn cần đăng nhập để tiếp tục.
+            request_id: req-123
+    Forbidden:
+      description: Đã đăng nhập nhưng không đủ quyền
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: FORBIDDEN
+              message: Bạn không có quyền thực hiện thao tác này.
+            request_id: req-123
+    AccountLocked:
+      description: Tài khoản đang bị khóa
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: ACCOUNT_LOCKED
+              message: Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.
+            request_id: req-123
+    NotApprovedLawyer:
+      description: Chỉ luật sư đã duyệt, đang Online và không bị khóa mới dùng được
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          examples:
+            chua_duyet:
+              summary: Hồ sơ luật sư chưa được duyệt
+              value:
+                data: null
+                error:
+                  code: LAWYER_NOT_APPROVED
+                  message: Hồ sơ luật sư của bạn chưa được duyệt.
+                request_id: req-123
+            offline:
+              summary: Luật sư đang Offline
+              value:
+                data: null
+                error:
+                  code: LAWYER_OFFLINE
+                  message: Bạn cần bật trạng thái Online để nhận yêu cầu.
+                request_id: req-124
+            bi_khoa:
+              summary: Tài khoản bị khóa
+              value:
+                data: null
+                error:
+                  code: ACCOUNT_LOCKED
+                  message: Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.
+                request_id: req-125
+    ConsultationNotFound:
+      description: Không có cuộc tư vấn với ID này, hoặc bạn không có quyền xem
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: CONSULTATION_NOT_FOUND
+              message: Không tìm thấy cuộc tư vấn.
+            request_id: req-123
+    InvalidStatus:
+      description: Trạng thái cuộc tư vấn không cho phép thao tác này
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: CONSULTATION_INVALID_STATUS
+              message: Cuộc tư vấn đang ở trạng thái không thực hiện được thao tác này.
+            request_id: req-123
+    ServiceBadResponse:
+      description: Service phụ trả lỗi 5xx hoặc dữ liệu sai cấu trúc
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          examples:
+            user:
+              summary: User Service trả lỗi
+              value:
+                data: null
+                error:
+                  code: USER_BAD_RESPONSE
+                  message: Hệ thống tài khoản đang gặp lỗi, vui lòng thử lại sau.
+                request_id: req-123
+            lawyer:
+              summary: Lawyer Service trả lỗi
+              value:
+                data: null
+                error:
+                  code: LAWYER_BAD_RESPONSE
+                  message: Không kiểm tra được thông tin luật sư, vui lòng thử lại sau.
+                request_id: req-124
+    ServiceUnavailable:
+      description: Không kết nối được service phụ
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_UNAVAILABLE
+              message: Hệ thống luật sư tạm thời không phản hồi, vui lòng thử lại sau.
+            request_id: req-123
+    ServiceTimeout:
+      description: Service phụ quá thời gian chờ (5 giây)
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_TIMEOUT
+              message: Hệ thống luật sư phản hồi quá chậm, vui lòng thử lại sau.
+            request_id: req-123
+    InternalError:
+      description: Lỗi Backend không lường trước
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: INTERNAL_ERROR
+              message: Hệ thống đang gặp lỗi, vui lòng thử lại sau.
+            request_id: req-123
+
+  schemas:
+    # ---------- Kiểu dùng chung ----------
+    RequestIdValue:
+      type: string
+      description: Mã lần gọi API
+      example: req-123
+
+    NoError:
+      description: Luôn `null` khi thành công
+      nullable: true
+      enum: [null]
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer, minimum: 1, example: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        total: { type: integer, minimum: 0, example: 1 }
+        total_pages: { type: integer, minimum: 0, example: 1 }
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Mã lỗi cố định, FE dùng để xử lý (xem API_GUIDELINES mục 5)
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          description: Câu báo lỗi tiếng Việt, hiển thị được cho người dùng
+        details:
+          type: array
+          description: Lỗi theo từng trường (chỉ có khi `VALIDATION_ERROR`)
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string, example: question }
+              message: { type: string }
+
+    ErrorResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          description: Luôn `null` khi lỗi
+          nullable: true
+          enum: [null]
+        error: { $ref: "#/components/schemas/ErrorBody" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    # ---------- Cuộc tư vấn ----------
+    ConsultationSource:
+      type: string
+      description: "`ai_escalation` = chuyển từ AI, `direct` = nhắn thẳng một luật sư"
+      enum: [ai_escalation, direct]
+
+    ConsultationStatus:
+      type: string
+      description: "`waiting` = chờ luật sư nhận, `in_progress` = đang tư vấn, `closed` = đã đóng, `cancelled` = đã hủy"
+      enum: [waiting, in_progress, closed, cancelled]
+
+    Consultation:
+      type: object
+      required: [id, citizen_id, specialization_code, question, source, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        citizen_id: { type: string, format: uuid }
+        lawyer_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: User ID của luật sư đã nhận; `null` khi còn `waiting`
+        specialization_code: { type: string, example: land }
+        question: { type: string }
+        source: { $ref: "#/components/schemas/ConsultationSource" }
+        agent_session_id: { type: string, format: uuid, nullable: true }
+        target_lawyer_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "`lawyer_profiles.id` khi `source` = `direct`"
+        status: { $ref: "#/components/schemas/ConsultationStatus" }
+        accepted_at: { type: string, format: date-time, nullable: true }
+        closed_by: { type: string, format: uuid, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
+        last_message:
+          allOf:
+            - $ref: "#/components/schemas/Message"
+          nullable: true
+          description: Tin gần nhất, để hiện ở danh sách
+        unread_count:
+          type: integer
+          minimum: 0
+          description: Số tin người đang xem chưa đọc
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Message:
+      type: object
+      required: [id, consultation_id, sender_id, content, is_read, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        consultation_id: { type: string, format: uuid }
+        sender_id: { type: string, format: uuid }
+        content: { type: string }
+        is_read: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    # ---------- Báo cáo ----------
+    ReportStatus:
+      type: string
+      description: "`pending` = chờ xử lý, `resolved` = báo cáo đúng, `dismissed` = bỏ qua"
+      enum: [pending, resolved, dismissed]
+
+    Report:
+      type: object
+      required: [id, consultation_id, reporter_id, reason, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        consultation_id: { type: string, format: uuid }
+        reporter_id: { type: string, format: uuid }
+        reason: { type: string }
+        status: { $ref: "#/components/schemas/ReportStatus" }
+        handled_by: { type: string, format: uuid, nullable: true }
+        handled_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Stats:
+      type: object
+      required: [accepted_count, in_progress_count, closed_count]
+      properties:
+        accepted_count: { type: integer, minimum: 0, description: Tổng số yêu cầu đã nhận }
+        in_progress_count: { type: integer, minimum: 0, description: Số cuộc đang tư vấn }
+        closed_count: { type: integer, minimum: 0, description: Số cuộc đã đóng }
+
+    # ---------- Body gửi lên ----------
+    CreateConsultationRequest:
+      type: object
+      required: [specialization_code, question, source]
+      properties:
+        specialization_code:
+          type: string
+          description: Mã lĩnh vực, lấy từ Lawyer Service `GET /lawyers/specializations`
+          example: land
+        question:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          pattern: '\S'
+        source: { $ref: "#/components/schemas/ConsultationSource" }
+        agent_session_id:
+          type: string
+          format: uuid
+          description: Bắt buộc khi `source` = `ai_escalation`
+        target_lawyer_id:
+          type: string
+          format: uuid
+          description: Bắt buộc khi `source` = `direct`
+
+    SendMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 5000
+          pattern: '\S'
+
+    CreateReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          pattern: '\S'
+          description: Lý do báo cáo
+
+    ResolveReportRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [resolved, dismissed]
+
+    # ---------- Kết quả từng API ----------
+    ConsultationResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/Consultation" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    ConsultationListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/Consultation" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    DeclineResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [consultation_id, is_declined]
+          properties:
+            consultation_id: { type: string, format: uuid }
+            is_declined: { type: boolean }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    MessageResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/Message" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    MessageListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, has_more]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/Message" }
+            has_more:
+              type: boolean
+              description: "`true` = còn tin cũ hơn (khi dùng `before`) hoặc mới hơn (khi dùng `after`)"
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    ReportResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/Report" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    ReportListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/Report" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    StatsResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/Stats" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }

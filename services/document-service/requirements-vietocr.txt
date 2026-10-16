@@ -1,0 +1,4 @@
+# Inference-only dependencies; training/augmentation packages are not needed.
+numpy==1.26.4
+einops==0.8.1
+PyYAML==6.0.2

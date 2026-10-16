@@ -1,0 +1,174 @@
+// C3+C4 ERD: PostgreSQL schema verified on 2026-10-10 (10 tables,92 columns,8 internal FKs).
+// SQL 001_contract_schema.sql + 002_admin_catalog.sql are authoritative for CHECK, indexes, triggers, RLS and defaults.
+// No cross-service foreign keys. All tables backend-only.
+
+Table contract_analysis_jobs {
+  id uuid [not null]
+  template_id uuid [not null]
+  template_version_id uuid [not null]
+  owner_user_id uuid [not null]
+  status text [not null]
+  idempotency_key uuid [not null]
+  request_hash varchar(64) [not null]
+  error_code varchar(100)
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  indexes {
+    (owner_user_id, idempotency_key) [unique]
+    (id) [pk]
+  }
+}
+
+Table contract_draft_documents {
+  draft_id uuid [not null]
+  owner_user_id uuid [not null]
+  document_id uuid [not null]
+  indexes {
+    (draft_id, document_id) [pk]
+  }
+}
+
+Table contract_drafts {
+  id uuid [not null]
+  owner_user_id uuid [not null]
+  template_version_id uuid [not null]
+  procedure_id uuid
+  title varchar(200) [not null]
+  field_values jsonb [not null]
+  revision integer [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz
+  indexes {
+    (id, owner_user_id) [unique]
+    (id, template_version_id, owner_user_id) [unique]
+    (id) [pk]
+  }
+}
+
+Table contract_generation_jobs {
+  id uuid [not null]
+  draft_id uuid [not null]
+  template_version_id uuid [not null]
+  owner_user_id uuid [not null]
+  draft_revision integer [not null]
+  input_snapshot jsonb [not null]
+  document_ids uuid[] [not null]
+  kind text [not null]
+  format text [not null]
+  status text [not null]
+  idempotency_key uuid [not null]
+  request_hash varchar(64) [not null]
+  error_code varchar(100)
+  warnings jsonb [not null]
+  retry_count integer [not null]
+  created_at timestamptz [not null]
+  started_at timestamptz
+  completed_at timestamptz
+  indexes {
+    (id, owner_user_id, format) [unique]
+    (owner_user_id, kind, idempotency_key) [unique]
+    (id) [pk]
+  }
+}
+
+Table contract_generation_results {
+  job_id uuid [not null]
+  owner_user_id uuid [not null]
+  format text [not null]
+  storage_key text [not null]
+  sha256 varchar(64) [not null]
+  size_bytes bigint [not null]
+  created_at timestamptz [not null]
+  indexes {
+    (job_id) [pk]
+    (storage_key) [unique]
+  }
+}
+
+Table contract_notification_outbox {
+  id uuid [not null]
+  job_id uuid [not null]
+  status text [not null]
+  attempts integer [not null]
+  created_at timestamptz [not null]
+  next_attempt_at timestamptz [not null]
+  sent_at timestamptz
+  indexes {
+    (job_id) [unique]
+    (id) [pk]
+  }
+}
+
+Table contract_schema_versions {
+  version integer [not null]
+  installed_at timestamptz [not null]
+  indexes {
+    (version) [pk]
+  }
+}
+
+Table contract_template_fields {
+  version_id uuid [not null]
+  name varchar(64) [not null]
+  label varchar(200) [not null]
+  type text [not null]
+  required boolean [not null]
+  identity_key text
+  ordinal integer [not null]
+  placements jsonb [not null]
+  confidence numeric
+  indexes {
+    (version_id, name) [pk]
+    (version_id, ordinal) [unique]
+  }
+}
+
+Table contract_template_versions {
+  id uuid [not null]
+  template_id uuid [not null]
+  version integer [not null]
+  status text [not null]
+  content text [not null]
+  source_format text [not null]
+  snapshot_storage_key text
+  source_sha256 varchar(64)
+  source_size_bytes bigint
+  source_document_id uuid
+  source_extraction_id uuid
+  extraction_snapshot jsonb
+  mapping_revision integer [not null]
+  warnings jsonb [not null]
+  created_at timestamptz [not null]
+  published_at timestamptz
+  indexes {
+    (id, template_id) [unique]
+    (id) [pk]
+    (template_id, version) [unique]
+  }
+}
+
+Table contract_templates {
+  last_version integer [not null, default: 0]
+  id uuid [not null]
+  kind text [not null]
+  owner_user_id uuid
+  name varchar(200) [not null]
+  description varchar(2000)
+  is_visible boolean [not null]
+  created_at timestamptz [not null]
+  updated_at timestamptz [not null]
+  deleted_at timestamptz
+  indexes {
+    (id) [pk]
+  }
+}
+
+Ref: contract_analysis_jobs.(template_version_id, template_id) > contract_template_versions.(id, template_id) [delete: restrict]
+Ref: contract_draft_documents.(draft_id, owner_user_id) > contract_drafts.(id, owner_user_id) [delete: restrict]
+Ref: contract_drafts.template_version_id > contract_template_versions.id [delete: restrict]
+Ref: contract_generation_jobs.(draft_id, template_version_id, owner_user_id) > contract_drafts.(id, template_version_id, owner_user_id) [delete: restrict]
+Ref: contract_generation_results.(job_id, owner_user_id, format) > contract_generation_jobs.(id, owner_user_id, format) [delete: restrict]
+Ref: contract_notification_outbox.job_id > contract_generation_jobs.id [delete: restrict]
+Ref: contract_template_fields.version_id > contract_template_versions.id [delete: restrict]
+Ref: contract_template_versions.template_id > contract_templates.id [delete: restrict]
