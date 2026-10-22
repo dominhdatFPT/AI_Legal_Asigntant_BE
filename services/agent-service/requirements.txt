@@ -10,4 +10,5 @@ asyncpg>=0.29,<1
 alembic>=1.13,<2
 google-genai>=1.0,<2
 groq>=0.12,<1
+openai>=1.40,<3
 psycopg[binary]>=3.1,<4

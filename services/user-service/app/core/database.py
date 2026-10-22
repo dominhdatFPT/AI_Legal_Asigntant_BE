@@ -20,12 +20,15 @@ READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 # DB nằm trên Supabase cloud: mỗi lượt hỏi-đáp với DB mất ~100–250 ms.
 # Bật pool_pre_ping: keepalive + recycle vẫn để lọt kết nối bị pooler cắt (SSL unexpected eof), request lấy
 # trúng sẽ treo rồi lỗi 500. Đổi 1 lượt ping mỗi lần lấy kết nối lấy độ ổn định.
+# Pooler session (5432) của Supabase chỉ cho 15 kết nối/DB, chia cho mọi máy chạy user-service:
+# 2 engine x (3 + 2) = tối đa 10. prepare_threshold=None để chạy được cả pooler transaction (6543).
 _POOL_OPTIONS = {
     "pool_pre_ping": True,
-    "pool_size": 5,
-    "max_overflow": 10,
+    "pool_size": 3,
+    "max_overflow": 2,
     "pool_recycle": 300,
-    "connect_args": {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3},
+    "connect_args": {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3,
+                     "prepare_threshold": None},
 }
 
 

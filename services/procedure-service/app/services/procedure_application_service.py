@@ -84,19 +84,13 @@ class ProcedureApplicationService:
 
         proc_meta = None
         try:
-            with db_connection() as conn:
-                from sqlalchemy import text
-                row = conn.execute(
-                    text("SELECT name, fee, receiving_agency_level, processing_days, description FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
-                    {"code": str(record["procedure_code"]).upper()},
-                ).mappings().fetchone()
-                if row:
-                    proc_meta = dict(row)
+            from app.repositories.procedure_repository import ProcedureRepository
+            proc_meta = ProcedureRepository.get_procedure_by_id_or_code(record["procedure_code"])
         except Exception:
             proc_meta = None
-
-        short_id = str(record["id"])[:8].upper()
+        short_id = str(record['id'])[:8].upper()
         app_code = f"{record['procedure_code']}-{short_id}"
+        record['application_code'] = app_code
         return {
             "application_code": app_code,
             "record": record,

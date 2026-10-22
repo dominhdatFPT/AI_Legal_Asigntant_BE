@@ -44,11 +44,18 @@ services:
       LOCATION_SERVICE_URL: ${LOCATION_SERVICE_URL:-http://location-service:8000}
       DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8000}
       AGENT_DATABASE_URL: ${AGENT_DATABASE_URL:-}
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      # OpenRouter trước; lỗi (hết lượt model free, sai key...) thì tự chuyển sang Gemini
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter,gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-}
+      OPENROUTER_REASONING_MAX_TOKENS: ${OPENROUTER_REASONING_MAX_TOKENS:-1024}
       # Trong mạng Docker gọi rag-service theo tên service (không dùng localhost)
       RAG_SERVICE_URL: http://rag-service:8000
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}

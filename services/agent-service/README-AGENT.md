@@ -4,7 +4,7 @@ Tài liệu này mô tả agent-service **đang làm gì và làm như thế nà
 
 - Muốn hiểu tổng quan: đọc mục 1 đến 3.
 - Muốn sửa/thêm tính năng: đọc mục 4 (cách hoạt động), mục 8 (bản đồ file), mục 11 (sửa xong phải cập nhật gì).
-- Cập nhật lần cuối: 21/10/2026 (khớp code nhánh `feature/legal-article-lookup`; test: 144 đạt).
+- Cập nhật lần cuối: 22/10/2026 (thêm provider OpenRouter; test: 157 đạt).
 
 ---
 
@@ -116,10 +116,11 @@ Rag báo không có văn bản/Điều/Khoản (404) hoặc tên mơ hồ (409) 
 2. **Dựng system prompt** (`build_system_prompt`): chèn các đoạn vào `SYSTEM_PROMPT`, mỗi đoạn có dòng tiêu đề trích dẫn, ví dụ `[1] Khoản 1 Điều 188, Luật Đất đai 2024 (31/2024/QH15)` rồi nội dung. Không có đoạn nào thì chèn câu "(Không tìm thấy trích đoạn pháp luật nào liên quan đến câu hỏi.)".
 3. **Quy tắc trong prompt** (sửa ở `SYSTEM_PROMPT` đầu `app/services/agent.py`): trả lời tiếng Việt, câu đầu trả lời thẳng; sau đó tối đa 3 đến 5 gạch đầu dòng, căn cứ ghi gọn trong ngoặc ở cuối dòng; dưới 200 chữ, không chào hỏi/kết bài; **chỉ dùng thông tin trong các trích đoạn, không bịa**; không đủ căn cứ thì nói chưa đủ căn cứ và gợi ý hỏi luật sư; thiếu thông tin thì hỏi lại đúng 1 câu.
 4. **Gọi LLM** (`app/services/llm_client.py`, hàm `generate`):
-   - `LLM_PROVIDER` là một provider (`groq` hoặc `gemini`) hoặc **danh sách ưu tiên** cách nhau dấu phẩy, ví dụ `groq,gemini`: provider đầu lỗi thì tự thử provider kế tiếp; tất cả lỗi mới ném `LLMError`. (`.env` hiện đặt `groq,gemini`.)
+   - `LLM_PROVIDER` là một provider (`openrouter`, `groq` hoặc `gemini`) hoặc **danh sách ưu tiên** cách nhau dấu phẩy, mặc định `openrouter,gemini`: provider đầu lỗi thì tự thử provider kế tiếp; tất cả lỗi mới ném `LLMError`.
    - Gửi kèm lịch sử hội thoại (cũ đến mới), `temperature = 0.2`, `max_output_tokens = 800`.
-   - Mỗi provider: timeout 15 giây, thử lại 1 lần (chờ 2 giây) khi lỗi tạm thời (429/500/503/504, timeout, lỗi mạng). Lỗi khác (ví dụ 400, 401) báo ngay, không thử lại.
+   - Mỗi provider: timeout 15 giây (OpenRouter 30 giây), thử lại 1 lần (chờ 2 giây) khi lỗi tạm thời (429/500/503/504, timeout, lỗi mạng). Lỗi khác (ví dụ 400, 401) báo ngay, không thử lại.
    - Gemini: giảm "suy nghĩ" tối đa (`thinking_budget=0` cho gemini-2.x, `thinking_level=MINIMAL` cho bản mới). Groq model qwen3: gửi `reasoning_effort="none"` để không sinh đoạn `<think>`.
+   - OpenRouter (SDK `openai`, `base_url = OPENROUTER_BASE_URL`): gửi header `HTTP-Referer`/`X-Title` chỉ khi `OPENROUTER_SITE_URL`/`OPENROUTER_APP_NAME` có giá trị. Model `recursive/flint-v1.0:free` **bắt buộc suy luận** (không tắt được, `effort=low` không giảm) và phần suy nghĩ tính vào `max_tokens`, nên gửi `reasoning.max_tokens = OPENROUTER_REASONING_MAX_TOKENS` (1024) và `max_tokens = 800 + 1024`; thiếu phần này câu trả lời bị cắt hoặc rỗng. Lỗi đổi thành câu dễ hiểu trong log: 401 sai key, 402 hết credit, 429 vượt giới hạn model free, chặn bởi data policy (bật tại https://openrouter.ai/settings/privacy). Thiếu `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` thì báo lỗi ngay, không gọi mạng.
    - Trả về `(câu trả lời, số token, tên model đã dùng)`.
 
 ### 4.5. Hội thoại có lưu lịch sử (`api/v1/conversations.py`, `repositories/conversation.py`)
@@ -230,7 +231,13 @@ Database: Supabase riêng của agent-service (`AGENT_DATABASE_URL`, đổi `pos
 | `DOCUMENT_SERVICE_URL` | `http://document-service:8000` | Địa chỉ document-service, lấy chữ tài liệu đính kèm |
 | `JWT_PUBLIC_KEY_PATH` | `keys/jwt_public.pem` | Public key verify JWT |
 | `AGENT_DATABASE_URL` | (trống) | Chuỗi kết nối Supabase của agent-service |
-| `LLM_PROVIDER` | `gemini` | `groq`, `gemini` hoặc danh sách ưu tiên `groq,gemini` |
+| `LLM_PROVIDER` | `openrouter,gemini` | `openrouter`, `groq`, `gemini` hoặc danh sách ưu tiên |
+| `OPENROUTER_API_KEY` | (trống) | Khóa OpenRouter (bắt buộc khi dùng provider `openrouter`) |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Địa chỉ API tương thích OpenAI |
+| `OPENROUTER_MODEL` | (trống) | Model, ví dụ `recursive/flint-v1.0:free` (bắt buộc) |
+| `OPENROUTER_SITE_URL` / `OPENROUTER_APP_NAME` | (trống) | Tuỳ chọn, gửi header `HTTP-Referer` / `X-Title` |
+| `OPENROUTER_TIMEOUT_SECONDS` / `OPENROUTER_MAX_RETRIES` | `30` / `1` | Chờ tối đa mỗi lần / số lần thử lại |
+| `OPENROUTER_REASONING_MAX_TOKENS` | `1024` | Token chừa cho phần suy nghĩ của model suy luận; `0` = không gửi |
 | `GEMINI_API_KEY` | (trống) | Khóa Gemini |
 | `GEMINI_MODEL` | `gemini-3.8-flash` | Model Gemini |
 | `GEMINI_TIMEOUT_SECONDS` / `GEMINI_MAX_RETRIES` | `15` / `1` | Chờ tối đa mỗi lần / số lần thử lại |
@@ -240,7 +247,7 @@ Database: Supabase riêng của agent-service (`AGENT_DATABASE_URL`, đổi `pos
 | `LLM_MAX_OUTPUT_TOKENS` | `800` | Chốt chặn độ dài câu trả lời (prompt đã yêu cầu dưới 200 chữ) |
 | `RAG_TOP_K` | `4` | Số đoạn luật lấy từ rag-service |
 
-Lưu ý Docker (`docker-compose.yml`): chỉ truyền cho agent-service các biến `JWT_PUBLIC_KEY_PATH`, `PROCEDURE_SERVICE_URL`, `LOCATION_SERVICE_URL`, `DOCUMENT_SERVICE_URL`, `AGENT_DATABASE_URL`, `LLM_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_API_KEY`, `GROQ_MODEL`, `RAG_SERVICE_URL`, `INTERNAL_TOKEN`, `RABBITMQ_URL`. Các biến còn lại (timeout, số lần thử lại, `RAG_TOP_K`, `LLM_MAX_OUTPUT_TOKENS`) luôn dùng mặc định trừ khi thêm vào `environment`. Khi `GROQ_MODEL`/`LLM_PROVIDER` không có trong `.env`, compose dùng mặc định riêng (`llama-3.3-70b-versatile`, `gemini`) khác mặc định trong code. Đổi `.env` xong phải `docker compose up -d --force-recreate agent-service` (`restart` không nạp lại `.env`). Ngoài ra `.env.example` của service còn cũ (chưa có Groq, `LLM_PROVIDER`, `RAG_TOP_K`); `.env` gốc ở thư mục `legal-assistant-ai` mới là bản đang dùng.
+Lưu ý Docker (`docker-compose.yml`): chỉ truyền cho agent-service các biến `JWT_PUBLIC_KEY_PATH`, `PROCEDURE_SERVICE_URL`, `LOCATION_SERVICE_URL`, `DOCUMENT_SERVICE_URL`, `AGENT_DATABASE_URL`, `LLM_PROVIDER`, `GEMINI_API_KEY`, `GEMINI_MODEL`, `GROQ_API_KEY`, `GROQ_MODEL`, `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`, `OPENROUTER_MODEL`, `OPENROUTER_SITE_URL`, `OPENROUTER_APP_NAME`, `OPENROUTER_REASONING_MAX_TOKENS`, `RAG_SERVICE_URL`, `INTERNAL_TOKEN`, `RABBITMQ_URL`. Các biến còn lại (timeout, số lần thử lại, `RAG_TOP_K`, `LLM_MAX_OUTPUT_TOKENS`) luôn dùng mặc định trừ khi thêm vào `environment`. Khi `GROQ_MODEL` không có trong `.env`, compose dùng mặc định riêng (`llama-3.3-70b-versatile`) khác mặc định trong code. Đổi `.env` xong phải `docker compose up -d --force-recreate agent-service` (`restart` không nạp lại `.env`). Ngoài ra `.env.example` của service còn cũ (chưa có Groq, `LLM_PROVIDER`, `RAG_TOP_K`); `.env` gốc ở thư mục `legal-assistant-ai` mới là bản đang dùng.
 
 ## 8. Bản đồ file
 
@@ -271,7 +278,7 @@ services/agent-service/
 Chạy lệnh ở thư mục gốc `legal-assistant-ai`, dùng venv `.venv` của repo.
 
 ```powershell
-# Test (144 test, không cần mạng: rag, LLM, document-service và DB đều được giả lập)
+# Test (157 test, không cần mạng: rag, LLM, document-service và DB đều được giả lập)
 cd services/agent-service
 ..\..\.venv\Scripts\python -m pytest -q
 
@@ -282,7 +289,13 @@ docker compose logs agent-service
 # Chạy thử LLM thật (cần khóa trong .env)
 python services/agent-service/scripts/try_groq.py
 python services/agent-service/scripts/try_gemini.py
+python services/agent-service/scripts/try_openrouter.py   # chỉ OpenRouter, in rõ lỗi (sai key, hết credit, 429...), không in khóa
 ```
+
+Thử OpenRouter bằng Postman (Docker đang chạy, `.env` có `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`):
+- `POST http://localhost:8080/api/agent/chat`, header `Content-Type: application/json`, body `{"message": "Thủ tục sang tên sổ đỏ gồm những bước nào?"}`. Không cần đăng nhập.
+- Kết quả 200 có `data.answer`. Xem model đã dùng trong log: `docker compose logs agent-service` (nếu OpenRouter lỗi sẽ có dòng `Provider 'openrouter' thất bại: <lý do>` rồi Gemini trả lời thay).
+- Có lưu lịch sử: đăng nhập lấy `access_token`, `POST http://localhost:8080/api/agent/conversations` (Bearer) rồi `POST http://localhost:8080/api/agent/conversations/{id}/messages` body `{"content": "..."}`; `assistant_message.metadata.model` cho biết model đã trả lời.
 
 Thử cả luồng qua gateway (Docker đang chạy): `POST http://localhost:8080/api/agent/chat` body `{"message": "Điều 45 Luật Đất đai"}` (nhánh nguyên văn) và `{"message": "Sang tên sổ đỏ cần giấy tờ gì?"}` (nhánh AI). Xem `agent timing` trong log để biết rag và LLM mất bao lâu.
 
@@ -308,6 +321,12 @@ Gặp 503 `RAG_SERVICE_ERROR`: kiểm tra rag-service còn chạy, `INTERNAL_TOK
 4. Đổi cách gọi rag-service hoặc hợp đồng API thì sửa cả `openapi.yaml` (cả 2 service) và README-RAG.md.
 
 ## 12. Nhật ký thay đổi
+
+### 22/10/2026: thêm provider OpenRouter
+- `llm_client.py`: provider `openrouter` qua SDK `openai` (cùng khuôn timeout/thử lại/chuyển provider như Groq); đổi lỗi 401/402/429/data policy/timeout thành câu dễ hiểu; header `HTTP-Referer`/`X-Title` chỉ gửi khi có giá trị. Mặc định `LLM_PROVIDER = openrouter,gemini` (code và compose).
+- Model `recursive/flint-v1.0:free` bắt buộc suy luận: với `max_tokens = 800` câu trả lời bị cắt/rỗng (thử thật: ~760 token dành cho suy nghĩ). Thêm `OPENROUTER_REASONING_MAX_TOKENS` (1024): thử thật 4 câu đều trả lời đủ, 6–14 giây.
+- File: `app/services/llm_client.py`, `app/core/config.py`, `app/api/v1/conversations.py` (log "LLM lỗi" thay "Gemini lỗi"), `requirements.txt` (`openai`), `scripts/try_openrouter.py` (mới), `.env.example`, `docker-compose.yml`, `.env.example` gốc.
+- Test: thêm 13 test OpenRouter vào `tests/test_llm_client.py`; agent-service 157 đạt (trước đó 144). Không đổi database, không đổi API.
 
 ### 21/10/2026: đính kèm tài liệu khi hỏi trong hội thoại
 - Thêm `document_ids` (tối đa 3) vào `POST /conversations/{id}/messages`; AI đọc chữ tài liệu đã upload và đối chiếu với luật. Không sửa document-service.

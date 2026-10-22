@@ -1,0 +1,531 @@
+{
+  "info": {
+    "name": "Procedure Service - Tra cứu thủ tục & Hồ sơ dịch vụ công",
+    "description": "Bộ kiểm thử tự động toàn diện cho Procedure Service qua API Gateway (http://localhost:8080/api/procedures). Bao gồm kiểm tra tra cứu danh mục, lĩnh vực, form schema, mẫu biểu và quy trình nộp/tra cứu/xóa hồ sơ dịch vụ công.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "adminEmail", "value": "admin.hcm@demo.ai-legal.local" },
+    { "key": "adminPassword", "value": "Demo@123" },
+    { "key": "authToken", "value": "" },
+    { "key": "sampleProcedureCode", "value": "DD-001" },
+    { "key": "sampleProcedureId", "value": "" },
+    { "key": "sampleTemplateId", "value": "" },
+    { "key": "createdApplicationId", "value": "" },
+    { "key": "createdApplicationCode", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "0. Đăng nhập Admin lấy JWT Token",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.data).to.have.property('access_token');",
+              "pm.collectionVariables.set('authToken', res.data.access_token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/users/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"{{adminEmail}}\", \"password\": \"{{adminPassword}}\"}"
+        }
+      }
+    },
+    {
+      "name": "1. Health Check",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.status).to.eql('ok');",
+              "pm.expect(res.service).to.eql('procedure-service');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/health"
+      }
+    },
+    {
+      "name": "2. Phân loại tài liệu tham khảo (Reference Classifications)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('domains');",
+              "pm.expect(res.data).to.have.property('items');",
+              "pm.expect(res.data.items.length).to.be.above(0);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/reference-classifications"
+      }
+    },
+    {
+      "name": "3. Danh sách lĩnh vực (Domains)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.be.an('array');",
+              "const codes = res.data.map(d => d.code);",
+              "pm.expect(codes).to.include.members(['land', 'business']);",
+              "pm.expect(res.total_procedures).to.be.above(0);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/domains"
+      }
+    },
+    {
+      "name": "4. Danh sách thủ tục theo lĩnh vực đất đai (Procedures by Domain - Land)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.domain).to.eql('land');",
+              "pm.expect(res.data.items).to.be.an('array');",
+              "pm.expect(res.data.items.length).to.be.above(0);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/domains/land"
+      }
+    },
+    {
+      "name": "5. Danh sách tên thủ tục theo lĩnh vực kinh doanh (Names by Domain - Business)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.domain).to.eql('business');",
+              "pm.expect(res.data.items).to.be.an('array');",
+              "pm.expect(res.data.items.length).to.be.above(0);",
+              "pm.expect(res.data.items[0]).to.include.all.keys('id', 'code', 'name');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/domains/business/names"
+      }
+    },
+    {
+      "name": "6. Tra cứu danh sách thủ tục (List procedures with pagination)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.items).to.be.an('array');",
+              "pm.expect(res.data.pagination).to.have.property('total');",
+              "if (res.data.items.length > 0) {",
+              "  pm.collectionVariables.set('sampleProcedureId', res.data.items[0].id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures?page=1&page_size=10"
+      }
+    },
+    {
+      "name": "7. Lọc thủ tục theo lĩnh vực đất đai (Filter by domain)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "res.data.items.forEach(item => {",
+              "  pm.expect(item.domain).to.eql('land');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures?domain=land&page=1&page_size=5"
+      }
+    },
+    {
+      "name": "8. Tìm kiếm thủ tục (Search procedures)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.items).to.be.an('array');",
+              "pm.expect(res.data.items.length).to.be.above(0);",
+              "const codes = res.data.items.map(i => i.code);",
+              "pm.expect(codes).to.include('HKD-001');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/procedures/search",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"query\": \"đăng ký hộ kinh doanh\"}"
+        }
+      }
+    },
+    {
+      "name": "9. Chi tiết thủ tục theo mã (Procedure Detail by Code)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.code).to.eql(pm.collectionVariables.get('sampleProcedureCode'));",
+              "pm.expect(res.data).to.have.property('requirements');",
+              "pm.expect(res.data).to.have.property('conditions');",
+              "pm.expect(res.data).to.have.property('fees');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/{{sampleProcedureCode}}"
+      }
+    },
+    {
+      "name": "10. Danh mục hồ sơ, giấy tờ cần chuẩn bị (Procedure Requirements)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('requirements');",
+              "pm.expect(res.data.requirements).to.be.an('array');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/{{sampleProcedureCode}}/requirements"
+      }
+    },
+    {
+      "name": "11. Danh sách điều kiện thực hiện (Procedure Conditions)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('conditions');",
+              "pm.expect(res.data.conditions).to.be.an('array');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/{{sampleProcedureCode}}/conditions"
+      }
+    },
+    {
+      "name": "12. Bảng phí và lệ phí (Procedure Fees)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('fees');",
+              "pm.expect(res.data.fees).to.be.an('array');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/{{sampleProcedureCode}}/fees"
+      }
+    },
+    {
+      "name": "13. Lấy Form Schema động của thủ tục (Dynamic Form Schema)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.procedure_code).to.eql(pm.collectionVariables.get('sampleProcedureCode'));",
+              "pm.expect(res.data.domain).to.eql('land');",
+              "pm.expect(res.data.sections).to.be.an('array');",
+              "pm.expect(res.data.sections.length).to.be.above(0);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/form-schema/{{sampleProcedureCode}}"
+      }
+    },
+    {
+      "name": "14. Kho mẫu đơn tham khảo (Form Templates)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.items).to.be.an('array');",
+              "pm.expect(res.data.total).to.be.above(0);",
+              "if (res.data.items.length > 0) {",
+              "  pm.collectionVariables.set('sampleTemplateId', res.data.items[0].id);",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/templates?domain=land&page_size=5"
+      }
+    },
+    {
+      "name": "15. Tải mẫu đơn Word theo mã thủ tục (Download Word Template)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "pm.test('Content-Type is document stream', () => {",
+              "  const contentType = pm.response.headers.get('Content-Type') || '';",
+              "  pm.expect(contentType).to.match(/word|officedocument|octet-stream/i);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/procedures/templates/by-procedure/DD-002/word"
+      }
+    },
+    {
+      "name": "16. Hồ sơ dịch vụ công - Thống kê của tôi (Applications Summary - Auth)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('total');",
+              "pm.expect(res.data).to.have.property('by_domain');",
+              "pm.expect(res.data).to.have.property('by_status');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            { "key": "token", "value": "{{authToken}}" }
+          ]
+        },
+        "url": "{{baseUrl}}/api/procedures/applications/summary"
+      }
+    },
+    {
+      "name": "17. Hồ sơ dịch vụ công - Danh sách hồ sơ của tôi (Applications Me - Auth)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('items');",
+              "pm.expect(res.data.items).to.be.an('array');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            { "key": "token", "value": "{{authToken}}" }
+          ]
+        },
+        "url": "{{baseUrl}}/api/procedures/applications/me"
+      }
+    },
+    {
+      "name": "18. Tạo hồ sơ thủ tục đất đai nháp (Create Application - Draft - Auth)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data).to.have.property('id');",
+              "pm.expect(res.data.procedure_code).to.eql('DD-001');",
+              "pm.collectionVariables.set('createdApplicationId', res.data.id);",
+              "const compCode = 'DD-001-' + res.data.id.substring(0, 8).toUpperCase();",
+              "pm.collectionVariables.set('createdApplicationCode', compCode);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            { "key": "token", "value": "{{authToken}}" }
+          ]
+        },
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{baseUrl}}/api/procedures/applications",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"procedure_code\": \"DD-001\",\n  \"status\": \"draft\",\n  \"form_data\": {\n    \"receiving_agency\": \"Chi nhánh Văn phòng Đăng ký đất đai\",\n    \"applicant_name\": \"NGUYEN VAN POSTMAN\",\n    \"applicant_id_document\": \"CCCD 079090001234\",\n    \"applicant_address\": \"Phường Tân An, TP. Hội An, Quảng Nam\",\n    \"applicant_phone\": \"0901234567\",\n    \"change_content\": \"Đăng ký biến động quyền sử dụng đất do chuyển nhượng\",\n    \"attached_documents\": \"Bản gốc Giấy chứng nhận quyền sử dụng đất\",\n    \"declarer_signature_name\": \"NGUYEN VAN POSTMAN\"\n  },\n  \"extra_data\": { \"source\": \"postman_automated_test\" }\n}"
+        }
+      }
+    },
+    {
+      "name": "19. Tra cứu hồ sơ theo mã (Lookup Application - Auth)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;",
+              "pm.expect(res.data.record.id).to.eql(pm.collectionVariables.get('createdApplicationId'));",
+              "pm.expect(res.data.record.applicant_name).to.eql('NGUYEN VAN POSTMAN');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            { "key": "token", "value": "{{authToken}}" }
+          ]
+        },
+        "url": "{{baseUrl}}/api/procedures/applications/lookup/{{createdApplicationCode}}"
+      }
+    },
+    {
+      "name": "20. Dọn dẹp hồ sơ thử nghiệm vừa tạo (Clean up test application - Auth)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status code is 200', () => pm.response.to.have.status(200));",
+              "const res = pm.response.json();",
+              "pm.expect(res.error).to.be.null;"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "DELETE",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            { "key": "token", "value": "{{authToken}}" }
+          ]
+        },
+        "url": "{{baseUrl}}/api/procedures/applications/land/{{createdApplicationId}}"
+      }
+    }
+  ]
+}

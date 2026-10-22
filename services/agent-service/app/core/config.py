@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     # Database
     agent_database_url: str = ""
 
-    # LLM provider: "gemini" hoặc "groq"
-    llm_provider: str = "gemini"
+    # LLM provider: "openrouter", "gemini" hoặc "groq"; danh sách ưu tiên ngăn bởi dấu phẩy
+    llm_provider: str = "openrouter,gemini"
 
     # Gemini
     gemini_api_key: str = ""
@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     groq_model: str = "qwen/qwen3.8-27b"
     groq_timeout_seconds: float = 15.0
     groq_max_retries: int = 1
+
+    # OpenRouter (API tương thích OpenAI). SITE_URL/APP_NAME là tuỳ chọn, chỉ gửi header khi có giá trị
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = ""
+    openrouter_site_url: str = ""
+    openrouter_app_name: str = ""
+    openrouter_timeout_seconds: float = 30.0
+    openrouter_max_retries: int = 1
+    # Model suy luận (vd recursive/flint-v1.0:free) bắt buộc "suy nghĩ" trước khi trả lời và tính vào max_tokens:
+    # chừa thêm chừng này token cho phần suy nghĩ, nếu không câu trả lời bị cắt/rỗng. 0 = không gửi tham số reasoning
+    openrouter_reasoning_max_tokens: int = 1024
 
     # Câu trả lời mong muốn ~150-200 chữ; giới hạn này là chốt chặn khi model vẫn muốn viết dài
     llm_max_output_tokens: int = 800

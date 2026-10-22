@@ -122,8 +122,9 @@ services:
       - fromGroup: ailegal-shared
       - key: AGENT_DATABASE_URL
         sync: false
+      # OpenRouter trước, lỗi thì tự chuyển sang Gemini
       - key: LLM_PROVIDER
-        value: gemini
+        value: openrouter,gemini
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
@@ -132,6 +133,18 @@ services:
         sync: false
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_BASE_URL
+        value: https://openrouter.ai/api/v1
+      - key: OPENROUTER_MODEL
+        value: recursive/flint-v1.0:free
+      - key: OPENROUTER_SITE_URL
+        sync: false
+      - key: OPENROUTER_APP_NAME
+        sync: false
+      - key: OPENROUTER_REASONING_MAX_TOKENS
+        value: "1024"
 
   # ───────────── rag-service ─────────────
   - type: web

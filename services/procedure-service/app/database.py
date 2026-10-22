@@ -82,7 +82,7 @@ def get_engine() -> Engine | None:
                         max_overflow=10,
                         pool_recycle=300,
                         connect_args={
-                            "connect_timeout": 15,
+                            "connect_timeout": 3,
                             "keepalives": 1,
                             "keepalives_idle": 30,
                             "keepalives_interval": 10,

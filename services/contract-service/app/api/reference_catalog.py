@@ -1,32 +1,127 @@
-"""Public blank source documents, isolated from authenticated/private contracts.
+"""Public blank source documents, loaded directly from the PostgreSQL database (Supabase).
 
-Only the packaged 30-document manifest and its immutable asset whitelist can be
-read here. These routes never access DB, Storage, user documents or generators.
+All template items, classifications and procedures are stored and queried from
+public.contract_reference_catalog and public.reference_classifications.
 """
+import hashlib
 import json
-import unicodedata
-from functools import lru_cache
+import logging
+import os
 from pathlib import Path
 from typing import Literal
+import time
+import unicodedata
 from uuid import UUID
+
+import psycopg
+from psycopg.rows import dict_row
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
+from app.core.config import DatabaseSettings
 from app.core.errors import ContractError, success
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix='/api/v1/contracts', tags=['reference-catalog'])
 ROOT = Path(__file__).resolve().parents[2] / 'templates/reference-catalog'
 
+_CACHE = {"data": None, "timestamp": 0.0}
+_CACHE_TTL = 30.0  # seconds
+_ASSET_HASHES = None
 
-@lru_cache(maxsize=1)
-def snapshot():
+
+def get_asset_hashes():
+    """Lấy danh sách mã băm SHA256 trực tiếp từ tệp tài nguyên, không đọc qua file JSON."""
+    global _ASSET_HASHES
+    if _ASSET_HASHES is None:
+        try:
+            _ASSET_HASHES = {
+                p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in ROOT.iterdir()
+                if p.is_file() and p.suffix.lower() in ('.pdf', '.png')
+            }
+        except Exception:
+            _ASSET_HASHES = {}
+    return _ASSET_HASHES
+
+
+def load_from_database():
+    """Tải dữ liệu danh mục biểu mẫu và phân loại thủ tục trực tiếp từ Database PostgreSQL (Supabase)"""
+    global _CACHE
+    now = time.time()
+    if _CACHE["data"] is not None and (now - _CACHE["timestamp"]) < _CACHE_TTL:
+        return _CACHE["data"]
+
     try:
-        result = json.loads((ROOT / 'catalog.json').read_text(encoding='utf-8'))
-        if result.get('read_only') is not True or any(i.get('view_only') is not True or i.get('can_fill') is not False for i in result['items']):
-            raise ValueError('Not a read-only manifest')
-        return result
-    except (OSError, ValueError, KeyError, TypeError):
-        raise ContractError('REFERENCE_CATALOG_UNAVAILABLE', 'Kho mẫu chưa sẵn sàng.') from None
+        db_url = os.getenv("CONTRACT_DATABASE_URL", "")
+        if not db_url:
+            try:
+                settings = DatabaseSettings.from_env()
+                db_url = settings.database_url
+            except Exception:
+                pass
+        if not db_url:
+            return None
+
+        if "sslmode" not in db_url and "localhost" not in db_url and "127.0.0.1" not in db_url:
+            db_url = db_url + ("&" if "?" in db_url else "?") + "sslmode=require"
+        db_url = db_url.replace("postgresql+psycopg://", "postgresql://", 1)
+
+        with psycopg.connect(db_url, connect_timeout=5, prepare_threshold=None,
+                             row_factory=dict_row, options="-c statement_timeout=5000 -c lock_timeout=2000") as conn:
+            # 1. Lấy danh sách phân loại thủ tục từ database
+            classes = conn.execute("""
+                SELECT key, code, name, domain, kind, procedure_id::text
+                FROM public.reference_classifications
+                ORDER BY code, name
+            """).fetchall()
+
+            # 2. Lấy toàn bộ biểu mẫu tham khảo từ database
+            rows = conn.execute("""
+                SELECT 
+                    id::text, number, name, description, domain, procedure_key as procedure,
+                    procedure_code, procedure_name, procedures, page_count, format,
+                    pdf_url as pdf, pages, page_dimensions, text_content as text,
+                    content_status, review_notes, source_id, source_filename, source_url,
+                    source_sha256, pdf_sha256, view_only, can_fill
+                FROM public.contract_reference_catalog
+                ORDER BY number ASC
+            """).fetchall()
+
+            if rows and len(rows) > 0:
+                asset_hashes = get_asset_hashes()
+
+                domains = [
+                    {'code': 'land', 'name': 'Đất đai & Bất động sản'},
+                    {'code': 'business', 'name': 'Doanh nghiệp & Hộ kinh doanh'},
+                    {'code': 'cooperative', 'name': 'Hợp tác xã'},
+                    {'code': 'social_insurance', 'name': 'Bảo hiểm xã hội'}
+                ]
+                result = {
+                    'read_only': True,
+                    'domains': domains,
+                    'classifications': classes,
+                    'items': rows,
+                    'counts': {'templates': len(rows), 'pages': sum(r.get('page_count', 1) for r in rows)},
+                    'revision': 'db-postgres',
+                    'asset_hashes': asset_hashes,
+                    'data_source': 'database'
+                }
+                _CACHE["data"] = result
+                _CACHE["timestamp"] = now
+                return result
+    except Exception as e:
+        logger.warning(f"Database catalog lookup failed: {e}")
+    return None
+
+
+def snapshot():
+    """Tải snapshot biểu mẫu 100% từ Database PostgreSQL (Supabase), không đọc qua file JSON."""
+    db_result = load_from_database()
+    if db_result:
+        return db_result
+    raise ContractError('REFERENCE_CATALOG_UNAVAILABLE', 'Kho mẫu từ cơ sở dữ liệu chưa sẵn sàng.')
 
 
 def normalized(value):
@@ -47,20 +142,21 @@ def list_references(request: Request, domain: str | None = Query(None, max_lengt
             continue
         if procedure and not any(procedure in (p['key'], p.get('code')) for p in item['procedures']):
             continue
-        content = normalized(' '.join([item['name'], item['description'], item['source_filename'],
-                                      *[p['name'] + ' ' + (p['code'] or '') for p in item['procedures']]]))
+        content = normalized(' '.join([item['name'], item.get('description') or '', item.get('source_filename') or '',
+                                      *[p['name'] + ' ' + (p.get('code') or '') for p in item['procedures']]]))
         if all(word in content for word in words):
             items.append(item)
     total = len(items)
     return success(request, {'items': items[(page - 1) * page_size:page * page_size],
         'pagination': {'page': page, 'page_size': page_size, 'total': total, 'total_pages': (total + page_size - 1) // page_size},
         'domains': data['domains'], 'classifications': data['classifications'], 'counts': data['counts'],
-        'revision': data['revision'], 'read_only': True, 'asset_base_path': '/api/v1/contracts/reference-assets/'})
+        'revision': data['revision'], 'read_only': True, 'data_source': data.get('data_source', 'database'),
+        'asset_base_path': '/api/v1/contracts/reference-assets/'})
 
 
 @router.get('/reference-catalog/{template_id}')
 def get_reference(request: Request, template_id: UUID):
-    item = next((i for i in snapshot()['items'] if i['id'] == str(template_id)), None)
+    item = next((i for i in snapshot()['items'] if str(i['id']) == str(template_id)), None)
     if item is None:
         raise ContractError('REFERENCE_NOT_FOUND', 'Không tìm thấy mẫu.', 404)
     return success(request, item)

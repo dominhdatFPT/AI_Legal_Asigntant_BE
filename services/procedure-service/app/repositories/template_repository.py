@@ -245,10 +245,17 @@ class TemplateRepository:
             engine = get_engine()
             if engine:
                 try:
+                    from uuid import UUID
+                    try:
+                        clean_uuid = str(UUID(clean_id))
+                        where_tpl = "id = :id"
+                    except Exception:
+                        clean_uuid = clean_id
+                        where_tpl = "CAST(id AS TEXT) = :id"
                     with db_connection() as conn:
                         row = conn.execute(
-                            text("SELECT id, name, file_name, format, media_type, file_data, domain FROM public.form_templates WHERE CAST(id AS TEXT) = :id LIMIT 1"),
-                            {"id": clean_id},
+                            text(f"SELECT id, name, file_name, format, media_type, file_data, domain FROM public.form_templates WHERE {where_tpl} LIMIT 1"),
+                            {"id": clean_uuid},
                         ).mappings().fetchone()
                         if row:
                             raw_data = row["file_data"]

@@ -175,7 +175,7 @@ async def send_message(
         logger.exception("RAG lỗi, request_id=%s", request_id)
         raise _error(503, "RAG_SERVICE_ERROR", "Không thể truy xuất dữ liệu pháp luật lúc này, vui lòng thử lại.")
     except llm_client.LLMError:
-        logger.exception("Gemini lỗi, request_id=%s", request_id)
+        logger.exception("LLM lỗi, request_id=%s", request_id)
         raise _error(503, "AI_SERVICE_ERROR", "Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.")
 
     metadata = result["metadata"]

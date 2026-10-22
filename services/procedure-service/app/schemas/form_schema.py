@@ -74,6 +74,7 @@ class ApplicationSubmitRequest(BaseModel):
 
 class ApplicationRecordResponse(BaseModel):
     id: str
+    application_code: Optional[str] = None
     user_id: Optional[str] = None
     procedure_code: str
     procedure_name: Optional[str] = None

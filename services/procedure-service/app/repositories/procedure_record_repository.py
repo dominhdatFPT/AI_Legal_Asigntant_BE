@@ -1,5 +1,8 @@
+import copy
+import time
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import uuid
@@ -21,6 +24,13 @@ from app.repositories.procedure_repository import db_connection, ProcedureInvali
 
 logger = logging.getLogger(__name__)
 
+# Pattern chuẩn cho 8 ký tự hex mã định danh rút gọn
+HEX_8_PATTERN = re.compile(r"^[0-9a-fA-F]{8}$")
+
+# Reusable in-memory cache cho tra cứu hồ sơ (TTL 60s)
+_lookup_cache: dict[str, tuple[float, any]] = {}
+LOOKUP_CACHE_TTL = 60.0
+
 # Reusable HTTP Session với Connection Pool chống socket exhaustion (M5)
 _session = requests.Session()
 _adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
@@ -39,7 +49,7 @@ def safe_uuid_str(val) -> Optional[str]:
 
 
 def _serialize_row(row: dict) -> dict:
-    """Chuyển đổi kiểu dữ liệu UUID, datetime để an toàn serialize JSON"""
+    """Chuyển đổi kiểu dữ liệu UUID, datetime để an toàn serialize JSON và cấp application_code chuẩn"""
     result = {}
     for k, v in row.items():
         if isinstance(v, UUID):
@@ -53,6 +63,12 @@ def _serialize_row(row: dict) -> dict:
                 result[k] = v
         else:
             result[k] = v
+
+    if "id" in result and result.get("procedure_code"):
+        proc_code = str(result["procedure_code"]).strip().upper()
+        rec_id_str = str(result["id"])
+        short_id = rec_id_str[:8].upper() if len(rec_id_str) >= 8 else rec_id_str.upper()
+        result["application_code"] = f"{proc_code}-{short_id}"
     return result
 
 
@@ -75,15 +91,30 @@ def _to_number(value, cast):
 
 
 def get_procedure_id_by_code(conn_or_code, maybe_code: Optional[str] = None) -> Optional[str]:
-    """Tìm UUID của procedure dựa vào code (hỗ trợ cả PostgreSQL và SQLite)"""
+    """Tìm UUID của procedure dựa vào code (hỗ trợ cả PostgreSQL, SQLite và fallback PostgREST)"""
     if maybe_code is None:
         code = str(conn_or_code).strip().upper()
-        with db_connection() as conn:
-            row = conn.execute(
-                text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
-                {"code": code},
-            ).fetchone()
-            return str(row[0]) if row else None
+        if not is_postgres_circuit_open():
+            try:
+                with db_connection() as conn:
+                    row = conn.execute(
+                        text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
+                        {"code": code},
+                    ).fetchone()
+                    if row:
+                        return str(row[0])
+            except Exception:
+                pass
+        # Fallback PostgREST
+        try:
+            supabase_url, _ = get_supabase_config()
+            if supabase_url:
+                r = _session.get(f"{supabase_url}/rest/v1/procedures?code=eq.{code}&select=id&limit=1", headers=_supabase_headers(), timeout=3)
+                if r.status_code == 200 and r.json():
+                    return str(r.json()[0]["id"])
+        except Exception:
+            pass
+        return None
     else:
         conn = conn_or_code
         code = str(maybe_code).strip().upper()
@@ -109,6 +140,7 @@ def save_procedure_record(
     table = "land_procedure_records" if domain == "land" else "business_procedure_records"
 
     user_uuid = safe_uuid_str(user_id) or (str(user_id) if user_id else None)
+    now_dt = datetime.now(timezone.utc)
     values = {
         "id": str(uuid.uuid4()),
         "user_id": user_uuid,
@@ -116,7 +148,7 @@ def save_procedure_record(
         "status": status,
         "form_data": json.dumps(form_data, ensure_ascii=False),
         "extra_data": json.dumps(extra_data, ensure_ascii=False),
-        "created_at": datetime.now(timezone.utc),
+        "created_at": now_dt,
     }
     if domain == "land":
         values.update({
@@ -140,22 +172,57 @@ def save_procedure_record(
             "charter_capital": _to_number(form_data.get("charter_capital"), int),
         })
 
-    with db_connection(write=True) as conn:
-        proc_id = get_procedure_id_by_code(conn, code_upper)
-        if proc_id is None:
-            return None
-        values["procedure_id"] = proc_id
-        columns = ", ".join(values)
-        placeholders = ", ".join(f":{k}" for k in values)
-        row = conn.execute(
-            text(f"INSERT INTO public.{table} ({columns}, updated_at) VALUES ({placeholders}, :created_at) "
-                 "RETURNING id, user_id, procedure_code, procedure_id, status, applicant_name, created_at, updated_at"),
-            values,
-        ).mappings().fetchone()
-    result = _serialize_row(dict(row))
-    result["domain"] = domain
-    result["target_table"] = table
-    return result
+    # 1. Thử qua SQLAlchemy
+    if not is_postgres_circuit_open():
+        try:
+            with db_connection(write=True) as conn:
+                proc_id = get_procedure_id_by_code(conn, code_upper)
+                if proc_id is None:
+                    return None
+                values["procedure_id"] = proc_id
+                columns = ", ".join(values)
+                placeholders = ", ".join(f":{k}" for k in values)
+                row = conn.execute(
+                    text(f"INSERT INTO public.{table} ({columns}, updated_at) VALUES ({placeholders}, :created_at) "
+                         "RETURNING id, user_id, procedure_code, procedure_id, status, applicant_name, created_at, updated_at"),
+                    values,
+                ).mappings().fetchone()
+            result = _serialize_row(dict(row))
+            result["domain"] = domain
+            result["target_table"] = table
+            return result
+        except Exception as e:
+            logger.warning(f"Lỗi khi lưu hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
+
+    # 2. Fallback qua Supabase PostgREST
+    try:
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            proc_id = get_procedure_id_by_code(code_upper)
+            if proc_id:
+                values["procedure_id"] = proc_id
+            pg_values = dict(values)
+            pg_values["created_at"] = now_dt.isoformat()
+            pg_values["updated_at"] = now_dt.isoformat()
+            pg_values["form_data"] = form_data
+            pg_values["extra_data"] = extra_data
+            r = _session.post(
+                f"{supabase_url}/rest/v1/{table}",
+                headers=_supabase_headers(),
+                json=pg_values,
+                timeout=8,
+            )
+            if r.status_code in (200, 201):
+                rows = r.json()
+                if rows:
+                    res = _serialize_row(rows[0])
+                    res["domain"] = domain
+                    res["target_table"] = table
+                    return res
+    except Exception as e:
+        logger.warning(f"Lỗi fallback PostgREST trong save_procedure_record: {e}")
+
+    return None
 
 
 create_procedure_record = save_procedure_record
@@ -173,99 +240,174 @@ def get_procedure_record_by_id(domain: str, record_id: str, owner_id: Optional[s
     if owner_id is not None:
         owner_sql = " AND user_id = :owner_id"
         params["owner_id"] = str(owner_id)
-    with db_connection() as conn:
-        row = conn.execute(
-            text(f"SELECT * FROM public.{table} WHERE id = :id{owner_sql} LIMIT 1"),
-            params,
-        ).mappings().fetchone()
-    if not row:
-        return None
-    res = _serialize_row(dict(row))
-    res["domain"] = clean_domain
-    res["target_table"] = table
-    return res
+
+    if not is_postgres_circuit_open():
+        try:
+            with db_connection() as conn:
+                row = conn.execute(
+                    text(f"SELECT * FROM public.{table} WHERE id = :id{owner_sql} LIMIT 1"),
+                    params,
+                ).mappings().fetchone()
+                if row:
+                    res = _serialize_row(dict(row))
+                    res["domain"] = clean_domain
+                    res["target_table"] = table
+                    return res
+        except Exception as e:
+            logger.warning(f"Lỗi khi lấy chi tiết hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
+
+    # Fallback PostgREST
+    try:
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            p = {"id": f"eq.{rec_uuid}", "limit": 1}
+            if owner_id is not None:
+                p["user_id"] = f"eq.{owner_id}"
+            r = _session.get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
+            if r.status_code == 200:
+                rows = r.json()
+                if rows:
+                    res = _serialize_row(rows[0])
+                    res["domain"] = clean_domain
+                    res["target_table"] = table
+                    return res
+    except Exception as e:
+        logger.warning(f"Lỗi fallback PostgREST trong get_procedure_record_by_id: {e}")
+
+    return None
 
 
 def lookup_procedure_record(code_or_id: str, owner_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Tra cứu chi tiết hồ sơ bằng mã hồ sơ (ví dụ: DD-001-811F7E21), ID prefix (811F7E21), hoặc full UUID.
+    Tra cứu chi tiết hồ sơ bằng:
+    - Mã hồ sơ chuẩn (ví dụ: DD-001-811F7E21)
+    - ID prefix 8 ký tự hex (811F7E21)
+    - Hoặc full UUID (36 ký tự).
+    
+    BẮT BUỘC ĐÚNG ĐỊNH DẠNG:
+    Nếu gõ thiếu (ví dụ 6 ký tự như 811F7E hoặc DD-001-811F7E), trả về None ngay lập tức để API trả lỗi 404 APPLICATION_NOT_FOUND,
+    không tự động tìm khớp mờ.
     owner_id=None (chỉ admin) thì không lọc theo người tạo.
     """
     if not code_or_id or not str(code_or_id).strip():
         return None
 
     raw = str(code_or_id).strip()
-    raw_upper = raw.upper()
-
-    # Kiểm tra UUID chuẩn trước tiên
     full_uuid = safe_uuid_str(raw)
-
     procedure_code_filter = None
     id_part = raw
+
     if not full_uuid and "-" in raw:
         parts = raw.split("-")
         if len(parts) >= 3 and (parts[0].upper().startswith("DD") or parts[0].upper().startswith("HKD") or parts[0].upper().startswith("DN")):
             procedure_code_filter = f"{parts[0].upper()}-{parts[1].upper()}"
             id_part = "-".join(parts[2:])
+            full_uuid = safe_uuid_str(id_part)
+
+    clean_id = id_part.replace("-", "").strip().lower()
+
+    # YÊU CẦU: Nếu không phải full UUID 36 ký tự, thì clean_id BẮT BUỘC phải là đúng 8 ký tự hex.
+    # Nếu gõ thiếu/không đủ 8 ký tự hex -> trả về None ngay lập tức!
+    if not full_uuid:
+        if not HEX_8_PATTERN.match(clean_id):
+            return None
+
+    cache_key = f"lookup:{owner_id}:{raw.upper()}"
+    now = time.time()
+    if cache_key in _lookup_cache:
+        c_time, c_data = _lookup_cache[cache_key]
+        if now - c_time < LOOKUP_CACHE_TTL:
+            return copy.deepcopy(c_data)
 
     domains = ["land", "business"]
     if procedure_code_filter:
         domains = ["land"] if procedure_code_filter.startswith("DD") else ["business"]
-    elif raw_upper.startswith("DD"):
+    elif raw.upper().startswith("DD"):
         domains = ["land"]
-    elif raw_upper.startswith("HKD") or raw_upper.startswith("DN"):
+    elif raw.upper().startswith("HKD") or raw.upper().startswith("DN"):
         domains = ["business"]
-
-    if not full_uuid:
-        full_uuid = safe_uuid_str(id_part)
 
     owner_sql = " AND user_id = :owner_id" if owner_id is not None else ""
     base_params: Dict[str, Any] = {"owner_id": str(owner_id)} if owner_id is not None else {}
 
-    with db_connection() as conn:
-        for dom in domains:
-            table = "land_procedure_records" if dom == "land" else "business_procedure_records"
+    # 1. Thử qua SQLAlchemy
+    if not is_postgres_circuit_open():
+        try:
+            with db_connection() as conn:
+                for dom in domains:
+                    table = "land_procedure_records" if dom == "land" else "business_procedure_records"
 
-            # 1. Tra cứu theo UUID chính xác
-            if full_uuid:
-                p = dict(base_params, id=full_uuid)
-                row = conn.execute(
-                    text(f"SELECT * FROM public.{table} WHERE id = :id{owner_sql} LIMIT 1"),
-                    p,
-                ).mappings().fetchone()
-                if row:
-                    res = _serialize_row(dict(row))
-                    res["domain"] = dom
-                    res["target_table"] = table
-                    return res
+                    if full_uuid:
+                        p = dict(base_params, id=full_uuid)
+                        p_sql = " AND upper(procedure_code) = :p_code" if procedure_code_filter else ""
+                        if procedure_code_filter:
+                            p["p_code"] = procedure_code_filter
+                        row = conn.execute(
+                            text(f"SELECT * FROM public.{table} WHERE id = :id{p_sql}{owner_sql} LIMIT 1"),
+                            p,
+                        ).mappings().fetchone()
+                        if row:
+                            res = _serialize_row(dict(row))
+                            res["domain"] = dom
+                            res["target_table"] = table
+                            return res
+                    else:
+                        # clean_id đúng 8 ký tự hex: dùng B-Tree index scan trên UUID range (0.1ms)
+                        p = dict(
+                            base_params,
+                            id_min=f"{clean_id}-0000-0000-0000-000000000000",
+                            id_max=f"{clean_id}-ffff-ffff-ffff-ffffffffffff",
+                        )
+                        p_sql = " AND upper(procedure_code) = :p_code" if procedure_code_filter else ""
+                        if procedure_code_filter:
+                            p["p_code"] = procedure_code_filter
+                        row = conn.execute(
+                            text(f"SELECT * FROM public.{table} WHERE id >= :id_min AND id <= :id_max{p_sql}{owner_sql} ORDER BY created_at DESC LIMIT 1"),
+                            p,
+                        ).mappings().fetchone()
+                        if row:
+                            res = _serialize_row(dict(row))
+                            res["domain"] = dom
+                            res["target_table"] = table
+                            return res
+        except Exception as e:
+            logger.warning(f"Lỗi khi tra cứu hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
+            mark_postgres_failed(60.0)
 
-            # 2. Tra cứu theo short ID (tiền tố UUID) và/hoặc mã thủ tục
-            clean_id_prefix = id_part.replace("-", "").strip().lower()
-            where_clauses = ["1=1"]
-            p = dict(base_params)
+    # 2. Fallback qua Supabase PostgREST
+    try:
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            for dom in domains:
+                table = "land_procedure_records" if dom == "land" else "business_procedure_records"
+                p = {"select": "*", "limit": 1}
+                if owner_id is not None:
+                    p["user_id"] = f"eq.{owner_id}"
 
-            if clean_id_prefix and len(clean_id_prefix) >= 4:
-                where_clauses.append("lower(cast(id as text)) LIKE :id_prefix")
-                p["id_prefix"] = f"{clean_id_prefix}%"
+                if full_uuid:
+                    p["id"] = f"eq.{full_uuid}"
+                    if procedure_code_filter:
+                        p["procedure_code"] = f"eq.{procedure_code_filter}"
+                else:
+                    # clean_id đúng 8 ký tự hex -> dùng phạm vi trên UUID index
+                    p["id"] = f"gte.{clean_id}-0000-0000-0000-000000000000"
+                    p["and"] = f"(id.lte.{clean_id}-ffff-ffff-ffff-ffffffffffff)"
+                    if procedure_code_filter:
+                        p["procedure_code"] = f"eq.{procedure_code_filter}"
+                    p["order"] = "created_at.desc"
 
-            if procedure_code_filter:
-                where_clauses.append("upper(procedure_code) = :p_code")
-                p["p_code"] = procedure_code_filter
-
-            if len(where_clauses) > 1:
-                where_sql = " AND ".join(where_clauses)
-                row = conn.execute(
-                    text(f"SELECT * FROM public.{table} WHERE {where_sql}{owner_sql} ORDER BY created_at DESC LIMIT 1"),
-                    p,
-                ).mappings().fetchone()
-                if row:
-                    res = _serialize_row(dict(row))
-                    res["domain"] = dom
-                    res["target_table"] = table
-                    return res
+                r = _session.get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
+                if r.status_code == 200:
+                    rows = r.json()
+                    if rows and len(rows) > 0:
+                        res = _serialize_row(rows[0])
+                        res["domain"] = dom
+                        res["target_table"] = table
+                        return res
+    except Exception as e:
+        logger.warning(f"Lỗi fallback PostgREST trong lookup_procedure_record: {e}")
 
     return None
-
 
 
 def list_procedure_records(
@@ -407,7 +549,7 @@ def update_procedure_record(
     if current_status not in ("draft", None):
         raise ApplicationLockedError(f"Hồ sơ đang ở trạng thái '{current_status}', không thể chỉnh sửa.")
 
-    # Không cho phép chuyển sang submitted qua hàm update này (C6)
+    # Không cho phép chuyển sang submitted qua API cập nhật (C6)
     if status and status.strip().lower() == "submitted":
         raise ApplicationValidationError("Không thể chuyển trạng thái sang 'submitted' qua API cập nhật. Vui lòng sử dụng endpoint /submit.")
 
@@ -541,7 +683,6 @@ def update_procedure_record(
             try: patch_payload["land_area"] = float(merged_form["land_area"])
             except (ValueError, TypeError): pass
     else:
-        # Đồng bộ đầy đủ các cột kinh doanh cho PostgREST fallback (H3, M7)
         name_val = merged_form.get("applicant_name") or merged_form.get("authorizer_name") or merged_form.get("lessor_name")
         if name_val: patch_payload["applicant_name"] = name_val
         id_val = merged_form.get("applicant_id_number") or merged_form.get("authorizer_id_number") or merged_form.get("lessor_id_number")
@@ -566,7 +707,6 @@ def update_procedure_record(
         timeout=8,
     )
     if r.status_code in (200, 204):
-        # Trả về trực tiếp nếu PostgREST đã trả về representation
         if r.status_code == 200 and r.text:
             try:
                 res_json = r.json()
@@ -715,7 +855,6 @@ STATUSES = ("draft", "submitted", "processing", "completed", "cancelled")
 
 
 def _as_datetime(value) -> datetime:
-    # Postgres trả datetime; SQLite (test) trả chuỗi.
     if isinstance(value, datetime):
         return value
     try:
@@ -728,12 +867,18 @@ def _list_item(row: dict, include_owner: bool) -> dict:
     created_at = _as_datetime(row["created_at"])
     days = row.get("processing_days")
     due_date = (created_at + timedelta(days=days)).date().isoformat() if days is not None else None
+    proc_code = str(row.get("procedure_code") or "").strip().upper()
+    rec_id_str = str(row.get("id") or "")
+    short_id = rec_id_str[:8].upper() if len(rec_id_str) >= 8 else rec_id_str.upper()
+    app_code = f"{proc_code}-{short_id}" if proc_code and short_id else rec_id_str
+
     item = {
-        "id": str(row["id"]),
-        "domain": row["domain"],
-        "procedure_code": row["procedure_code"],
+        "id": rec_id_str,
+        "application_code": app_code,
+        "domain": row.get("domain"),
+        "procedure_code": proc_code,
         "procedure_name": row.get("procedure_name"),
-        "status": row["status"],
+        "status": row.get("status"),
         "applicant_name": row.get("applicant_name"),
         "applicant_id_number": row.get("applicant_id_number"),
         "address": row.get("address"),
@@ -750,51 +895,161 @@ def _list_item(row: dict, include_owner: bool) -> dict:
 def list_records(owner_id: Optional[str], domain: Optional[str], status: Optional[str], q: Optional[str],
                  page: int, page_size: int) -> tuple[list[dict], int]:
     """Hồ sơ của cả hai bảng, mới nhất trước. owner_id=None (chỉ admin) thì lấy của mọi người."""
-    where, params = [], {"limit": page_size, "offset": (page - 1) * page_size}
-    if owner_id is not None:
-        where.append("user_id = :owner_id")
-        params["owner_id"] = str(owner_id)
-    if domain:
-        where.append("domain = :domain")
-        params["domain"] = domain
-    if status:
-        where.append("status = :status")
-        params["status"] = status
-    if q and q.strip():
-        q_clean = q.strip().lower()
-        where_or = [
-            "lower(coalesce(applicant_name, '')) LIKE :q",
-            "coalesce(applicant_id_number, '') LIKE :q",
-            "lower(procedure_code) LIKE :q",
-            "lower(cast(id as text)) LIKE :q",
-        ]
-        params["q"] = f"%{q_clean}%"
-        if "-" in q_clean:
-            parts = q_clean.split("-")
-            if len(parts) >= 3:
-                p_code = f"{parts[0]}-{parts[1]}".upper()
-                short_id = parts[2].lower()
-                where_or.append("(upper(procedure_code) = :p_code_exact AND lower(cast(id as text)) LIKE :short_id_like)")
-                params["p_code_exact"] = p_code
-                params["short_id_like"] = f"{short_id}%"
-        where.append(f"({' OR '.join(where_or)})")
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-    with db_connection() as conn:
-        total = conn.execute(text(f"SELECT count(*) FROM ({_LIST_SOURCE}) a {where_sql}"), params).scalar() or 0
-        rows = conn.execute(text(f"SELECT * FROM ({_LIST_SOURCE}) a {where_sql} "
-                                 "ORDER BY created_at DESC LIMIT :limit OFFSET :offset"), params).mappings().all()
-    return [_list_item(dict(r), include_owner=owner_id is None) for r in rows], total
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    # 1. Thử qua SQLAlchemy
+    if not is_postgres_circuit_open():
+        try:
+            where, params = [], {"limit": page_size, "offset": (page - 1) * page_size}
+            if owner_id is not None:
+                where.append("user_id = :owner_id")
+                params["owner_id"] = str(owner_id)
+            if domain:
+                where.append("domain = :domain")
+                params["domain"] = domain
+            if status:
+                where.append("status = :status")
+                params["status"] = status
+            if q and q.strip():
+                q_clean = q.strip().lower()
+                where_or = [
+                    "lower(coalesce(applicant_name, '')) LIKE :q",
+                    "coalesce(applicant_id_number, '') LIKE :q",
+                    "lower(procedure_code) LIKE :q",
+                ]
+                params["q"] = f"%{q_clean}%"
+                q_uuid = safe_uuid_str(q_clean)
+                if q_uuid:
+                    where_or.append("id = :q_uuid")
+                    params["q_uuid"] = q_uuid
+                elif HEX_8_PATTERN.match(q_clean):
+                    where_or.append("(id >= :q_id_min AND id <= :q_id_max)")
+                    params["q_id_min"] = f"{q_clean}-0000-0000-0000-000000000000"
+                    params["q_id_max"] = f"{q_clean}-ffff-ffff-ffff-ffffffffffff"
+                else:
+                    where_or.append("lower(cast(id as text)) LIKE :q")
+
+                if "-" in q_clean:
+                    parts = q_clean.split("-")
+                    if len(parts) >= 3:
+                        p_code = f"{parts[0]}-{parts[1]}".upper()
+                        short_id = parts[2].lower()
+                        if HEX_8_PATTERN.match(short_id):
+                            where_or.append("(upper(procedure_code) = :p_code_exact AND id >= :short_id_min AND id <= :short_id_max)")
+                            params["p_code_exact"] = p_code
+                            params["short_id_min"] = f"{short_id}-0000-0000-0000-000000000000"
+                            params["short_id_max"] = f"{short_id}-ffff-ffff-ffff-ffffffffffff"
+                        else:
+                            where_or.append("(upper(procedure_code) = :p_code_exact AND lower(cast(id as text)) LIKE :short_id_like)")
+                            params["p_code_exact"] = p_code
+                            params["short_id_like"] = f"{short_id}%"
+                where.append(f"({' OR '.join(where_or)})")
+            where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+            with db_connection() as conn:
+                total = conn.execute(text(f"SELECT count(*) FROM ({_LIST_SOURCE}) a {where_sql}"), params).scalar() or 0
+                rows = conn.execute(text(f"SELECT * FROM ({_LIST_SOURCE}) a {where_sql} "
+                                         "ORDER BY created_at DESC LIMIT :limit OFFSET :offset"), params).mappings().all()
+            return [_list_item(dict(r), include_owner=owner_id is None) for r in rows], total
+        except Exception as e:
+            logger.warning(f"Lỗi khi lấy danh sách hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
+
+    # 2. Fallback qua Supabase PostgREST
+    try:
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            proc_map = {}
+            try:
+                pr = _session.get(f"{supabase_url}/rest/v1/procedures?select=code,name,fee,receiving_agency_level,processing_days", headers=_supabase_headers(), timeout=5)
+                if pr.status_code == 200:
+                    for p in pr.json():
+                        proc_map[p.get("code", "").upper()] = p
+            except Exception:
+                pass
+
+            all_rows = []
+            targets = []
+            if domain == "land" or domain is None:
+                targets.append(("land", "land_procedure_records"))
+            if domain == "business" or domain is None:
+                targets.append(("business", "business_procedure_records"))
+
+            for dom_name, tbl in targets:
+                p_query: Dict[str, Any] = {"select": "*", "order": "created_at.desc", "limit": 100}
+                if owner_id is not None:
+                    p_query["user_id"] = f"eq.{owner_id}"
+                if status:
+                    p_query["status"] = f"eq.{status}"
+
+                r = _session.get(f"{supabase_url}/rest/v1/{tbl}", headers=_supabase_headers(), params=p_query, timeout=5)
+                if r.status_code == 200:
+                    for row in r.json():
+                        p_meta = proc_map.get(str(row.get("procedure_code", "")).upper(), {})
+                        enriched = dict(row)
+                        enriched["domain"] = dom_name
+                        enriched["procedure_name"] = p_meta.get("name")
+                        enriched["fee"] = p_meta.get("fee")
+                        enriched["receiving_agency_level"] = p_meta.get("receiving_agency_level")
+                        enriched["processing_days"] = p_meta.get("processing_days")
+                        if dom_name == "land":
+                            enriched["address"] = row.get("land_address")
+                        else:
+                            enriched["address"] = row.get("headquarters_address")
+                        all_rows.append(enriched)
+
+            if q and q.strip():
+                q_str = q.strip().lower()
+                all_rows = [
+                    r for r in all_rows
+                    if q_str in str(r.get("applicant_name") or "").lower()
+                    or q_str in str(r.get("applicant_id_number") or "").lower()
+                    or q_str in str(r.get("procedure_code") or "").lower()
+                    or q_str in str(r.get("id") or "").lower()
+                ]
+
+            all_rows.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
+            total = len(all_rows)
+            offset = (page - 1) * page_size
+            sliced = all_rows[offset : offset + page_size]
+            return [_list_item(r, include_owner=owner_id is None) for r in sliced], total
+    except Exception as e:
+        logger.warning(f"Lỗi fallback PostgREST trong list_records: {e}")
+
+    return [], 0
 
 
 def count_records() -> dict:
     """Số hồ sơ theo lĩnh vực và trạng thái (cho dashboard admin)."""
-    with db_connection() as conn:
-        rows = conn.execute(text(f"SELECT domain, status, count(*) AS n FROM ({_LIST_SOURCE}) a GROUP BY domain, status")).all()
     by_domain = {"land": 0, "business": 0}
     by_status = dict.fromkeys(STATUSES, 0)
-    for domain, status, n in rows:
-        if domain in by_domain:
-            by_domain[domain] += n
-        if status in by_status:
-            by_status[status] += n
-    return {"total": sum(by_domain.values()), "by_domain": by_domain, "by_status": by_status}
+
+    if not is_postgres_circuit_open():
+        try:
+            with db_connection() as conn:
+                rows = conn.execute(text(f"SELECT domain, status, count(*) AS n FROM ({_LIST_SOURCE}) a GROUP BY domain, status")).all()
+            for domain, status, n in rows:
+                if domain in by_domain:
+                    by_domain[domain] += n
+                if status in by_status:
+                    by_status[status] += n
+            return {"total": sum(by_domain.values()), "by_domain": by_domain, "by_status": by_status}
+        except Exception as e:
+            logger.warning(f"Lỗi khi đếm hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
+
+    # Fallback PostgREST
+    try:
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            for d_name, tbl in [("land", "land_procedure_records"), ("business", "business_procedure_records")]:
+                r = _session.get(f"{supabase_url}/rest/v1/{tbl}?select=status", headers=_supabase_headers(), timeout=5)
+                if r.status_code == 200:
+                    for row in r.json():
+                        st = row.get("status")
+                        by_domain[d_name] += 1
+                        if st in by_status:
+                            by_status[st] += 1
+            return {"total": sum(by_domain.values()), "by_domain": by_domain, "by_status": by_status}
+    except Exception as e:
+        logger.warning(f"Lỗi fallback PostgREST trong count_records: {e}")
+
+    return {"total": 0, "by_domain": by_domain, "by_status": by_status}

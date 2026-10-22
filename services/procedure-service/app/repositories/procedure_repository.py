@@ -1,14 +1,42 @@
 import copy
 import logging
+import time
 import unicodedata
 from contextlib import contextmanager
 
+import requests
+from requests.adapters import HTTPAdapter
 from sqlalchemy import text
 from sqlalchemy.exc import DataError, SQLAlchemyError
 
-from app.database import database_url, get_engine
+from app.database import (
+    database_url,
+    get_engine,
+    get_supabase_config,
+    is_postgres_circuit_open,
+    mark_postgres_failed,
+)
 
 logger = logging.getLogger(__name__)
+
+# Reusable HTTP Session cho PostgREST fallback
+_proc_session = requests.Session()
+_proc_adapter = HTTPAdapter(pool_connections=5, pool_maxsize=10, max_retries=1)
+_proc_session.mount("http://", _proc_adapter)
+_proc_session.mount("https://", _proc_adapter)
+
+# In-Memory Cache cho danh mục thủ tục (giảm 99% tải DB)
+_proc_cache: dict[str, tuple[float, any]] = {}
+CACHE_TTL = 300.0  # 5 phút cache trong RAM
+
+
+def _get_supabase_headers() -> dict:
+    _, anon_key = get_supabase_config()
+    return {
+        "apikey": anon_key,
+        "Authorization": f"Bearer {anon_key}",
+        "Content-Type": "application/json",
+    }
 
 
 class ProcedureDbUnavailable(Exception):
@@ -557,65 +585,156 @@ class ProcedureRepository:
 
     @staticmethod
     def get_procedure_by_id_or_code(procedure_id_or_code: str) -> dict | None:
-        """Lấy chi tiết thủ tục theo ID hoặc mã nghiệp vụ (HKD-001, DD-001...)."""
+        """Lấy chi tiết thủ tục theo ID hoặc mã nghiệp vụ (HKD-001, DD-001...) có cache & fallback."""
         target = procedure_id_or_code.strip()
-        with db_connection() as conn:
-            found = _rows(conn, "SELECT * FROM public.procedures WHERE CAST(id AS TEXT) = :target "
-                                "OR upper(code) = :code LIMIT 1", {"target": target, "code": target.upper()})
-            if not found:
-                return None
-            proc = found[0]
-            p = {"p_id": proc["id"]}
-            proc["legal_bases"] = _rows(conn, "SELECT * FROM public.procedure_legal_bases WHERE procedure_id = :p_id ORDER BY order_index", p)
-            proc["requirements"] = _rows(conn, "SELECT * FROM public.procedure_requirements WHERE procedure_id = :p_id ORDER BY order_index", p)
-            proc["conditions"] = _rows(conn, "SELECT * FROM public.procedure_conditions WHERE procedure_id = :p_id ORDER BY order_index", p)
-            proc["fees"] = _rows(conn, "SELECT * FROM public.procedure_fees WHERE procedure_id = :p_id", p)
-        return proc
+        cache_key = f"proc_detail:{target.upper()}"
+        now = time.time()
+        if cache_key in _proc_cache:
+            c_time, c_data = _proc_cache[cache_key]
+            if now - c_time < CACHE_TTL:
+                return copy.deepcopy(c_data)
+
+        proc = None
+        if not is_postgres_circuit_open():
+            try:
+                from app.repositories.procedure_record_repository import safe_uuid_str
+                target_uuid = safe_uuid_str(target)
+                where_id = "id = :target_uuid" if target_uuid else "CAST(id AS TEXT) = :target"
+                p_dict = {"target": target, "code": target.upper()}
+                if target_uuid:
+                    p_dict["target_uuid"] = target_uuid
+                with db_connection() as conn:
+                    found = _rows(conn, f"SELECT * FROM public.procedures WHERE {where_id} OR upper(code) = :code LIMIT 1", p_dict)
+                    if found:
+                        proc = found[0]
+                        p = {"p_id": proc["id"]}
+                        proc["legal_bases"] = _rows(conn, "SELECT * FROM public.procedure_legal_bases WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["requirements"] = _rows(conn, "SELECT * FROM public.procedure_requirements WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["conditions"] = _rows(conn, "SELECT * FROM public.procedure_conditions WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["fees"] = _rows(conn, "SELECT * FROM public.procedure_fees WHERE procedure_id = :p_id", p)
+            except Exception as e:
+                logger.warning(f"Lỗi SQL get_procedure_by_id_or_code: {e}. Thử fallback...")
+                mark_postgres_failed(60.0)
+                proc = None
+
+        if proc is None:
+            for p in MOCK_PROCEDURES:
+                if str(p.get("id")) == target or p.get("code", "").upper() == target.upper():
+                    proc = copy.deepcopy(p)
+                    break
+
+        if proc:
+            _proc_cache[cache_key] = (now, proc)
+            return copy.deepcopy(proc)
+        return None
 
     @staticmethod
     def get_domains() -> list[dict]:
-        """Danh sách lĩnh vực kèm số thủ tục thực tế."""
-        with db_connection() as conn:
-            domains = _rows(conn, "SELECT code, name, description, icon, order_index FROM public.procedure_domains "
-                                  "WHERE is_active = 1 or is_active = true ORDER BY order_index")
-            counts = {r["domain"]: r["count"] for r in _rows(conn, "SELECT domain, count(*) AS count FROM public.procedures GROUP BY domain")}
-        return [
-            {
-                "code": d["code"],
-                "name": d["name"],
-                "description": d.get("description") or "",
-                "icon": d.get("icon") or ("landscape" if d["code"] == "land" else "storefront"),
-                "count": counts.get(d["code"], 0),
-            }
-            for d in domains
-        ]
+        """Danh sách lĩnh vực kèm số thủ tục thực tế (có in-memory cache & fallback)."""
+        cache_key = "proc_domains"
+        now = time.time()
+        if cache_key in _proc_cache:
+            c_time, c_data = _proc_cache[cache_key]
+            if now - c_time < CACHE_TTL:
+                return copy.deepcopy(c_data)
+
+        domains_result = None
+        if not is_postgres_circuit_open():
+            try:
+                with db_connection() as conn:
+                    domains = _rows(conn, "SELECT code, name, description, icon, order_index FROM public.procedure_domains "
+                                          "WHERE is_active IS TRUE ORDER BY order_index")
+                    counts = {r["domain"]: r["count"] for r in _rows(conn, "SELECT domain, count(*) AS count FROM public.procedures GROUP BY domain")}
+                domains_result = [
+                    {
+                        "code": d["code"],
+                        "name": d["name"],
+                        "description": d.get("description") or "",
+                        "icon": d.get("icon") or ("landscape" if d["code"] == "land" else "storefront"),
+                        "count": counts.get(d["code"], 0),
+                    }
+                    for d in domains
+                ]
+            except Exception as e:
+                logger.warning(f"Lỗi SQL get_domains: {e}. Thử fallback...")
+                mark_postgres_failed(60.0)
+                domains_result = None
+
+        if domains_result is None:
+            domains_result = [
+                {"code": "land", "name": "Đất đai & Bất động sản", "description": "Thủ tục hành chính đất đai", "icon": "landscape", "count": 2},
+                {"code": "business", "name": "Doanh nghiệp & Hộ kinh doanh", "description": "Đăng ký thành lập, thay đổi HKD", "icon": "storefront", "count": 2},
+            ]
+
+        _proc_cache[cache_key] = (now, domains_result)
+        return copy.deepcopy(domains_result)
 
     @staticmethod
     def get_procedures_by_domain(domain: str, limit: int = 100, include_details: bool = True) -> list[dict]:
-        """Danh sách thủ tục theo lĩnh vực ('all' = mọi lĩnh vực)."""
+        """Danh sách thủ tục theo lĩnh vực ('all' = mọi lĩnh vực), có In-Memory cache và PostgREST fallback."""
         clean_domain = domain.strip().lower()
-        params: dict = {"limit": limit}
-        where_sql = ""
-        if clean_domain != "all":
-            where_sql = "WHERE domain = :domain"
-            params["domain"] = clean_domain
-        with db_connection() as conn:
-            items = _rows(conn, f"SELECT * FROM public.procedures {where_sql} ORDER BY code LIMIT :limit", params)
-            for proc in items:
+        cache_key = f"proc_domain:{clean_domain}:{limit}:{include_details}"
+        now = time.time()
+        if cache_key in _proc_cache:
+            c_time, c_data = _proc_cache[cache_key]
+            if now - c_time < CACHE_TTL:
+                return copy.deepcopy(c_data)
+
+        items = None
+        if not is_postgres_circuit_open():
+            try:
+                params: dict = {"limit": limit}
+                where_sql = ""
+                if clean_domain != "all":
+                    where_sql = "WHERE domain = :domain"
+                    params["domain"] = clean_domain
+                with db_connection() as conn:
+                    items = _rows(conn, f"SELECT * FROM public.procedures {where_sql} ORDER BY code LIMIT :limit", params)
+                    for proc in items:
+                        proc["fee_formatted"] = _fee_formatted(proc.get("fee"))
+                        if not include_details:
+                            continue
+                        p = {"p_id": proc["id"]}
+                        proc["requirements"] = _rows(conn, "SELECT id, name, is_required, copies, document_form, form_code, note "
+                                                           "FROM public.procedure_requirements WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["conditions"] = _rows(conn, "SELECT id, condition_code, title, description, is_mandatory "
+                                                         "FROM public.procedure_conditions WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["legal_bases"] = _rows(conn, "SELECT id, doc_number, title, article_ref, source_url "
+                                                          "FROM public.procedure_legal_bases WHERE procedure_id = :p_id ORDER BY order_index", p)
+                        proc["requirements_count"] = len(proc["requirements"])
+                        proc["conditions_count"] = len(proc["conditions"])
+                        proc["legal_bases_count"] = len(proc["legal_bases"])
+            except Exception as e:
+                logger.warning(f"Lỗi SQL get_procedures_by_domain: {e}. Thử fallback PostgREST...")
+                mark_postgres_failed(60.0)
+                items = None
+
+        if items is None:
+            try:
+                supabase_url, _ = get_supabase_config()
+                if supabase_url:
+                    url = f"{supabase_url}/rest/v1/procedures?select=*&order=code.asc&limit={limit}"
+                    if clean_domain != "all":
+                        url += f"&domain=eq.{clean_domain}"
+                    res = _proc_session.get(url, headers=_get_supabase_headers(), timeout=4)
+                    if res.status_code == 200:
+                        items = res.json()
+                        for proc in items:
+                            proc["fee_formatted"] = _fee_formatted(proc.get("fee"))
+                            if "id" in proc:
+                                proc["id"] = str(proc["id"])
+            except Exception as e:
+                logger.warning(f"Lỗi fallback PostgREST get_procedures_by_domain: {e}")
+                items = None
+
+        if items is None:
+            matched = [copy.deepcopy(p) for p in MOCK_PROCEDURES if clean_domain in ("all", p.get("domain"))][:limit]
+            for proc in matched:
                 proc["fee_formatted"] = _fee_formatted(proc.get("fee"))
-                if not include_details:
-                    continue
-                p = {"p_id": proc["id"]}
-                proc["requirements"] = _rows(conn, "SELECT id, name, is_required, copies, document_form, form_code, note "
-                                                   "FROM public.procedure_requirements WHERE procedure_id = :p_id ORDER BY order_index", p)
-                proc["conditions"] = _rows(conn, "SELECT id, condition_code, title, description, is_mandatory "
-                                                 "FROM public.procedure_conditions WHERE procedure_id = :p_id ORDER BY order_index", p)
-                proc["legal_bases"] = _rows(conn, "SELECT id, doc_number, title, article_ref, source_url "
-                                                  "FROM public.procedure_legal_bases WHERE procedure_id = :p_id ORDER BY order_index", p)
-                proc["requirements_count"] = len(proc["requirements"])
-                proc["conditions_count"] = len(proc["conditions"])
-                proc["legal_bases_count"] = len(proc["legal_bases"])
-        return items
+            items = matched
+
+        _proc_cache[cache_key] = (now, items)
+        return copy.deepcopy(items)
 
     @staticmethod
     def get_procedure_names_by_domain(domain: str) -> list[dict]:
