@@ -51,19 +51,88 @@ CREATE TABLE IF NOT EXISTS public.business_procedure_records (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Indexes for performance
+-- Indexes for performance & foreign keys
 CREATE INDEX IF NOT EXISTS idx_land_records_user_status ON public.land_procedure_records (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_land_records_procedure_code ON public.land_procedure_records (procedure_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_land_records_procedure_id ON public.land_procedure_records (procedure_id);
 CREATE INDEX IF NOT EXISTS idx_land_records_form_data_gin ON public.land_procedure_records USING GIN (form_data);
 
 CREATE INDEX IF NOT EXISTS idx_biz_records_user_status ON public.business_procedure_records (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_biz_records_procedure_code ON public.business_procedure_records (procedure_code, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_biz_records_procedure_id ON public.business_procedure_records (procedure_id);
 CREATE INDEX IF NOT EXISTS idx_biz_records_form_data_gin ON public.business_procedure_records USING GIN (form_data);
 
--- Row Level Security (RLS): bật RLS và KHÔNG tạo policy cho anon/authenticated.
--- Hồ sơ chứa CCCD, SĐT nên chỉ procedure-service (kết nối bằng PROCEDURE_DATABASE_URL, role postgres) được đọc/ghi;
--- quyền "chỉ xem hồ sơ của mình" kiểm tra ở API theo JWT.
+-- Row Level Security (RLS)
 ALTER TABLE public.land_procedure_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.business_procedure_records ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.land_procedure_records FROM anon, authenticated;
-REVOKE ALL ON public.business_procedure_records FROM anon, authenticated;
+
+-- 1. Land Procedure Records Policies
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'land_procedure_records' AND policyname = 'land_records_select_owner'
+    ) THEN
+        CREATE POLICY land_records_select_owner ON public.land_procedure_records
+            FOR SELECT USING (auth.uid() = user_id OR user_id IS NULL);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'land_procedure_records' AND policyname = 'land_records_insert'
+    ) THEN
+        CREATE POLICY land_records_insert ON public.land_procedure_records
+            FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'land_procedure_records' AND policyname = 'land_records_update_owner'
+    ) THEN
+        CREATE POLICY land_records_update_owner ON public.land_procedure_records
+            FOR UPDATE USING (auth.uid() = user_id AND status = 'draft');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'land_procedure_records' AND policyname = 'land_records_delete_owner'
+    ) THEN
+        CREATE POLICY land_records_delete_owner ON public.land_procedure_records
+            FOR DELETE USING (auth.uid() = user_id AND status = 'draft');
+    END IF;
+END $$;
+
+-- 2. Business Procedure Records Policies
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'business_procedure_records' AND policyname = 'biz_records_select_owner'
+    ) THEN
+        CREATE POLICY biz_records_select_owner ON public.business_procedure_records
+            FOR SELECT USING (auth.uid() = user_id OR user_id IS NULL);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'business_procedure_records' AND policyname = 'biz_records_insert'
+    ) THEN
+        CREATE POLICY biz_records_insert ON public.business_procedure_records
+            FOR INSERT WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'business_procedure_records' AND policyname = 'biz_records_update_owner'
+    ) THEN
+        CREATE POLICY biz_records_update_owner ON public.business_procedure_records
+            FOR UPDATE USING (auth.uid() = user_id AND status = 'draft');
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = 'business_procedure_records' AND policyname = 'biz_records_delete_owner'
+    ) THEN
+        CREATE POLICY biz_records_delete_owner ON public.business_procedure_records
+            FOR DELETE USING (auth.uid() = user_id AND status = 'draft');
+    END IF;
+END $$;
+
+-- Cấp quyền có kiểm soát qua RLS
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.land_procedure_records TO authenticated;
+GRANT SELECT, INSERT ON public.land_procedure_records TO anon;
+GRANT ALL ON public.land_procedure_records TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.business_procedure_records TO authenticated;
+GRANT SELECT, INSERT ON public.business_procedure_records TO anon;
+GRANT ALL ON public.business_procedure_records TO service_role;

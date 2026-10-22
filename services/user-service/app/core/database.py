@@ -17,10 +17,11 @@ _read_session_factory: sessionmaker[Session] | None = None
 # Request chỉ đọc → dùng kết nối autocommit (xem get_db).
 READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-# DB nằm trên Supabase cloud: mỗi lượt hỏi-đáp với DB mất ~100–250 ms, bớt được lượt nào là nhanh hơn lượt đó.
-# Không dùng pool_pre_ping (tốn thêm 1 lượt cho MỌI request); thay bằng bỏ kết nối cũ quá 5 phút và
-# TCP keepalive để pooler/NAT không cắt kết nối đang rảnh.
+# DB nằm trên Supabase cloud: mỗi lượt hỏi-đáp với DB mất ~100–250 ms.
+# Bật pool_pre_ping: keepalive + recycle vẫn để lọt kết nối bị pooler cắt (SSL unexpected eof), request lấy
+# trúng sẽ treo rồi lỗi 500. Đổi 1 lượt ping mỗi lần lấy kết nối lấy độ ổn định.
 _POOL_OPTIONS = {
+    "pool_pre_ping": True,
     "pool_size": 5,
     "max_overflow": 10,
     "pool_recycle": 300,

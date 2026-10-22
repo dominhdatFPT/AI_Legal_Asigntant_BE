@@ -32,6 +32,8 @@ tags:
     description: Tra cứu thủ tục và giấy tờ cần chuẩn bị
   - name: Applications
     description: Hồ sơ người dùng đã nộp/lưu nháp (cần đăng nhập)
+  - name: Form templates
+    description: Kho mẫu đơn tham khảo (công khai, xem hoặc tải file mẫu)
 
 paths:
   /procedures/health:
@@ -191,6 +193,78 @@ paths:
                       fee_formatted: "100.000 ₫"
                 error: null
                 request_id: req-123
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/templates:
+    get:
+      tags: [Form templates]
+      operationId: listFormTemplates
+      summary: Danh sách mẫu đơn tham khảo
+      description: |
+        Mẫu đơn, tờ khai, hợp đồng mẫu trong bảng `form_templates` của database Procedure
+        (nạp bằng `scripts/seed_form_templates.py`). Công khai, không cần đăng nhập.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: domain, in: query, schema: { type: string, enum: [land, business] } }
+        - { name: q, in: query, description: Tìm theo tên mẫu hoặc tên thủ tục, schema: { type: string, maxLength: 200 } }
+      responses:
+        "200":
+          description: Danh sách mẫu đơn
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, error, request_id]
+                properties:
+                  data:
+                    type: object
+                    required: [items, total]
+                    properties:
+                      total: { type: integer, minimum: 0 }
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          required: [id, name, procedure, domain, domain_label, format, size, media_type, filename, viewable]
+                          properties:
+                            id: { type: string, format: uuid }
+                            name: { type: string, example: Đăng ký giải thể doanh nghiệp }
+                            procedure: { type: string, example: Đăng ký giải thể doanh nghiệp }
+                            domain: { type: string, enum: [land, business] }
+                            domain_label: { type: string, example: Doanh nghiệp & Hộ kinh doanh }
+                            format: { type: string, enum: [PDF, DOC, DOCX, PNG, JPG, JPEG] }
+                            size: { type: integer, description: Dung lượng file (byte) }
+                            media_type: { type: string, example: application/msword }
+                            filename: { type: string, example: Thủ tục đăng ký giải thể doanh nghiệp.doc }
+                            viewable:
+                              type: boolean
+                              description: true nếu trình duyệt xem được (PDF/ảnh, hoặc mẫu Word đã có bản PDF xem trước)
+                  error: { $ref: "#/components/schemas/NoError" }
+                  request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+  /procedures/templates/{template_id}/file:
+    get:
+      tags: [Form templates]
+      operationId: getFormTemplateFile
+      summary: Xem hoặc tải file mẫu đơn
+      description: |
+        Trả nội dung file từ database. Mặc định `Content-Disposition: inline` để xem; mẫu Word có bản PDF
+        xem trước thì trả bản PDF đó. `download=true` luôn trả file gốc để tải về.
+      x-status: implemented
+      parameters:
+        - { name: template_id, in: path, required: true, schema: { type: string } }
+        - { name: download, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: File mẫu
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+            application/msword: { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "404":
+          description: Không có mẫu với id này (`TEMPLATE_NOT_FOUND`)
         "503": { $ref: "#/components/responses/DbUnavailable" }
 
   /procedures/{procedure_id}:

@@ -31,6 +31,19 @@ def _get_groq_client() -> groq_sdk.AsyncGroq:
     return groq_sdk.AsyncGroq(api_key=get_settings().groq_api_key)
 
 
+def _gemini_thinking_config(model: str) -> types.ThinkingConfig:
+    """Tắt (hoặc giảm tối đa) phần "suy nghĩ" của Gemini: trả lời từ trích đoạn có sẵn không cần suy luận dài."""
+    if model.startswith("gemini-2"):
+        return types.ThinkingConfig(thinking_budget=0)
+    return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+
+
+def _groq_reasoning_args(model: str) -> dict:
+    """Qwen3 trên Groq mặc định sinh đoạn <think> trước câu trả lời; tắt đi. Model khác không nhận tham số này."""
+    if "qwen3" in model.lower():
+        return {"reasoning_effort": "none"}
+    return {}
+
 
 async def _generate_gemini(
     system_prompt: str,
@@ -46,7 +59,12 @@ async def _generate_gemini(
         for m in history
     ]
     contents.append(types.Content(role="user", parts=[types.Part(text=user_content)]))
-    config = types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.2)
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        temperature=0.2,
+        max_output_tokens=settings.llm_max_output_tokens,
+        thinking_config=_gemini_thinking_config(settings.gemini_model),
+    )
 
     max_retries = max(0, settings.gemini_max_retries)
     last_error: Exception | None = None
@@ -103,7 +121,8 @@ async def _generate_groq(
                     model=settings.groq_model,
                     messages=messages,
                     temperature=0.2,
-                    max_tokens=4096,
+                    max_tokens=settings.llm_max_output_tokens,
+                    **_groq_reasoning_args(settings.groq_model),
                 ),
                 timeout=settings.groq_timeout_seconds,
             )

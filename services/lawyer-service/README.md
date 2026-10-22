@@ -4,9 +4,16 @@ Dịch vụ quản lý hồ sơ năng lực luật sư, thống kê và trạng 
 
 Thiết kế, luồng gọi và mã lỗi: [docs/api/LAWYER_DESIGN.md](../../docs/api/LAWYER_DESIGN.md). Contract: `openapi.yaml`.
 
-Đã có: lĩnh vực, hồ sơ của tôi (`GET/PATCH /lawyers/me`), đơn xin làm luật sư / đổi thẻ (`/lawyers/me/applications`),
-admin tạo tài khoản luật sư, danh sách / đếm / chi tiết / duyệt / từ chối đơn, API nội bộ trạng thái và ẩn hồ sơ.
-Chưa có: danh sách luật sư công khai, online/offline (WebSocket cùng Consultation), thống kê.
+Đã có (prefix `/api/v1`, Gateway `/api`):
+- `GET /lawyers/specializations` - danh sách lĩnh vực.
+- `POST /lawyers` - citizen gửi hồ sơ xin làm luật sư; `GET /lawyers/me` - xem hồ sơ của tôi;
+  `PUT /lawyers/me` - gửi lại sau khi bị từ chối.
+- Admin: `GET /lawyers/applications` (lọc `approval_status`, `order`, phân trang),
+  `POST /lawyers/{lawyer_id}/approve`, `POST /lawyers/{lawyer_id}/reject`.
+- Nội bộ (`X-Internal-Token`): `GET /internal/v1/lawyers/{user_id}/status`, `POST /internal/v1/lawyers/{user_id}/hide`.
+
+Chưa có (`x-status: planned`): danh sách / chi tiết luật sư công khai, online/offline (WebSocket cùng Consultation),
+thống kê.
 
 ```bash
 cd services/lawyer-service

@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "common-auth"
 version = "0.1.0"
-description = "Shared JWT (RS256) verification for legal-assistant-ai services"
+description = "Shared JWT (RS256) verification, token revocation and RabbitMQ events for legal-assistant-ai services"
 requires-python = ">=3.10"
-dependencies = ["PyJWT[crypto]>=2.8,<3"]
+dependencies = ["PyJWT[crypto]>=2.8,<3", "aio-pika>=9.4,<11"]
 
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.115,<1"]

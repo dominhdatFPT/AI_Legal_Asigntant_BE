@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, ConfigDict, ValidationError
 from app.api.v1.conversations import router as conversations_router
 from app.services import agent, llm_client, rag_client
 
+# Hiện log INFO của app (ví dụ "agent timing") trong docker logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 

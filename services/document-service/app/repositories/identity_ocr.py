@@ -12,7 +12,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 
 from app.core.errors import DocumentError
-from app.services.identity_parser import merge_fields, parse_additional_fields, ADDITIONAL_FIELDS
+from app.services.identity_parser import merge_fields, parse_additional_fields, residence_components, ADDITIONAL_FIELDS
 from app.services.identity_card_match import ensure_card_pair
 
 logger = logging.getLogger("document-service")
@@ -37,6 +37,9 @@ class IdentityOcr:
             if row["status"] == "completed" else "not_checked")
         row["additional_fields"] = {key: None if front[key] and back[key] and front[key] != back[key]
             else front[key] or back[key] for key in ADDITIONAL_FIELDS}
+        components = residence_components(raw_back, row["additional_fields"].get("residence_address"))
+        if row["status"] == "completed" and components:
+            row["additional_fields"]["residence_address_components"] = components
         if row["card_match_status"] == "matched":
             correction = raw_back.get("card_pair_check", {}).get("corrections", {}).get("expiry_date")
             if correction:
@@ -91,14 +94,23 @@ class IdentityOcr:
             b = self.provider.read_image(back, deadline=deadline,
                                          on_response=lambda raw: save_raw("back", raw))
             fields, warnings = merge_fields(f, b)
-            if not any(side["identity_number"] and side["full_name"] for side in (f, b)):
+            if not f["identity_number"]:
                 raise DocumentError("OCR_UNREADABLE", "Chưa đọc được số CCCD và họ tên; chụp rõ hơn và kiểm tra thủ công.", 422)
             pair_check = ensure_card_pair(f, raw_images.get("front", {}), raw_images.get("back", {}))
             raw_images["back"]["card_pair_check"] = pair_check
             self._save_raw(owner, session_id, "back", raw_images["back"])
             warnings.append("CARD_PAIR_MATCHED_NOT_AUTHENTICATED")
             if pair_check.get("corrections"):
-                warnings.append("OCR_EXPIRY_RECONCILED_WITH_MRZ")
+                if "expiry_date" in pair_check["corrections"]:
+                    warnings.append("OCR_EXPIRY_RECONCILED_WITH_MRZ")
+                if "date_of_birth" in pair_check["corrections"]:
+                    fields["date_of_birth"] = pair_check["corrections"]["date_of_birth"]
+                    warnings.append("OCR_BIRTH_RECONCILED_WITH_MRZ")
+                if "full_name" in pair_check["corrections"]:
+                    fields["full_name"] = pair_check["corrections"]["full_name"]
+                    warnings.append("OCR_NAME_RECONCILED_WITH_MRZ")
+            if not f["identity_number"] or not (f["full_name"] or pair_check.get("corrections", {}).get("full_name")):
+                raise DocumentError("OCR_UNREADABLE", "Chưa đọc được số CCCD và họ tên; kiểm tra ảnh hoặc nhập tay.", 422)
             warnings.append("OCR_REQUIRES_USER_REVIEW")
             with self.database.connection() as conn:
                 conn.execute("UPDATE public.document_identity_ocr_sessions SET status='completed',fields=%s,warnings=%s,updated_at=now() "

@@ -28,25 +28,17 @@ def get_by_hash(db: Session, token_hash: str, for_update: bool = False) -> Refre
     return db.scalar(query)
 
 
-def has_any(db: Session, user_id: uuid.UUID) -> bool:
-    """Tài khoản đã từng đăng nhập (có refresh token, kể cả đã thu hồi) chưa."""
-    return db.scalar(select(RefreshToken.id).where(RefreshToken.user_id == user_id).limit(1)) is not None
-
-
 def revoke(db: Session, token: RefreshToken) -> None:
     if token.revoked_at is None:
         token.revoked_at = datetime.now(timezone.utc)
         db.flush()
 
 
-ROLE_CHANGED = "role_changed"
-
-
-def revoke_all_for_user(db: Session, user_id: uuid.UUID, reason: str | None = None) -> int:
+def revoke_all_for_user(db: Session, user_id: uuid.UUID) -> int:
     result = db.execute(
         update(RefreshToken)
         .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
-        .values(revoked_at=datetime.now(timezone.utc), revoked_reason=reason)
+        .values(revoked_at=datetime.now(timezone.utc))
     )
     db.flush()
     return result.rowcount

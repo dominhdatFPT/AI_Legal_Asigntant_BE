@@ -1,4 +1,4 @@
-"""Đơn của người dùng: tạo nháp, sửa, gửi duyệt, rút; ảnh thẻ phải của chính mình; thời gian chờ sau khi bị từ chối."""
+"""Hồ sơ xin làm luật sư của người dùng: POST /lawyers (gửi là chờ duyệt luôn), GET /me, PUT /me (gửi lại sau từ chối)."""
 
 import uuid
 from datetime import timedelta
@@ -8,234 +8,213 @@ import pytest
 from app.models import LawyerApplication, LawyerProfile, LawyerProfileSpecialization
 from app.models.lawyer import utcnow
 
-APPS = "/api/v1/lawyers/me/applications"
+LAWYERS = "/api/v1/lawyers"
+ME = f"{LAWYERS}/me"
 
 
 def _code(res):
     return res.json()["error"]["code"]
 
 
-def _new_body(card_id, number="12345/TP"):
-    return {"type": "new", "bar_card_number": number, "law_firm": "VP ABC", "years_experience": 8,
-            "bio": "Tư vấn đất đai", "specialization_codes": ["land"], "card_document_id": str(card_id)}
+def _body(upstream, uid, number="12345/TP"):
+    return {"bar_card_number": number, "law_firm": "VP ABC", "years_experience": 8, "bio": "Tư vấn đất đai",
+            "specialization_codes": ["land"], "credentials": upstream.credentials(uid)}
 
 
-def _draft(client, upstream, auth, uid=None, number="12345/TP"):
+def _submit(client, upstream, auth, uid=None, number="12345/TP"):
     uid = uid or upstream.user()
-    res = client.post(APPS, headers=auth(uid), json=_new_body(upstream.card(uid, number=number), number))
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid, number))
     assert res.status_code == 201, res.text
     return uid, res.json()["data"]
 
 
-def _lawyer(db, upstream, number="111/TP"):
-    uid = upstream.user(role="lawyer")
-    profile = LawyerProfile(user_id=uid, source="self_applied", status="active", bar_card_number=number)
-    profile.specializations = [LawyerProfileSpecialization(specialization_code="land")]
-    db.add(profile)
+def _rejected(db, uid, hours_ago=2, number="1/TP"):
+    """Đơn đã bị từ chối cách đây `hours_ago` giờ."""
+    app = LawyerApplication(user_id=uid, type="new", status="rejected", reject_reason="Ảnh mờ",
+                            reviewed_by=uuid.uuid4(), reviewed_at=utcnow() - timedelta(hours=hours_ago),
+                            submitted_at=utcnow() - timedelta(hours=hours_ago + 1), bar_card_number=number,
+                            specialization_codes=["land"], created_at=utcnow() - timedelta(hours=hours_ago + 1))
+    db.add(app)
     db.commit()
-    return uid
+    return app
 
 
-# ---------------------------------------------------------------- Tạo nháp
-def test_tao_nhap_lay_json_ocr_tu_document(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    assert data["status"] == "draft" and data["type"] == "new" and data["user_id"] == str(uid)
-    assert data["ocr_result"]["fields"]["bar_card_number"] == "12345/TP"
+# ---------------------------------------------------------------- Gửi hồ sơ
+def test_gui_ho_so_vao_hang_cho_luon(client, upstream, auth):
+    uid = upstream.user()
+    body = _body(upstream, uid)
+    res = client.post(LAWYERS, headers=auth(uid), json=body)
+    assert res.status_code == 201, res.text
+    data = res.json()["data"]
+    assert data["approval_status"] == "pending" and data["user_id"] == str(uid)
+    assert data["full_name"] == "Nguyễn Văn A" and data["rejected_reason"] is None and data["reviewed_at"] is None
     assert data["specializations"] == [{"code": "land", "name": "Đất đai"}]
-    assert data["submitted_at"] is None and data["can_reapply_at"] is None
+    assert data["credentials"] == body["credentials"] and data["created_at"]
+    me = client.get(ME, headers=auth(uid))
+    assert me.status_code == 200 and me.json()["data"]["id"] == data["id"]
 
 
-def test_tao_don_can_dang_nhap(client):
-    res = client.post(APPS, json={"type": "new"})
-    assert res.status_code == 401
+def test_gui_ho_so_can_dang_nhap(client):
+    assert client.post(LAWYERS, json={}).status_code == 401
+    assert client.get(ME).status_code == 401
+    assert client.put(ME, json={}).status_code == 401
 
 
-def test_luat_su_khong_tao_don_new_citizen_khong_tao_card_change(client, db, upstream, auth):
-    lawyer = _lawyer(db, upstream)
-    assert client.post(APPS, headers=auth(lawyer, "lawyer"), json={"type": "new"}).status_code == 403
-    citizen = upstream.user()
-    assert client.post(APPS, headers=auth(citizen), json={"type": "card_change"}).status_code == 403
-    admin = upstream.user(role="admin")
-    assert client.post(APPS, headers=auth(admin, "admin"), json={"type": "new"}).status_code == 403
+@pytest.mark.parametrize("role", ["lawyer", "admin"])
+def test_chi_citizen_duoc_gui(client, upstream, auth, role):
+    uid = upstream.user(role=role)
+    for res in (client.post(LAWYERS, headers=auth(uid, role), json=_body(upstream, uid)),
+                client.put(ME, headers=auth(uid, role), json=_body(upstream, uid))):
+        assert res.status_code == 403 and _code(res) == "FORBIDDEN"
 
 
-@pytest.mark.parametrize("body", [{}, {"type": "other"}, {"type": "new", "specialization_codes": ["tax"]},
-                                  {"type": "new", "years_experience": -1}, {"type": "new", "card_document_id": "x"},
-                                  {"type": "new", "owner_user_id": str(uuid.uuid4())}])
-def test_tao_don_du_lieu_sai_422(client, upstream, auth, body):
-    res = client.post(APPS, headers=auth(upstream.user()), json=body)
+@pytest.mark.parametrize("change", [
+    lambda b: b.update(credentials=b["credentials"][:1]),                         # thiếu chứng chỉ hành nghề
+    lambda b: b.update(credentials=[b["credentials"][0], b["credentials"][0]]),   # trùng giấy tờ
+    lambda b: b.update(credentials=[]),
+    lambda b: b.update(credentials=b["credentials"] + [{"document_id": str(uuid.uuid4()), "type": "khac"}
+                                                       for _ in range(9)]),  # quá 10 giấy tờ
+    lambda b: b["credentials"][0].update(type="cccd"),
+    lambda b: b.update(specialization_codes=[]),
+    lambda b: b.update(specialization_codes=["tax"]),
+    lambda b: b.update(specialization_codes=["land", "land"]),
+    lambda b: b.update(bar_card_number="   "),
+    lambda b: b.pop("bar_card_number"),
+    lambda b: b.update(years_experience=71),
+    lambda b: b.update(owner_user_id=str(uuid.uuid4())),
+])
+def test_du_lieu_sai_422(client, upstream, auth, change):
+    uid = upstream.user()
+    body = _body(upstream, uid)
+    change(body)
+    res = client.post(LAWYERS, headers=auth(uid), json=body)
     assert res.status_code == 422 and _code(res) == "VALIDATION_ERROR"
 
 
-def test_don_doi_the_chi_mang_thong_tin_the(client, db, upstream, auth):
-    uid = _lawyer(db, upstream)
-    res = client.post(APPS, headers=auth(uid, "lawyer"), json={"type": "card_change", "bio": "x"})
-    assert res.status_code == 422 and res.json()["error"]["details"][0]["field"] == "bio"
-
-
-def test_chi_mot_don_dang_mo(client, upstream, auth):
-    uid, _ = _draft(client, upstream, auth)
-    res = client.post(APPS, headers=auth(uid), json={"type": "new"})
-    assert res.status_code == 409 and _code(res) == "OPEN_APPLICATION_EXISTS"
-
-
-def test_da_co_ho_so_thi_khong_xin_moi(client, db, upstream, auth):
+def test_thieu_giay_to_bat_buoc_bao_dung_o(client, upstream, auth):
     uid = upstream.user()
-    db.add(LawyerProfile(user_id=uid, source="admin_created", status="incomplete"))
-    db.commit()
-    res = client.post(APPS, headers=auth(uid), json={"type": "new"})
+    body = _body(upstream, uid)
+    body["credentials"][1]["type"] = "bang_cu_nhan"
+    res = client.post(LAWYERS, headers=auth(uid), json=body)
+    assert res.status_code == 422 and res.json()["error"]["details"][0]["field"] == "credentials"
+
+
+@pytest.mark.parametrize("foreign", [True, False])
+def test_giay_to_cua_nguoi_khac_hoac_khong_ton_tai(client, upstream, auth, foreign):
+    uid = upstream.user()
+    body = _body(upstream, uid)
+    body["credentials"][0]["document_id"] = str(upstream.document(uuid.uuid4()) if foreign else uuid.uuid4())
+    res = client.post(LAWYERS, headers=auth(uid), json=body)
+    assert res.status_code == 422 and _code(res) == "VALIDATION_ERROR"
+    assert res.json()["error"]["details"][0]["field"] == "credentials"
+    assert client.get(ME, headers=auth(uid)).status_code == 404
+
+
+def test_gui_lan_hai_409(client, upstream, auth):
+    uid, _ = _submit(client, upstream, auth)
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid, "999/TP"))
     assert res.status_code == 409 and _code(res) == "LAWYER_PROFILE_EXISTS"
 
 
-def test_doi_the_khi_chua_co_so_the(client, db, upstream, auth):
-    uid = upstream.user(role="lawyer")
+def test_da_co_ho_so_luat_su_thi_khong_xin_moi(client, db, upstream, auth):
+    uid = upstream.user()
     db.add(LawyerProfile(user_id=uid, source="admin_created", status="incomplete"))
     db.commit()
-    res = client.post(APPS, headers=auth(uid, "lawyer"), json={"type": "card_change"})
-    assert res.status_code == 409 and _code(res) == "CARD_NOT_SET"
-
-
-def test_anh_the_cua_nguoi_khac_bi_tu_choi(client, upstream, auth):
-    uid = upstream.user()
-    other_card = upstream.card(uuid.uuid4())
-    res = client.post(APPS, headers=auth(uid), json={"type": "new", "card_document_id": str(other_card)})
-    assert res.status_code == 422 and res.json()["error"]["details"][0]["field"] == "card_document_id"
-    res = client.post(APPS, headers=auth(uid), json={"type": "new", "card_document_id": str(uuid.uuid4())})
-    assert res.status_code == 422
-
-
-@pytest.mark.parametrize("kind,status,code", [("down", 503, "DOCUMENT_UNAVAILABLE"),
-                                              ("timeout", 504, "DOCUMENT_TIMEOUT"),
-                                              ("bad", 502, "DOCUMENT_BAD_RESPONSE")])
-def test_document_service_loi(client, upstream, auth, kind, status, code):
-    uid = upstream.user()
-    card = upstream.card(uid)
-    upstream.fail["/internal/v1/documents"] = kind
-    res = client.post(APPS, headers=auth(uid), json={"type": "new", "card_document_id": str(card)})
-    assert res.status_code == status and _code(res) == code
-
-
-# ---------------------------------------------------------------- Sửa, xem, danh sách
-def test_sua_nhap_va_xem_lai(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    res = client.patch(f"{APPS}/{data['id']}", headers=auth(uid), json={"bio": None, "specialization_codes":
-                                                                        ["land", "business"]})
-    assert res.status_code == 200 and res.json()["data"]["bio"] is None
-    assert client.get(f"{APPS}/{data['id']}", headers=auth(uid)).json()["data"]["specializations"][1]["code"] == \
-        "business"
-    listing = client.get(APPS, headers=auth(uid)).json()["data"]
-    assert listing["pagination"] == {"page": 1, "page_size": 20, "total": 1, "total_pages": 1}
-
-
-def test_don_nguoi_khac_tra_404(client, upstream, auth):
-    _, data = _draft(client, upstream, auth)
-    stranger = auth(upstream.user())
-    for res in (client.get(f"{APPS}/{data['id']}", headers=stranger),
-                client.patch(f"{APPS}/{data['id']}", headers=stranger, json={"bio": "x"}),
-                client.post(f"{APPS}/{data['id']}/submit", headers=stranger),
-                client.post(f"{APPS}/{data['id']}/withdraw", headers=stranger)):
-        assert res.status_code == 404 and _code(res) == "APPLICATION_NOT_FOUND"
-
-
-def test_sua_don_rong_hoac_id_sai_422(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    assert client.patch(f"{APPS}/{data['id']}", headers=auth(uid), json={}).status_code == 422
-    assert client.get(f"{APPS}/not-a-uuid", headers=auth(uid)).status_code == 422
-
-
-def test_sua_don_pending_van_phai_du(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    assert client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid)).status_code == 200
-    res = client.patch(f"{APPS}/{data['id']}", headers=auth(uid), json={"specialization_codes": []})
-    assert res.status_code == 422
-    res = client.patch(f"{APPS}/{data['id']}", headers=auth(uid), json={"law_firm": "VP mới"})
-    assert res.status_code == 200 and res.json()["data"]["status"] == "pending"
-
-
-# ---------------------------------------------------------------- Gửi duyệt
-def test_gui_duyet_luu_ho_ten_cccd(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 200, res.text
-    sent = res.json()["data"]
-    assert sent["status"] == "pending" and sent["submitted_at"] and sent["applicant_full_name"] == "Nguyễn Văn A"
-    again = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert again.status_code == 409 and _code(again) == "APPLICATION_NOT_DRAFT"
-
-
-def test_gui_duyet_thieu_truong(client, upstream, auth):
-    uid = upstream.user()
-    data = client.post(APPS, headers=auth(uid), json={"type": "new"}).json()["data"]
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 422
-    assert {d["field"] for d in res.json()["error"]["details"]} == {"card_document_id", "bar_card_number",
-                                                                    "specialization_codes"}
-
-
-def test_gui_duyet_chua_khai_cccd_hoac_bi_khoa(client, upstream, auth):
-    uid = upstream.user(cccd=False)
-    _, data = _draft(client, upstream, auth, uid)
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 409 and _code(res) == "CITIZEN_PROFILE_REQUIRED"
-    upstream.users[uid].update(has_citizen_profile=True, is_locked=True)
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 403 and _code(res) == "ACCOUNT_LOCKED"
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 409 and _code(res) == "LAWYER_PROFILE_EXISTS"
 
 
 def test_so_the_trung_don_dang_cho(client, upstream, auth):
-    uid1, d1 = _draft(client, upstream, auth, number="777/TP")
-    assert client.post(f"{APPS}/{d1['id']}/submit", headers=auth(uid1)).status_code == 200
-    uid2, d2 = _draft(client, upstream, auth, number="777/tp")
-    res = client.post(f"{APPS}/{d2['id']}/submit", headers=auth(uid2))
+    _submit(client, upstream, auth, number="777/TP")
+    uid = upstream.user()
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid, "777/tp"))
     assert res.status_code == 409 and _code(res) == "BAR_CARD_NUMBER_TAKEN"
 
 
-@pytest.mark.parametrize("kind,status", [("down", 503), ("timeout", 504), ("bad", 502)])
-def test_gui_duyet_user_service_loi(client, upstream, auth, kind, status):
-    uid, data = _draft(client, upstream, auth)
-    upstream.fail["/internal/v1/users"] = kind
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == status and _code(res).startswith("USER_")
-    upstream.fail.clear()
-    assert client.get(f"{APPS}/{data['id']}", headers=auth(uid)).json()["data"]["status"] == "draft"
-
-
-def test_cho_24h_sau_khi_bi_tu_choi(client, db, upstream, auth, monkeypatch):
-    uid = upstream.user()
-    db.add(LawyerApplication(user_id=uid, type="new", status="rejected", reject_reason="Ảnh mờ",
-                             reviewed_by=uuid.uuid4(), reviewed_at=utcnow() - timedelta(hours=2),
-                             submitted_at=utcnow() - timedelta(hours=3), card_document_id=uuid.uuid4(),
-                             bar_card_number="1/TP"))
+def test_so_the_trung_ho_so_dang_hoat_dong(client, db, upstream, auth):
+    profile = LawyerProfile(user_id=uuid.uuid4(), source="admin_created", status="active", bar_card_number="888/TP")
+    profile.specializations = [LawyerProfileSpecialization(specialization_code="land")]
+    db.add(profile)
     db.commit()
-    _, data = _draft(client, upstream, auth, uid)  # tạo nháp vẫn được
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 409 and _code(res) == "REAPPLY_COOLDOWN" and "vui lòng chờ đến" in res.json()["error"]["message"]
-    rejected = [a for a in client.get(APPS, headers=auth(uid)).json()["data"]["items"] if a["status"] == "rejected"]
-    assert rejected[0]["can_reapply_at"]
-    monkeypatch.setenv("LAWYER_REAPPLY_COOLDOWN_HOURS", "1")
-    assert client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid)).status_code == 200
+    uid = upstream.user()
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid, " 888/tp "))
+    assert res.status_code == 409 and _code(res) == "BAR_CARD_NUMBER_TAKEN"
 
 
-# ---------------------------------------------------------------- Rút đơn
-def test_rut_don_pending_va_nhap(client, upstream, auth):
-    uid, data = _draft(client, upstream, auth)
-    client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    res = client.post(f"{APPS}/{data['id']}/withdraw", headers=auth(uid))
-    assert res.status_code == 200 and res.json()["data"]["status"] == "withdrawn"
-    again = client.post(f"{APPS}/{data['id']}/withdraw", headers=auth(uid))
+def test_chua_khai_cccd_hoac_bi_khoa(client, upstream, auth):
+    uid = upstream.user(cccd=False)
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 409 and _code(res) == "CITIZEN_PROFILE_REQUIRED"
+    upstream.users[uid].update(has_citizen_profile=True, is_locked=True)
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 403 and _code(res) == "ACCOUNT_LOCKED"
+
+
+def test_tai_khoan_khong_ton_tai_401(client, upstream, auth):
+    uid = uuid.uuid4()  # có token nhưng User Service không còn tài khoản
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 401 and _code(res) == "UNAUTHORIZED"
+
+
+@pytest.mark.parametrize("prefix,kind,status,code", [
+    ("/internal/v1/users", "down", 503, "USER_UNAVAILABLE"),
+    ("/internal/v1/users", "timeout", 504, "USER_TIMEOUT"),
+    ("/internal/v1/users", "bad", 502, "USER_BAD_RESPONSE"),
+    ("/api/v1/documents", "down", 503, "DOCUMENT_UNAVAILABLE"),
+    ("/api/v1/documents", "bad", 502, "DOCUMENT_BAD_RESPONSE"),
+])
+def test_service_phu_loi_thi_khong_luu(client, upstream, auth, prefix, kind, status, code):
+    uid = upstream.user()
+    upstream.fail[prefix] = kind
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == status and _code(res) == code
+    upstream.fail.clear()
+    assert client.get(ME, headers=auth(uid)).status_code == 404
+
+
+# ---------------------------------------------------------------- Xem hồ sơ của tôi
+def test_chua_gui_ho_so_tra_404(client, auth):
+    res = client.get(ME, headers=auth(uuid.uuid4()))
+    assert res.status_code == 404 and _code(res) == "LAWYER_NOT_FOUND"
+
+
+def test_me_tra_don_moi_nhat(client, db, upstream, auth, monkeypatch):
+    uid = upstream.user()
+    _rejected(db, uid, hours_ago=48)
+    monkeypatch.setenv("LAWYER_REAPPLY_COOLDOWN_HOURS", "0")
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 200, res.text
+    me = client.get(ME, headers=auth(uid)).json()["data"]
+    assert me["id"] == res.json()["data"]["id"] and me["approval_status"] == "pending"
+
+
+# ---------------------------------------------------------------- Gửi lại sau khi bị từ chối
+def test_gui_lai_khi_chua_co_don_404(client, upstream, auth):
+    uid = upstream.user()
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 404 and _code(res) == "LAWYER_NOT_FOUND"
+
+
+def test_don_dang_cho_khong_gui_lai_duoc(client, upstream, auth):
+    uid, _ = _submit(client, upstream, auth)
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 409 and _code(res) == "APPLICATION_NOT_EDITABLE"
+
+
+def test_gui_lai_phai_cho_het_thoi_gian(client, db, upstream, auth):
+    uid = upstream.user()
+    old = _rejected(db, uid, hours_ago=2)
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid))
+    assert res.status_code == 409 and _code(res) == "REAPPLY_COOLDOWN"
+    assert "vui lòng chờ đến" in res.json()["error"]["message"]
+    # Hết 24 giờ thì gửi lại được: tạo đơn mới, đơn cũ giữ làm lịch sử.
+    old.reviewed_at = utcnow() - timedelta(hours=25)
+    db.commit()
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid, "1/TP"))
+    assert res.status_code == 200, res.text
+    data = res.json()["data"]
+    assert data["id"] != str(old.id) and data["approval_status"] == "pending" and data["rejected_reason"] is None
+    db.expire_all()
+    assert db.get(LawyerApplication, old.id).status == "rejected"
+    again = client.put(ME, headers=auth(uid), json=_body(upstream, uid))
     assert again.status_code == 409 and _code(again) == "APPLICATION_NOT_EDITABLE"
-    assert client.patch(f"{APPS}/{data['id']}", headers=auth(uid), json={"bio": "x"}).status_code == 409
-    # Rút xong thì tạo đơn mới được, không tính thời gian chờ.
-    _draft(client, upstream, auth, uid, number="555/TP")
-
-
-def test_doi_the_cua_luat_su(client, db, upstream, auth):
-    uid = _lawyer(db, upstream)
-    card = upstream.card(uid, number="222/TP")
-    res = client.post(APPS, headers=auth(uid, "lawyer"), json={"type": "card_change", "bar_card_number": "222/TP",
-                                                                "card_document_id": str(card)})
-    assert res.status_code == 201 and res.json()["data"]["specializations"] is None
-    sent = client.post(f"{APPS}/{res.json()['data']['id']}/submit", headers=auth(uid, "lawyer"))
-    assert sent.status_code == 200
-    me = client.get("/api/v1/lawyers/me", headers=auth(uid, "lawyer")).json()["data"]
-    assert me["bar_card_number"] == "111/TP" and me["pending_application"]["type"] == "card_change"

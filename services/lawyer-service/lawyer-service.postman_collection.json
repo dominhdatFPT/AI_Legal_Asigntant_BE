@@ -1,0 +1,168 @@
+{
+  "info": {
+    "name": "Lawyer Service - Đăng ký & duyệt luật sư",
+    "description": "Chạy theo thứ tự qua Gateway. Điền citizenEmail/citizenPassword (tài khoản citizen ĐÃ khai CCCD) và adminEmail/adminPassword ở tab Variables. Ở 2 request upload, chọn file PDF/JPG/PNG cho ô `file`. Đăng nhập tự lưu token, upload tự lưu document_id, gửi hồ sơ tự lưu applicationId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "citizenEmail", "value": "" },
+    { "key": "citizenPassword", "value": "" },
+    { "key": "adminEmail", "value": "admin.hcm@demo.ai-legal.local" },
+    { "key": "adminPassword", "value": "Demo@123" },
+    { "key": "citizenToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "cardDocumentId", "value": "" },
+    { "key": "certDocumentId", "value": "" },
+    { "key": "applicationId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Đăng nhập citizen",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "pm.collectionVariables.set('citizenToken', pm.response.json().data.access_token);"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/users/auth/login",
+        "body": { "mode": "raw", "raw": "{\"username\": \"{{citizenEmail}}\", \"password\": \"{{citizenPassword}}\"}" }
+      }
+    },
+    {
+      "name": "2. Đăng nhập admin",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200', () => pm.response.to.have.status(200));",
+        "pm.collectionVariables.set('adminToken', pm.response.json().data.access_token);"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/users/auth/login",
+        "body": { "mode": "raw", "raw": "{\"username\": \"{{adminEmail}}\", \"password\": \"{{adminPassword}}\"}" }
+      }
+    },
+    {
+      "name": "3. Danh sách lĩnh vực (công khai)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 + có land, business', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.items.map(i => i.code)).to.include.members(['land', 'business']); });"
+      ] } }],
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/lawyers/specializations" }
+    },
+    {
+      "name": "4. Hồ sơ của tôi (chưa gửi → 404)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 hoặc 404 LAWYER_NOT_FOUND', () => pm.expect([200, 404]).to.include(pm.response.code));"
+      ] } }],
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "url": "{{baseUrl}}/api/lawyers/me"
+      }
+    },
+    {
+      "name": "5. Upload thẻ luật sư (Document Service)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('202', () => pm.response.to.have.status(202));",
+        "pm.collectionVariables.set('cardDocumentId', pm.response.json().data.document_id);"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "header": [{ "key": "Idempotency-Key", "value": "{{$guid}}" }],
+        "url": "{{baseUrl}}/api/documents/",
+        "body": { "mode": "formdata", "formdata": [
+          { "key": "file", "type": "file", "src": [] },
+          { "key": "purpose", "value": "supporting_document", "type": "text" },
+          { "key": "document_type", "value": "other", "type": "text" }
+        ] }
+      }
+    },
+    {
+      "name": "6. Upload chứng chỉ hành nghề (Document Service)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('202', () => pm.response.to.have.status(202));",
+        "pm.collectionVariables.set('certDocumentId', pm.response.json().data.document_id);"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "header": [{ "key": "Idempotency-Key", "value": "{{$guid}}" }],
+        "url": "{{baseUrl}}/api/documents/",
+        "body": { "mode": "formdata", "formdata": [
+          { "key": "file", "type": "file", "src": [] },
+          { "key": "purpose", "value": "supporting_document", "type": "text" },
+          { "key": "document_type", "value": "other", "type": "text" }
+        ] }
+      }
+    },
+    {
+      "name": "7. Gửi hồ sơ luật sư",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('201 pending', () => { pm.response.to.have.status(201); pm.expect(pm.response.json().data.approval_status).to.eql('pending'); });",
+        "pm.collectionVariables.set('applicationId', pm.response.json().data.id);"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/lawyers",
+        "body": { "mode": "raw", "raw": "{\n  \"bar_card_number\": \"12345/TP\",\n  \"law_firm\": \"Công ty Luật ABC\",\n  \"years_experience\": 5,\n  \"bio\": \"Tư vấn đất đai, hộ kinh doanh\",\n  \"specialization_codes\": [\"land\", \"business\"],\n  \"credentials\": [\n    {\"document_id\": \"{{cardDocumentId}}\", \"type\": \"the_luat_su\"},\n    {\"document_id\": \"{{certDocumentId}}\", \"type\": \"chung_chi_hanh_nghe\"}\n  ]\n}" }
+      }
+    },
+    {
+      "name": "8. Admin - danh sách chờ duyệt",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 + có hồ sơ vừa gửi', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.items.map(i => i.id)).to.include(pm.collectionVariables.get('applicationId')); });"
+      ] } }],
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}" }] },
+        "url": "{{baseUrl}}/api/lawyers/applications?approval_status=pending&page=1&page_size=100"
+      }
+    },
+    {
+      "name": "9a. Admin - từ chối (chạy 9a HOẶC 9b)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 rejected', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.approval_status).to.eql('rejected'); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}" }] },
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/lawyers/{{applicationId}}/reject",
+        "body": { "mode": "raw", "raw": "{\"reason\": \"Ảnh thẻ mờ, vui lòng chụp lại\"}" }
+      }
+    },
+    {
+      "name": "9b. Admin - duyệt (citizen thành lawyer)",
+      "event": [{ "listen": "test", "script": { "exec": [
+        "pm.test('200 approved', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.approval_status).to.eql('approved'); });"
+      ] } }],
+      "request": {
+        "method": "POST",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminToken}}" }] },
+        "url": "{{baseUrl}}/api/lawyers/{{applicationId}}/approve"
+      }
+    },
+    {
+      "name": "10. Hồ sơ của tôi (xem trạng thái / lý do từ chối)",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "url": "{{baseUrl}}/api/lawyers/me"
+      }
+    },
+    {
+      "name": "11. Gửi lại sau khi bị từ chối (chờ LAWYER_REAPPLY_COOLDOWN_HOURS, mặc định 24h → 409 REAPPLY_COOLDOWN)",
+      "request": {
+        "method": "PUT",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{citizenToken}}" }] },
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/lawyers/me",
+        "body": { "mode": "raw", "raw": "{\n  \"bar_card_number\": \"12345/TP\",\n  \"specialization_codes\": [\"land\"],\n  \"credentials\": [\n    {\"document_id\": \"{{cardDocumentId}}\", \"type\": \"the_luat_su\"},\n    {\"document_id\": \"{{certDocumentId}}\", \"type\": \"chung_chi_hanh_nghe\"}\n  ]\n}" }
+      }
+    }
+  ]
+}

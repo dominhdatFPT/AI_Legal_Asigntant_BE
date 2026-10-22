@@ -1,6 +1,6 @@
 # TÀI LIỆU BÀN GIAO TÍCH HỢP API PROCEDURE SERVICE (DÀNH CHO FRONTEND)
 
-Tài liệu kỹ thuật tổng hợp toàn bộ các API Backend của **Procedure Service** được thiết kế để đội ngũ Frontend (FE) tích hợp xây dựng giao diện hiển thị danh mục, tìm kiếm, render biểu mẫu động và lưu trữ hồ sơ người dùng.
+Tài liệu kỹ thuật tổng hợp toàn bộ các API Backend của **Procedure Service** được thiết kế để đội ngũ Frontend (FE) tích hợp xây dựng giao diện hiển thị danh mục, tìm kiếm, render biểu mẫu động, quản lý vòng đời hồ sơ người dùng (tạo nháp, cập nhật, xóa, nộp chính thức, xem lịch sử) và bảo mật JWT.
 
 ---
 
@@ -8,7 +8,10 @@ Tài liệu kỹ thuật tổng hợp toàn bộ các API Backend của **Proced
 
 - **Base URL qua API Gateway (FE gọi chính thức):** `http://localhost:8080/api/procedures`
 - **Base URL Service độc lập (Local test BE):** `http://localhost:8000/api/v1/procedures`
-- **Xác thực (Authentication):** Công khai (Không bắt buộc token, hỗ trợ khách vãng lai và người dân nộp đơn).
+- **Xác thực (Authentication):**
+  - **Tra cứu danh mục & Biểu mẫu thủ tục:** Công khai (Public, không yêu cầu đăng nhập).
+  - **Quản lý hồ sơ cá nhân:** Yêu cầu đăng nhập qua JWT Bearer Token (`Authorization: Bearer <token>`) hoặc HttpOnly cookie (`access_token`).
+  - **Lưu nháp hồ sơ ban đầu (`POST /applications`):** Hỗ trợ cả người dùng ẩn danh (guest) lẫn người dùng đã đăng nhập (tự động gắn `user_id` từ token).
 - **Format dữ liệu:** `application/json; charset=utf-8`
 - **Chuẩn bọc kết quả (Response Wrapper):**
   - **Thành công (HTTP 200, 201):**
@@ -19,7 +22,7 @@ Tài liệu kỹ thuật tổng hợp toàn bộ các API Backend của **Proced
       "request_id": "req-xxxx-xxxx"
     }
     ```
-  - **Lỗi (HTTP 400, 404, 422, 500):**
+  - **Lỗi (HTTP 400, 401, 403, 404, 422, 500):**
     ```json
     {
       "data": null,
@@ -36,27 +39,31 @@ Tài liệu kỹ thuật tổng hợp toàn bộ các API Backend của **Proced
 
 ## 2. Bảng tổng hợp toàn bộ các API Endpoints
 
-| STT | Method | Endpoint qua Gateway (FE gọi) | Endpoint trực tiếp Backend | Chức năng trên Giao diện Frontend |
-|:---:|:---:|---|---|---|
-| **1** | `GET` | `/api/procedures/health` | `/api/v1/procedures/health` | **Kiểm tra trạng thái Service & Database** (cho Header/Status bar) |
-| **2** | `GET` | `/api/procedures/domains` | `/api/v1/procedures/domains` | **Lấy danh sách Lĩnh vực** (cho Tabs / Filter: Tất cả, Kinh doanh, Đất đai) |
-| **3** | `GET` | `/api/procedures/domains/{domain}` | `/api/v1/procedures/domains/{domain}` | **Danh sách chi tiết thủ tục theo lĩnh vực** (`land` / `business`) |
-| **4** | `GET` | `/api/procedures/domains/{domain}/names` | `/api/v1/procedures/domains/{domain}/names` | **Tên & mã thủ tục rút gọn** (cho Select box / Dropdown menu) |
-| **5** | `GET` | `/api/procedures` | `/api/v1/procedures` | **Danh sách thủ tục phân trang** (kèm lọc lĩnh vực và tìm kiếm nhanh `q`) |
-| **6** | `POST` | `/api/procedures/search` | `/api/v1/procedures/search` | **Tìm kiếm thông minh** (hỗ trợ câu hỏi tự nhiên, từ khóa có dấu/không dấu) |
-| **7** | `GET` | `/api/procedures/{id_hoặc_code}` | `/api/v1/procedures/{id_hoặc_code}` | **Chi tiết thủ tục** (nhận UUID hoặc mã: `DD-001`, `HKD-001`...) |
-| **8** | `GET` | `/api/procedures/{id_hoặc_code}/requirements` | `/api/v1/procedures/{id_hoặc_code}/requirements` | **Checklist hồ sơ giấy tờ cần chuẩn bị** |
-| **9** | `GET` | `/api/procedures/{id_hoặc_code}/conditions` | `/api/v1/procedures/{id_hoặc_code}/conditions` | **Danh sách điều kiện thực hiện thủ tục** |
-| **10** | `GET` | `/api/procedures/{id_hoặc_code}/fees` | `/api/v1/procedures/{id_hoặc_code}/fees` | **Bảng phí, lệ phí chi tiết** |
-| **11** | `GET` | `/api/procedures/form-schema/{procedure_code}` | `/api/v1/procedures/form-schema/{procedure_code}` | **HÀM TRUNG GIAN (DISPATCHER): Lấy Form Schema động của 25 thủ tục** |
-| **12** | `POST` | `/api/procedures/applications` | `/api/v1/procedures/applications` | **Lưu hồ sơ người dùng điền** (tự động phân loại bảng Đất đai / Kinh doanh) |
-| **13** | `GET` | `/api/procedures/applications/{domain}/{record_id}` | `/api/v1/procedures/applications/{domain}/{record_id}` | **Tra cứu lại hồ sơ đã lưu** (để render lại dữ liệu vào form) |
+| STT | Method | Endpoint qua Gateway (FE gọi) | Endpoint trực tiếp Backend | Xác thực | Chức năng trên Giao diện Frontend |
+|:---:|:---:|---|---|:---:|---|
+| **1** | `GET` | `/api/procedures/health` | `/api/v1/procedures/health` | Không | **Kiểm tra trạng thái Service & Database** (cho Header/Status bar) |
+| **2** | `GET` | `/api/procedures/domains` | `/api/v1/procedures/domains` | Không | **Lấy danh sách Lĩnh vực** (cho Tabs / Filter: Tất cả, Kinh doanh, Đất đai) |
+| **3** | `GET` | `/api/procedures/domains/{domain}` | `/api/v1/procedures/domains/{domain}` | Không | **Danh sách chi tiết thủ tục theo lĩnh vực** (`land` / `business`) |
+| **4** | `GET` | `/api/procedures/domains/{domain}/names` | `/api/v1/procedures/domains/{domain}/names` | Không | **Tên & mã thủ tục rút gọn** (cho Select box / Dropdown menu) |
+| **5** | `GET` | `/api/procedures` | `/api/v1/procedures` | Không | **Danh sách thủ tục phân trang** (kèm lọc lĩnh vực và tìm kiếm nhanh `q`) |
+| **6** | `POST` | `/api/procedures/search` | `/api/v1/procedures/search` | Không | **Tìm kiếm thông minh** (hỗ trợ câu hỏi tự nhiên, từ khóa có dấu/không dấu) |
+| **7** | `GET` | `/api/procedures/{id_hoặc_code}` | `/api/v1/procedures/{id_hoặc_code}` | Không | **Chi tiết thủ tục** (nhận UUID hoặc mã: `DD-001`, `HKD-001`...) |
+| **8** | `GET` | `/api/procedures/{id_hoặc_code}/requirements` | `/api/v1/procedures/{id_hoặc_code}/requirements` | Không | **Checklist hồ sơ giấy tờ cần chuẩn bị** |
+| **9** | `GET` | `/api/procedures/{id_hoặc_code}/conditions` | `/api/v1/procedures/{id_hoặc_code}/conditions` | Không | **Danh sách điều kiện thực hiện thủ tục** |
+| **10** | `GET` | `/api/procedures/{id_hoặc_code}/fees` | `/api/v1/procedures/{id_hoặc_code}/fees` | Không | **Bảng phí, lệ phí chi tiết** |
+| **11** | `GET` | `/api/procedures/form-schema/{procedure_code}` | `/api/v1/procedures/form-schema/{procedure_code}` | Không | **HÀM TRUNG GIAN (DISPATCHER): Lấy Form Schema động của 25 thủ tục** |
+| **12** | `GET` | `/api/procedures/applications` | `/api/v1/procedures/applications` | **Bearer** | **Danh sách hồ sơ của tôi** (phân trang, lọc theo lĩnh vực `domain`, trạng thái `status`, tìm kiếm) |
+| **13** | `POST` | `/api/procedures/applications` | `/api/v1/procedures/applications` | Tùy chọn | **Lưu hồ sơ người dùng điền** (tự động phân loại bảng Đất đai / Kinh doanh) |
+| **14** | `GET` | `/api/procedures/applications/{domain}/{record_id}` | `/api/v1/procedures/applications/{domain}/{record_id}` | Tùy chọn | **Tra cứu lại hồ sơ đã lưu** (để render lại dữ liệu vào form) |
+| **15** | `PUT` | `/api/procedures/applications/{domain}/{record_id}` | `/api/v1/procedures/applications/{domain}/{record_id}` | **Bearer** | **Cập nhật bản nháp hồ sơ** (chỉ chủ sở hữu, chỉ cho phép khi đang là `draft`) |
+| **16** | `DELETE` | `/api/procedures/applications/{domain}/{record_id}` | `/api/v1/procedures/applications/{domain}/{record_id}` | **Bearer** | **Xóa bản nháp hồ sơ** (chỉ chủ sở hữu, chỉ cho phép khi đang là `draft`) |
+| **17** | `POST` | `/api/procedures/applications/{domain}/{record_id}/submit` | `/api/v1/procedures/applications/{domain}/{record_id}/submit` | **Bearer** | **Nộp chính thức hồ sơ** (kiểm tra đầy đủ trường bắt buộc, khóa hồ sơ) |
 
 ---
 
 ## 3. Danh sách 25 Thủ tục chi tiết & Dispatcher Form
 
-Backend tích hợp sẵn **1 Hàm điều phối trung gian** kết nối đến **25 hàm chuyên biệt** tương ứng với 25 thủ tục chi tiết:
+Backend tích hợp sẵn **1 Hàm điều phối trung gian** (`GET /form-schema/{procedure_code}`) kết nối đến **25 hàm chuyên biệt** tương ứng với 25 thủ tục chi tiết:
 
 ### A. Lĩnh vực Đất đai & Bất động sản (12 thủ tục - Bảng đích: `land_procedure_records`)
 1. **`DD-001`**: Đăng ký biến động quyền sử dụng đất do chuyển nhượng (Mẫu 11/ĐK - Sang tên sổ đỏ)
@@ -93,301 +100,243 @@ Backend tích hợp sẵn **1 Hàm điều phối trung gian** kết nối đế
 
 ### 4.1. `GET /api/procedures/health`
 Kiểm tra sức khỏe service và kết nối database.
-- **Response mẫu:**
-  ```json
-  {
-    "status": "healthy",
-    "service": "procedure-service",
-    "version": "0.1.0",
-    "database": {
-      "status": "connected",
-      "connected": true,
-      "message": "Kết nối PostgreSQL qua PROCEDURE_DATABASE_URL hoạt động tốt."
-    },
-    "request_id": "req-3fa85f64-5717-4562-b3fc-2c963f66afa6"
-  }
-  ```
 
 ---
 
 ### 4.2. `GET /api/procedures/domains`
 Lấy danh sách các lĩnh vực hỗ trợ kèm số lượng thủ tục thực tế (cho Tab / Filter trên UI).
-- **Response mẫu:**
-  ```json
-  {
-    "data": [
-      {
-        "code": "business",
-        "name": "Doanh nghiệp & Hộ kinh doanh",
-        "description": "Thành lập, thay đổi nội dung, giải thể doanh nghiệp và hộ kinh doanh...",
-        "icon": "storefront",
-        "count": 13
-      },
-      {
-        "code": "land",
-        "name": "Đất đai & Bất động sản",
-        "description": "Đăng ký biến động, cấp đổi, tách thửa, thế chấp, sang tên sổ đỏ...",
-        "icon": "landscape",
-        "count": 12
-      }
-    ],
-    "total_procedures": 25,
-    "error": null,
-    "request_id": "req-3fa85f64"
-  }
-  ```
 
 ---
 
 ### 4.3. `GET /api/procedures/domains/{domain}/names`
 Lấy danh sách tên & mã thủ tục rút gọn theo lĩnh vực (cho Dropdown menu / Select box).
-- **Tham số:** `domain` (`land` hoặc `business`)
-- **Response mẫu:**
-  ```json
-  {
-    "data": {
-      "domain": "land",
-      "total": 12,
-      "items": [
-        { "id": "d5d9c792-5b9e-4e42-9a3b-2856247c7c30", "code": "DD-001", "name": "Đăng ký biến động quyền sử dụng đất do chuyển nhượng" },
-        { "id": "b6c5d470-9e4d-7a84-1a5f-6298481d1d74", "code": "DD-002", "name": "Cấp đổi Giấy chứng nhận quyền sử dụng đất..." }
-      ]
-    },
-    "error": null,
-    "request_id": "req-3fa85f64"
-  }
-  ```
 
 ---
 
-### 4.4. `GET /api/procedures/form-schema/{procedure_code}`
-**HÀM TRUNG GIAN LẤY BIỂU MẪU ĐỘNG:** FE chỉ cần truyền mã thủ tục, BE điều phối tới 1 trong 25 hàm chi tiết trả về schema biểu mẫu hoàn chỉnh.
-- **Ví dụ gọi:** `GET /api/procedures/form-schema/DD-001` hoặc `GET /api/procedures/form-schema/HKD-001`
-- **Response mẫu (`DD-001` - Đăng ký biến động đất đai):**
-  ```json
-  {
-    "data": {
-      "procedure_code": "DD-001",
-      "procedure_name": "Đăng ký biến động quyền sử dụng đất do chuyển nhượng",
-      "domain": "land",
-      "target_table": "land_procedure_records",
-      "sections": [
-        {
-          "section_id": "applicant_info",
-          "title": "Thông tin Người nộp hồ sơ / Người sử dụng đất",
-          "description": "Thông tin cá nhân người đứng tên yêu cầu đăng ký",
-          "order": 1,
-          "fields": [
-            {
-              "name": "applicant_name",
-              "label": "Họ và tên người sử dụng đất / sở hữu tài sản",
-              "field_type": "text",
-              "required": true,
-              "placeholder": "NGUYỄN VĂN A"
-            },
-            {
-              "name": "applicant_id_number",
-              "label": "Số CCCD / Hộ chiếu",
-              "field_type": "text",
-              "required": true,
-              "placeholder": "12 chữ số CCCD"
-            },
-            {
-              "name": "applicant_phone",
-              "label": "Số điện thoại liên hệ",
-              "field_type": "text",
-              "required": true
-            }
-          ]
-        },
-        {
-          "section_id": "land_plot_info",
-          "title": "Thông tin Thửa đất & Tài sản gắn liền với đất",
-          "description": "Dữ liệu thể hiện trên Giấy chứng nhận hiện tại",
-          "order": 2,
-          "fields": [
-            {
-              "name": "plot_number",
-              "label": "Thửa đất số",
-              "field_type": "text",
-              "required": true
-            },
-            {
-              "name": "map_sheet_number",
-              "label": "Tờ bản đồ số",
-              "field_type": "text",
-              "required": true
-            },
-            {
-              "name": "land_address",
-              "label": "Địa chỉ thửa đất",
-              "field_type": "text",
-              "required": true
-            },
-            {
-              "name": "land_area",
-              "label": "Diện tích đất (m²)",
-              "field_type": "number",
-              "required": true
-            }
-          ]
-        },
-        {
-          "section_id": "procedure_specific",
-          "title": "Nội dung biến động đề nghị đăng ký",
-          "order": 3,
-          "fields": [
-            {
-              "name": "transfer_contract_number",
-              "label": "Số hợp đồng chuyển nhượng công chứng",
-              "field_type": "text",
-              "required": false
-            },
-            {
-              "name": "transfer_date",
-              "label": "Ngày công chứng hợp đồng",
-              "field_type": "date",
-              "required": false
-            },
-            {
-              "name": "change_content_description",
-              "label": "Nội dung biến động chi tiết",
-              "field_type": "textarea",
-              "required": false
-            }
-          ]
-        }
-      ]
-    },
-    "error": null,
-    "request_id": "req-3fa85f64"
-  }
-  ```
+### 4.4. `GET /api/procedures/domains/{domain}`
+Lấy danh sách chi tiết các thủ tục thuộc một lĩnh vực (`land` hoặc `business`).
 
 ---
 
-### 4.5. `POST /api/procedures/applications`
-**LƯU HỒ SƠ NGƯỜI DÙNG ĐIỀN VÀO CSDL:**
-Hệ thống tự động nhận diện mã thủ tục:
-- Nếu bắt đầu bằng `DD-*` -> Lưu vào bảng `public.land_procedure_records`
-- Nếu bắt đầu bằng `HKD-*` hoặc `DN-*` -> Lưu vào bảng `public.business_procedure_records`
-
-#### Request Body mẫu (Lĩnh vực Đất đai):
-```json
-{
-  "procedure_code": "DD-001",
-  "user_id": null,
-  "status": "draft",
-  "form_data": {
-    "applicant_name": "Nguyễn Văn A",
-    "applicant_id_number": "012345678901",
-    "applicant_phone": "0901234567",
-    "plot_number": "123",
-    "map_sheet_number": "45",
-    "land_address": "Số 10 Đường ABC, Phường 1, Quận 1, TP.HCM",
-    "land_area": 120.5,
-    "land_use_purpose": "Đất ở tại đô thị",
-    "land_use_origin": "Nhận chuyển nhượng quyền sử dụng đất",
-    "transfer_contract_number": "CC-12345/2026",
-    "transfer_date": "2026-10-01"
-  },
-  "extra_data": {
-    "note": "Nộp kèm 01 bản chính Sổ đỏ và hợp đồng công chứng"
-  }
-}
-```
-
-#### Request Body mẫu (Lĩnh vực Kinh doanh):
-```json
-{
-  "procedure_code": "HKD-001",
-  "user_id": null,
-  "status": "draft",
-  "form_data": {
-    "applicant_name": "Trần Thị B",
-    "applicant_id_number": "098765432109",
-    "applicant_phone": "0912345678",
-    "business_name_vn": "HỘ KINH DOANH BÌNH MINH",
-    "headquarters_address": "Số 50 Đường XYZ, Phường 2, Quận 3, TP.HCM",
-    "charter_capital": 100000000,
-    "business_lines": "Bán lẻ hàng tạp phẩm, nước giải khát",
-    "household_head_name": "Trần Thị B"
-  },
-  "extra_data": {
-    "note": "Địa điểm kinh doanh thuê 5 năm"
-  }
-}
-```
-
-#### Response mẫu (HTTP 200 OK):
-```json
-{
-  "data": {
-    "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
-    "user_id": null,
-    "procedure_code": "DD-001",
-    "procedure_id": "d5d9c792-5b9e-4e42-9a3b-2856247c7c30",
-    "status": "draft",
-    "applicant_name": "Nguyễn Văn A",
-    "created_at": "2026-10-10T13:46:26.123456Z",
-    "updated_at": "2026-10-10T13:46:26.123456Z",
-    "domain": "land",
-    "target_table": "land_procedure_records"
-  },
-  "error": null,
-  "request_id": "req-3fa85f64"
-}
-```
+### 4.5. `GET /api/procedures`
+Lấy danh sách thủ tục có phân trang, hỗ trợ lọc theo lĩnh vực và tìm kiếm nhanh.
+- **Query params:** `domain` (`land` / `business`), `page` (mặc định 1), `page_size` (mặc định 20), `q` hoặc `search` (từ khóa).
 
 ---
 
-### 4.6. `GET /api/procedures/applications/{domain}/{record_id}`
-**TRA CỨU HỒ SƠ ĐÃ LƯU:** Lấy lại dữ liệu người dùng đã nộp/lưu nháp để hiển thị ngược lại vào các trường form trên giao diện.
-- **Tham số Path:**
-  - `domain`: `land` (đất đai) hoặc `business` (kinh doanh)
-  - `record_id`: UUID của hồ sơ (nhận từ API lưu ở trên).
-- **Ví dụ gọi:** `GET /api/procedures/applications/land/34c3b7a2-1f03-425a-b4f4-6f2b06f9528a`
+### 4.6. `POST /api/procedures/search`
+Tìm kiếm ngữ nghĩa thông minh theo câu hỏi tự nhiên hoặc từ khóa.
+
+---
+
+### 4.7. `GET /api/procedures/{id_hoặc_code}`
+Lấy toàn bộ thông tin chi tiết của một thủ tục (hỗ trợ cả UUID lẫn mã viết tắt: `DD-001`, `HKD-001`...).
+
+---
+
+### 4.8. `GET /api/procedures/{id_hoặc_code}/requirements`
+Lấy danh sách hồ sơ, giấy tờ cần chuẩn bị cho thủ tục (cho màn hình Checklist giấy tờ).
+
+---
+
+### 4.9. `GET /api/procedures/{id_hoặc_code}/conditions`
+Lấy danh sách các điều kiện thực hiện của thủ tục.
+
+---
+
+### 4.10. `GET /api/procedures/{id_hoặc_code}/fees`
+Lấy chi tiết bảng biểu phí và lệ phí của thủ tục.
+
+---
+
+### 4.11. `GET /api/procedures/form-schema/{procedure_code}`
+**HÀM TRUNG GIAN ĐIỀU PHỐI (DISPATCHER)**: Lấy form schema động của bất kỳ thủ tục nào trong 25 thủ tục.
+Trả về danh sách các `sections` và `fields` (kèm nhãn, kiểu dữ liệu, trường bắt buộc, regex validation, danh sách options).
+
+---
+
+### 4.12. `GET /api/procedures/applications` *(MỚI - ƯU TIÊN CẤP 1)*
+**Lấy danh sách hồ sơ của người dùng hiện tại** phục vụ màn hình "Hồ sơ của tôi" (My Applications).
+- **Yêu cầu xác thực:** Bearer Token qua header `Authorization: Bearer <jwt>` hoặc cookie.
+- **Query Parameters:**
+  - `domain`: Lọc theo lĩnh vực (`land` hoặc `business`) - Tùy chọn.
+  - `status`: Lọc theo trạng thái (`draft` hoặc `submitted`) - Tùy chọn.
+  - `page`: Số trang (mặc định 1).
+  - `page_size`: Số bản ghi mỗi trang (mặc định 20, tối đa 100).
+  - `search`: Từ khóa tìm kiếm (họ tên người làm đơn, mã thủ tục...).
 - **Response mẫu (HTTP 200 OK):**
   ```json
   {
     "data": {
-      "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
-      "user_id": null,
-      "procedure_code": "DD-001",
-      "procedure_id": "d5d9c792-5b9e-4e42-9a3b-2856247c7c30",
-      "status": "draft",
-      "applicant_name": "Nguyễn Văn A",
-      "applicant_id_number": "012345678901",
-      "applicant_phone": "0901234567",
-      "plot_number": "123",
-      "map_sheet_number": "45",
-      "land_address": "Số 10 Đường ABC, Phường 1, Quận 1, TP.HCM",
-      "land_area": 120.5,
-      "form_data": {
-        "applicant_name": "Nguyễn Văn A",
-        "plot_number": "123",
-        "map_sheet_number": "45",
-        "land_use_purpose": "Đất ở tại đô thị",
-        "transfer_contract_number": "CC-12345/2026"
-      },
-      "extra_data": {
-        "note": "Nộp kèm 01 bản chính Sổ đỏ và hợp đồng công chứng"
-      },
-      "created_at": "2026-10-10T13:46:26.123456Z",
-      "updated_at": "2026-10-10T13:46:26.123456Z",
-      "domain": "land",
-      "target_table": "land_procedure_records"
+      "items": [
+        {
+          "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
+          "user_id": "11111111-1111-1111-1111-111111111111",
+          "procedure_code": "DD-001",
+          "procedure_id": "d5d9c792-5b9e-4e42-9a3b-2856247c7c30",
+          "status": "draft",
+          "applicant_name": "Nguyễn Văn A",
+          "applicant_id_number": "012345678901",
+          "applicant_phone": "0901234567",
+          "plot_number": "123",
+          "map_sheet_number": "45",
+          "land_address": "Số 10 Đường ABC, Phường 1, Quận 1, TP.HCM",
+          "land_area": 120.5,
+          "form_data": { ... },
+          "extra_data": { "note": "Hồ sơ nháp đang điền" },
+          "created_at": "2026-10-14T08:00:00Z",
+          "updated_at": "2026-10-14T08:30:00Z",
+          "domain": "land",
+          "target_table": "land_procedure_records"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "page_size": 20,
+        "total": 1,
+        "total_pages": 1
+      }
     },
     "error": null,
     "request_id": "req-3fa85f64"
   }
   ```
+- **Lỗi có thể trả về:**
+  - `401 Unauthorized`: Chưa truyền JWT Token hoặc token hết hạn.
 
 ---
 
-## 5. Hướng dẫn Frontend Render Biểu mẫu động (Dynamic Form)
+### 4.13. `POST /api/procedures/applications`
+**Lưu hồ sơ người dùng đã điền (Tạo mới bản nháp hoặc nộp)**.
+Backend tự động xác định thủ tục thuộc Đất đai (`land_procedure_records`) hay Doanh nghiệp (`business_procedure_records`).
+- **Xác thực:** Tùy chọn. Nếu người dùng đăng nhập, backend tự động gán `user_id` từ token.
+- **Request Body (JSON):**
+  ```json
+  {
+    "procedure_code": "DD-001",
+    "status": "draft",
+    "form_data": {
+      "applicant_name": "Nguyễn Văn A",
+      "applicant_id_number": "012345678901",
+      "applicant_phone": "0901234567",
+      "land_address": "Số 10 Đường ABC, Quận 1, TP.HCM",
+      "land_area": 120.5
+    },
+    "extra_data": {
+      "note": "Lưu nháp lần 1"
+    }
+  }
+  ```
 
-Khi FE gọi `GET /form-schema/{procedure_code}`, hãy lặp qua mảng `sections`, trong mỗi section lặp qua mảng `fields` và render Component tương ứng theo `field_type`:
+---
+
+### 4.14. `GET /api/procedures/applications/{domain}/{record_id}`
+**Tra cứu chi tiết một hồ sơ đã lưu** theo `domain` (`land` hoặc `business`) và `record_id`.
+- **Response mẫu (HTTP 200 OK):**
+  Trả về chi tiết bản ghi gồm `form_data`, `status`, `applicant_name`, thông tin thửa đất/doanh nghiệp.
+- **Lỗi có thể trả về:**
+  - `400 Bad Request`: `domain` không hợp lệ (khác `land`, `business`).
+  - `403 Forbidden`: Hồ sơ thuộc về người dùng khác.
+  - `404 Not Found`: Không tìm thấy bản ghi theo `record_id`.
+
+---
+
+### 4.15. `PUT /api/procedures/applications/{domain}/{record_id}` *(MỚI - ƯU TIÊN CẤP 1)*
+**Cập nhật dữ liệu bản nháp hồ sơ** (`form_data`, `extra_data`, `status`).
+- **Yêu cầu xác thực:** Bearer Token.
+- **Quy tắc nghiệp vụ:**
+  - Chỉ người tạo hồ sơ (`user_id` trùng khớp với token) mới có quyền chỉnh sửa.
+  - Chỉ cho phép sửa khi hồ sơ ở trạng thái nháp (`status: 'draft'`). Hồ sơ đã nộp chính thức (`submitted`) sẽ bị khóa.
+- **Request Body (JSON):**
+  ```json
+  {
+    "form_data": {
+      "applicant_name": "Nguyễn Văn A (Cập nhật)",
+      "applicant_phone": "0988999888",
+      "land_area": 150.0
+    },
+    "extra_data": {
+      "note": "Bổ sung thông tin đợt 2"
+    },
+    "status": "draft"
+  }
+  ```
+- **Response mẫu (HTTP 200 OK):** Trả về bản ghi sau khi đã cập nhật và đồng bộ các cột searchable.
+- **Lỗi có thể trả về:**
+  - `400 Bad Request`: Hồ sơ đang ở trạng thái `submitted`, không được sửa (`APPLICATION_LOCKED`).
+  - `401 Unauthorized`: Chưa truyền token.
+  - `403 Forbidden`: Bạn không phải là chủ sở hữu của hồ sơ này.
+  - `404 Not Found`: Không tìm thấy hồ sơ.
+
+---
+
+### 4.16. `DELETE /api/procedures/applications/{domain}/{record_id}` *(MỚI - ƯU TIÊN CẤP 1)*
+**Xóa một bản nháp hồ sơ người dùng**.
+- **Yêu cầu xác thực:** Bearer Token.
+- **Quy tắc nghiệp vụ:**
+  - Chỉ người tạo hồ sơ mới có quyền xóa.
+  - Chỉ cho phép xóa khi hồ sơ ở trạng thái nháp (`status: 'draft'`).
+- **Response mẫu (HTTP 200 OK):**
+  ```json
+  {
+    "data": {
+      "success": true,
+      "message": "Đã xóa bản nháp hồ sơ thành công"
+    },
+    "error": null,
+    "request_id": "req-3fa85f64"
+  }
+  ```
+- **Lỗi có thể trả về:**
+  - `400 Bad Request`: Hồ sơ đã nộp chính thức, không thể xóa.
+  - `403 Forbidden`: Không có quyền xóa hồ sơ của người khác.
+  - `404 Not Found`: Không tìm thấy hồ sơ.
+
+---
+
+### 4.17. `POST /api/procedures/applications/{domain}/{record_id}/submit` *(MỚI - ƯU TIÊN CẤP 1)*
+**Nộp chính thức hồ sơ từ trạng thái bản nháp (Official Submission)**.
+- **Yêu cầu xác thực:** Bearer Token.
+- **Quy tắc nghiệp vụ:**
+  - **Kiểm tra chủ quyền:** Chỉ người tạo hồ sơ mới được nộp.
+  - **Kiểm tra tính hợp lệ (Form Schema Validation):** Backend tự động đối chiếu dữ liệu trong `form_data` với danh sách trường bắt buộc (`required: true`) theo Schema của thủ tục đó. Nếu thiếu bất kỳ trường bắt buộc nào, API sẽ trả về lỗi `400 VALIDATION_ERROR` kèm danh sách cụ thể các trường bị thiếu.
+  - **Khóa hồ sơ:** Chuyển `status` thành `submitted` và cập nhật `updated_at`.
+- **Response mẫu thành công (HTTP 200 OK):**
+  ```json
+  {
+    "data": {
+      "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
+      "user_id": "11111111-1111-1111-1111-111111111111",
+      "procedure_code": "DD-001",
+      "status": "submitted",
+      "applicant_name": "Nguyễn Văn A",
+      "updated_at": "2026-10-14T09:00:00Z"
+    },
+    "error": null,
+    "request_id": "req-3fa85f64"
+  }
+  ```
+- **Lỗi có thể trả về:**
+  - `400 Bad Request / VALIDATION_ERROR`:
+    ```json
+    {
+      "data": null,
+      "error": {
+        "code": "VALIDATION_ERROR",
+        "message": "Hồ sơ còn thiếu các trường bắt buộc: Ngày tháng năm sinh (applicant_dob), Số CCCD (applicant_id_number)"
+      },
+      "request_id": "req-3fa85f64"
+    }
+    ```
+  - `400 Bad Request / APPLICATION_ALREADY_SUBMITTED`: Hồ sơ đã nộp trước đó.
+  - `403 Forbidden`: Không có quyền nộp hồ sơ này.
+  - `404 Not Found`: Không tìm thấy hồ sơ.
+
+---
+
+## 5. Hướng dẫn Frontend Render Biểu mẫu & Luồng Vòng đời Hồ sơ
+
+### 5.1. Bảng ánh xạ `field_type` sang UI Components
 
 | `field_type` | Component trên giao diện React / Vue | Ví dụ thuộc tính |
 |---|---|---|
@@ -399,11 +348,42 @@ Khi FE gọi `GET /form-schema/{procedure_code}`, hãy lặp qua mảng `section
 | `radio` | `<RadioGroup options={field.options} />` | Chọn 1 trong số ít lựa chọn |
 | `checkbox` | `<Checkbox />` | Đồng ý cam kết hoặc chọn nhiều |
 
-Khi người dùng ấn **"Lưu nháp"** hoặc **"Nộp hồ sơ"**, gom toàn bộ giá trị của các ô nhập vào đối tượng `form_data: { [field.name]: value }` và gửi lên `POST /api/procedures/applications`.
+### 5.2. Sơ đồ Vòng đời Hồ sơ trên Giao diện FE
+
+```
+[Chọn thủ tục từ Catalog]
+            │
+            ▼
+[Tải Schema: GET /form-schema/{code}]
+            │
+            ▼
+[Người dùng điền dữ liệu Form]
+      │                   │
+      ▼ (Lưu tạm)         ▼ (Nộp ngay)
+[POST /applications]      [POST /applications (status: 'submitted')]
+(status: 'draft')         (Backend kiểm tra đủ trường bắt buộc)
+      │
+      ▼
+[Màn hình "Hồ sơ của tôi": GET /applications]
+      │
+      ├─► [Xem lại]: GET /applications/{domain}/{id}
+      │
+      ├─► [Sửa tiếp bản nháp]: PUT /applications/{domain}/{id}
+      │
+      ├─► [Xóa bản nháp]: DELETE /applications/{domain}/{id}
+      │
+      └─► [Nộp chính thức]: POST /applications/{domain}/{id}/submit
+                │
+                ├─► [Thiếu trường]: Báo lỗi VALIDATION_ERROR -> FE focus ô nhập còn thiếu
+                │
+                └─► [Đủ trường]: Chuyển trạng thái 'submitted' (Khóa hồ sơ)
+```
 
 ---
 
 ## 6. Code mẫu TypeScript / Axios cho Frontend sử dụng ngay
+
+Đội ngũ Frontend có thể copy đoạn code dưới đây vào file `src/api/procedureApi.ts`:
 
 ```typescript
 import axios from 'axios';
@@ -414,7 +394,17 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 15000,
+  withCredentials: true, // Hỗ trợ gửi kèm Cookie xác thực
+});
+
+// Tự động gắn Bearer Token nếu có trong localStorage/session
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token');
+  if (token && !config.headers.Authorization) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 // Interceptor bọc unwrap data tiện dụng
@@ -423,42 +413,68 @@ apiClient.interceptors.response.use(
   (error) => {
     const errData = error.response?.data?.error || {
       code: 'NETWORK_ERROR',
-      message: 'Không thể kết nối đến máy chủ',
+      message: error.message || 'Không thể kết nối đến máy chủ',
     };
     return Promise.reject(errData);
   }
 );
 
-// 1. Kiểm tra trạng thái service
+// ==========================================
+// 1. CÁC API TRA CỨU DANH MỤC & BIỂU MẪU (PUBLIC)
+// ==========================================
+
 export const checkHealth = async () => {
   return apiClient.get('/health');
 };
 
-// 2. Lấy danh sách Lĩnh vực (Tabs: business, land)
 export const getDomains = async () => {
   const res: any = await apiClient.get('/domains');
   return res.data;
 };
 
-// 3. Lấy tên rút gọn thủ tục theo lĩnh vực (cho Dropdown)
 export const getProcedureNames = async (domain: 'land' | 'business') => {
   const res: any = await apiClient.get(`/domains/${domain}/names`);
   return res.data;
 };
 
-// 4. Lấy chi tiết thủ tục (căn cứ pháp lý, checklist giấy tờ, lệ phí)
+export const listProcedures = async (params?: { domain?: string; page?: number; page_size?: number; q?: string }) => {
+  const res: any = await apiClient.get('', { params });
+  return res.data;
+};
+
+export const searchProcedures = async (query: string, limit = 20) => {
+  const res: any = await apiClient.post('/search', { query }, { params: { limit } });
+  return res.data;
+};
+
 export const getProcedureDetail = async (procedureIdOrCode: string) => {
   const res: any = await apiClient.get(`/${procedureIdOrCode}`);
   return res.data;
 };
 
-// 5. HÀM TRUNG GIAN: Lấy Form Schema động của thủ tục (DD-001, HKD-001...)
 export const getProcedureFormSchema = async (procedureCode: string) => {
   const res: any = await apiClient.get(`/form-schema/${procedureCode}`);
   return res.data;
 };
 
-// 6. Lưu / Nộp hồ sơ người dùng đã điền
+// ==========================================
+// 2. CÁC API QUẢN LÝ HỒ SƠ NGƯỜI DÙNG (APPLICATIONS)
+// ==========================================
+
+export interface ApplicationFilterParams {
+  domain?: 'land' | 'business';
+  status?: 'draft' | 'submitted';
+  page?: number;
+  page_size?: number;
+  search?: string;
+}
+
+/** Lấy danh sách hồ sơ của người dùng đang đăng nhập (kèm phân trang & bộ lọc) */
+export const listMyApplications = async (params?: ApplicationFilterParams) => {
+  const res: any = await apiClient.get('/applications', { params });
+  return res.data; // { items: [...], pagination: { page, page_size, total, total_pages } }
+};
+
 export interface SubmitApplicationPayload {
   procedure_code: string;
   user_id?: string | null;
@@ -467,14 +483,43 @@ export interface SubmitApplicationPayload {
   extra_data?: Record<string, any>;
 }
 
-export const submitApplication = async (payload: SubmitApplicationPayload) => {
+/** Tạo mới hồ sơ (lưu nháp ban đầu hoặc nộp) */
+export const createApplication = async (payload: SubmitApplicationPayload) => {
   const res: any = await apiClient.post('/applications', payload);
   return res.data;
 };
 
-// 7. Lấy lại hồ sơ đã lưu để hiển thị lại lên màn hình
+/** Xem chi tiết hồ sơ đã lưu */
 export const getSavedApplication = async (domain: 'land' | 'business', recordId: string) => {
   const res: any = await apiClient.get(`/applications/${domain}/${recordId}`);
+  return res.data;
+};
+
+export interface UpdateApplicationPayload {
+  form_data?: Record<string, any>;
+  extra_data?: Record<string, any>;
+  status?: 'draft' | 'submitted';
+}
+
+/** Cập nhật hồ sơ bản nháp */
+export const updateDraftApplication = async (
+  domain: 'land' | 'business',
+  recordId: string,
+  payload: UpdateApplicationPayload
+) => {
+  const res: any = await apiClient.put(`/applications/${domain}/${recordId}`, payload);
+  return res.data;
+};
+
+/** Xóa hồ sơ bản nháp */
+export const deleteDraftApplication = async (domain: 'land' | 'business', recordId: string) => {
+  const res: any = await apiClient.delete(`/applications/${domain}/${recordId}`);
+  return res.data; // { success: true, message: ... }
+};
+
+/** Nộp chính thức bản nháp (Backend tự động kiểm tra trường bắt buộc) */
+export const submitDraftApplication = async (domain: 'land' | 'business', recordId: string) => {
+  const res: any = await apiClient.post(`/applications/${domain}/${recordId}/submit`);
   return res.data;
 };
 ```

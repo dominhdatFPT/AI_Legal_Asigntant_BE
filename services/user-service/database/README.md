@@ -12,8 +12,6 @@ Chạy lần lượt trong Supabase → SQL Editor (database của `USER_DATABAS
 4. `004_account_management.sql`: bổ sung cột cho quản lý tài khoản: `locked_until` (khóa có thời hạn), `deleted_by` (xóa mềm), `created_by`, `created_as_lawyer` (tài khoản admin tạo).
 5. `005_seed_demo_users.sql`: tài khoản demo.
 6. `006_users_phone_unique.sql`: số điện thoại không trùng (unique index `users_phone_key`).
-7. `007_lawyer_role.sql` (**chỉ chạy khi deploy code chức năng Luật sư**): thêm `refresh_tokens.revoked_reason`; đổi mọi tài khoản `created_as_lawyer = true` sang vai trò `lawyer` rồi xóa cột `created_as_lawyer`. Chạy lại `004` sau đó sẽ thêm lại cột này (vô hại, code không dùng).
-8. `008_export_lawyer_profiles.sql`: chỉ đọc, in ra một câu `INSERT` tạo hồ sơ luật sư "chưa hoàn thiện" cho mọi tài khoản `lawyer`. Copy kết quả sang SQL Editor của database Lawyer (sau `lawyer-service/database/001_lawyer_schema.sql`) rồi Run.
 
 ## Hai cách đăng nhập
 

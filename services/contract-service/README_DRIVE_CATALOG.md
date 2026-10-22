@@ -1,5 +1,7 @@
 # Kho hợp đồng từ Drive
 
+> Cập nhật 20/10/2026: đã có kho 30 bản nguồn chỉ xem, tách khỏi luồng điền/xuất bên dưới. Xem [bàn giao](../../docs/api/REFERENCE_LIBRARY_RELEASE.md). Không tự publish các mẫu còn blocker trong catalog cá nhân.
+
 Ngày 11/10/2026. Đã kiểm kê danh sách 30 file trong Drive và đọc trực tiếp bảy file liên quan hợp đồng/văn bản pháp lý. Bộ chuẩn bị này gồm **ba hợp đồng**; không có nghĩa toàn bộ 30 file đã được chuyển đổi hay kiểm tra nội dung. Các đơn/tờ khai, văn bản thừa kế và giấy ủy quyền chưa được tự publish như hợp đồng.
 
 ## Trạng thái trên Contract Supabase

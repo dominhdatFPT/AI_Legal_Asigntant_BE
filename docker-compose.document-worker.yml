@@ -16,6 +16,7 @@ services:
       DOCUMENT_PADDLE_MODEL_DIR: /opt/document-ocr
       DOCUMENT_PROCESSING_TIMEOUT_SECONDS: ${DOCUMENT_PROCESSING_TIMEOUT_SECONDS:-240}
       DOCUMENT_CLAMAV_HOST: document-antivirus
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     depends_on:
       document-antivirus:
         condition: service_healthy

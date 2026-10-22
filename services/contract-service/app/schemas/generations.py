@@ -18,7 +18,7 @@ def validate_generation(context, kind, format=None):
     catalog = catalog_manifest(version) is not None and version.get("snapshot_storage_key") is not None
     if not personal and not catalog and (version["kind"] != "system" or version["source_format"] != "docx" or version["snapshot_storage_key"] is not None):
         raise ContractError("SOURCE_RENDERER_NOT_SUPPORTED", "Mẫu file gốc cần luồng import/mapping C8; chưa thể xuất bằng renderer văn bản C7.", 422)
-    if personal and version["source_format"] == "pdf" and format == "docx":
+    if (personal or catalog) and version["source_format"] == "pdf" and format == "docx":
         raise ContractError("SOURCE_FORMAT_NOT_SUPPORTED", "Mẫu PDF chỉ xuất PDF giữ nền, không tự chuyển sang Word.", 422)
     validate_values(context["draft"]["field_values"], context["fields"])
     missing = [f["name"] for f in context["fields"] if f["required"] and (

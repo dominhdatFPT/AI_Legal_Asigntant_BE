@@ -1,41 +1,36 @@
-"""Gọi Document Service nội bộ (DOCUMENT_SERVICE_URL): ảnh thẻ luật sư + JSON OCR, link xem ảnh."""
+"""Gọi Document Service (DOCUMENT_SERVICE_URL) để kiểm tra giấy tờ FE vừa tải lên đúng là của người gửi."""
 
 import uuid
 
+import httpx
+
+from app.core.responses import CREDENTIAL_NOT_FOUND, ApiError, invalid
 from app.services.http_client import UpstreamError, bad_response, call
 
 SERVICE = "DOCUMENT"
-OCR_KEYS = ("status", "fields", "warnings", "error_code", "engine")
 
 
-def get_lawyer_card(card_id: uuid.UUID) -> dict | None:
-    """{card_id, owner_user_id, ocr_result}; None khi không tồn tại."""
+def ensure_owned(document_ids: list[uuid.UUID], access_token: str) -> None:
+    """Đọc từng tài liệu bằng chính token của người gửi: Document Service chỉ trả tài liệu của chủ sở hữu."""
+    for document_id in document_ids:
+        try:
+            data = call(SERVICE, "GET", f"/api/v1/documents/{document_id}", bearer=access_token)
+        except UpstreamError as e:
+            if e.status in (403, 404):
+                raise invalid("credentials", "Giấy tờ không tồn tại hoặc không thuộc về bạn.") from None
+            raise bad_response(SERVICE) from None
+        if not isinstance(data, dict) or str(data.get("document_id")) != str(document_id):
+            raise bad_response(SERVICE)
+
+
+def get_content(owner_user_id: uuid.UUID, document_id: uuid.UUID) -> httpx.Response:
+    """File giấy tờ (bytes + Content-Type) cho admin xem. 404 → None; 409 (chưa quét xong / bị chặn) trả nguyên cho FE."""
     try:
-        data = call(SERVICE, "GET", f"/internal/v1/documents/lawyer-cards/{card_id}")
+        return call(SERVICE, "GET", f"/internal/v1/documents/{document_id}/content?owner_user_id={owner_user_id}",
+                    raw=True)
     except UpstreamError as e:
         if e.status == 404:
-            return None
+            raise ApiError(404, CREDENTIAL_NOT_FOUND) from None
+        if e.status == 409:
+            raise ApiError(409, e.code, e.message) from None
         raise bad_response(SERVICE) from None
-    if not isinstance(data, dict) or not isinstance(data.get("ocr_result"), dict):
-        raise bad_response(SERVICE)
-    ocr = data["ocr_result"]
-    if any(k not in ocr for k in OCR_KEYS) or ocr["status"] not in ("completed", "failed"):
-        raise bad_response(SERVICE)
-    try:
-        data["owner_user_id"] = uuid.UUID(str(data.get("owner_user_id")))
-    except ValueError:
-        raise bad_response(SERVICE) from None
-    return data
-
-
-def get_view_url(card_id: uuid.UUID) -> dict | None:
-    """{url, expires_in}; None khi ảnh không còn."""
-    try:
-        data = call(SERVICE, "POST", f"/internal/v1/documents/lawyer-cards/{card_id}/view-url")
-    except UpstreamError as e:
-        if e.status == 404:
-            return None
-        raise bad_response(SERVICE) from None
-    if not isinstance(data, dict) or not isinstance(data.get("url"), str) or not isinstance(data.get("expires_in"), int):
-        raise bad_response(SERVICE)
-    return {"url": data["url"], "expires_in": data["expires_in"]}

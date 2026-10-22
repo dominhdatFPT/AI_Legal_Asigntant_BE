@@ -9,6 +9,7 @@ import logging
 import os
 import time
 
+from common_auth.events import publish_event_sync
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 from app.core.config import Settings, require_session_database
@@ -21,6 +22,15 @@ from app.services.storage import Storage
 
 RETRYABLE = {"SCAN_UNAVAILABLE", "STORAGE_UNAVAILABLE", "STORAGE_TIMEOUT", "STORAGE_BAD_RESPONSE", "STORAGE_CONFIGURATION_ERROR"}
 REJECT = {"MALWARE_DETECTED", "UNSAFE_FILE", "INVALID_FILE", "ENCRYPTED_PDF", "SIGNED_PDF", "UNSUPPORTED_FILE_TYPE", "TOO_MANY_PAGES"}
+
+
+def notify(event_type, row, error_code=None):
+    # Chỉ id, không gửi nội dung tài liệu. Lỗi broker không được làm hỏng job đã commit.
+    # shortcut: phát sau commit, worker chết đúng lúc đó thì mất thông báo; cần chắc chắn thì phát từ document_notification_outbox.
+    try:
+        publish_event_sync(event_type,{"document_id":str(row["id"]),"user_id":str(row["owner_user_id"]),"error_code":error_code})
+    except Exception:
+        logging.getLogger("document-worker").warning("Event %s not published.", event_type)
 
 
 class Worker:
@@ -117,6 +127,9 @@ class Worker:
             if code in REJECT and current["file_status"]=="pending_check":
                 conn.execute("UPDATE user_files SET file_status='rejected',error_code=%s WHERE id=%s",(code,row["id"]))
             conn.execute("UPDATE document_processing_jobs SET status='failed',completed_at=now(),error_code=%s WHERE id=%s",(code,job["id"]))
+            conn.commit()
+            notify("document.processing.failed",row,code)
+            return
         conn.commit()
 
     def run_once(self, document_id=None):
@@ -127,6 +140,7 @@ class Worker:
             try:
                 try:
                     self._process(conn,row,job)
+                    notify("document.ocr.completed",row)
                 except DocumentError as exc:
                     if exc.code!="WORKER_STALE": self._failure(conn,row,job,exc.code)
                 except Exception:

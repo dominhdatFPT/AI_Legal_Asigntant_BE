@@ -162,25 +162,3 @@ Table document_notification_outbox {
 }
 Ref: document_processing_jobs.id - document_notification_outbox.job_id
 Ref: user_files.id < document_notification_outbox.document_id
-
-Table document_lawyer_card_ocr {
-  id uuid [pk]
-  owner_user_id uuid [not null]
-  idempotency_key uuid [not null]
-  request_hash varchar(64) [not null]
-  status text [not null, default: 'processing']
-  storage_key text [not null, unique]
-  sha256 varchar(64) [not null]
-  size_bytes integer [not null]
-  engine text [not null]
-  raw jsonb
-  fields jsonb
-  warnings jsonb [not null]
-  error_code text
-  created_at timestamptz [not null]
-  updated_at timestamptz [not null]
-  indexes {
-    (owner_user_id, idempotency_key) [unique]
-  }
-  Note: '006 (Luật sư): một ảnh thẻ luật sư/dòng. JPEG mã hóa lại, private safe/<owner>/lawyer-card/<id>.jpg. OCR lỗi vẫn giữ dòng (failed) để người dùng nhập tay. Lawyer Service chỉ lưu id + JSON OCR qua API nội bộ. RLS/backend-only, không FK sang User.'
-}

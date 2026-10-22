@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS procedure_conditions (
     description TEXT,
     order_index INTEGER NOT NULL DEFAULT 0,
     is_mandatory BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_procedure_conditions UNIQUE (procedure_id, condition_code)
 );
 
 CREATE TABLE IF NOT EXISTS procedure_fees (
@@ -48,8 +49,9 @@ CREATE TABLE IF NOT EXISTS procedure_fees (
     amount BIGINT CHECK (amount >= 0),
     unit VARCHAR(50) NOT NULL DEFAULT 'ho_so',
     is_exemptible BOOLEAN NOT NULL DEFAULT false,
-    note TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    order_index INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_procedure_fees UNIQUE (procedure_id, fee_type, name)
 );
 
 CREATE TABLE IF NOT EXISTS procedure_legal_bases (
@@ -57,29 +59,35 @@ CREATE TABLE IF NOT EXISTS procedure_legal_bases (
     procedure_id UUID NOT NULL REFERENCES procedures(id) ON DELETE CASCADE,
     doc_number VARCHAR(100) NOT NULL,
     title VARCHAR(500) NOT NULL,
-    article_ref VARCHAR(255),
+    article_ref VARCHAR(100),
     source_url TEXT,
     order_index INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_procedure_legal_bases UNIQUE (procedure_id, doc_number, article_ref)
 );
 
 CREATE TABLE IF NOT EXISTS procedure_requirements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     procedure_id UUID NOT NULL REFERENCES procedures(id) ON DELETE CASCADE,
     name VARCHAR(500) NOT NULL,
-    description TEXT,
     is_required BOOLEAN NOT NULL DEFAULT true,
-    copies INTEGER NOT NULL DEFAULT 1 CHECK (copies >= 1),
-    document_form VARCHAR(50) NOT NULL DEFAULT 'original' CHECK (document_form IN ('original', 'copy', 'certified_copy')),
+    copies INTEGER NOT NULL DEFAULT 1,
+    document_form VARCHAR(50) NOT NULL DEFAULT 'original' CHECK (document_form IN ('original', 'certified_copy', 'copy', 'electronic')),
     form_code VARCHAR(50),
     note TEXT,
     order_index INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_procedure_requirements UNIQUE (procedure_id, name)
 );
 
+-- Immutable wrapper for unaccent to ensure index expressions are valid
+CREATE OR REPLACE FUNCTION f_unaccent(text) RETURNS text AS $$
+SELECT public.unaccent('public.unaccent', $1);
+$$ LANGUAGE sql IMMUTABLE PARALLEL SAFE;
+
 -- Indexes
--- Không tạo index GIN(unaccent(...)): unaccent() không IMMUTABLE nên Postgres báo lỗi và dừng script.
--- Bảng thủ tục chỉ vài chục dòng; service tìm kiếm không dấu trong Python.
+CREATE INDEX IF NOT EXISTS ix_procedures_name_trgm ON procedures USING GIN(f_unaccent(name) gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_procedures_code_trgm ON procedures USING GIN(f_unaccent(code) gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS ix_procedures_domain_status ON procedures (domain, status);
 
 CREATE INDEX IF NOT EXISTS ix_procedure_conditions_procedure_id ON procedure_conditions(procedure_id);
@@ -105,24 +113,21 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- Enable RLS
+-- Enable RLS (không dùng FORCE ROW LEVEL SECURITY để bảo trì kết nối direct backend)
+ALTER TABLE procedure_domains ENABLE ROW LEVEL SECURITY;
 ALTER TABLE procedures ENABLE ROW LEVEL SECURITY;
-ALTER TABLE procedures FORCE ROW LEVEL SECURITY;
 ALTER TABLE procedure_conditions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE procedure_conditions FORCE ROW LEVEL SECURITY;
 ALTER TABLE procedure_fees ENABLE ROW LEVEL SECURITY;
-ALTER TABLE procedure_fees FORCE ROW LEVEL SECURITY;
 ALTER TABLE procedure_legal_bases ENABLE ROW LEVEL SECURITY;
-ALTER TABLE procedure_legal_bases FORCE ROW LEVEL SECURITY;
 ALTER TABLE procedure_requirements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE procedure_requirements FORCE ROW LEVEL SECURITY;
 
 -- Grant permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon, authenticated;
-GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 
 -- Remove old policies to be idempotent
+DROP POLICY IF EXISTS "Public can view procedure_domains" ON procedure_domains;
 DROP POLICY IF EXISTS "Public can view active procedures" ON procedures;
 DROP POLICY IF EXISTS "Admin can view all procedures" ON procedures;
 DROP POLICY IF EXISTS "Admins can insert procedures" ON procedures;
@@ -149,17 +154,24 @@ DROP POLICY IF EXISTS "Admins can insert procedure_requirements" ON procedure_re
 DROP POLICY IF EXISTS "Admins can update procedure_requirements" ON procedure_requirements;
 DROP POLICY IF EXISTS "Admins can delete procedure_requirements" ON procedure_requirements;
 
--- Add Policies (using auth caching for performance as best practice)
--- SELECT
+-- Add Policies
+CREATE POLICY "Public can view procedure_domains" ON procedure_domains FOR SELECT TO anon, authenticated USING (is_active = true);
 CREATE POLICY "Public can view active procedures" ON procedures FOR SELECT TO anon, authenticated USING (status = 'active');
 CREATE POLICY "Admin can view all procedures" ON procedures FOR SELECT TO authenticated USING (
     (SELECT coalesce(auth.jwt() -> 'app_metadata' ->> 'role', '')) = 'admin' OR (SELECT auth.jwt() ->> 'role') = 'service_role'
 );
 
-CREATE POLICY "Public can view related procedure_conditions" ON procedure_conditions FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public can view related procedure_fees" ON procedure_fees FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public can view related procedure_legal_bases" ON procedure_legal_bases FOR SELECT TO anon, authenticated USING (true);
-CREATE POLICY "Public can view related procedure_requirements" ON procedure_requirements FOR SELECT TO anon, authenticated USING (true);
+CREATE POLICY "Public can view related procedure_conditions" ON procedure_conditions FOR SELECT TO anon, authenticated 
+    USING (EXISTS (SELECT 1 FROM procedures WHERE procedures.id = procedure_conditions.procedure_id AND procedures.status = 'active'));
+
+CREATE POLICY "Public can view related procedure_fees" ON procedure_fees FOR SELECT TO anon, authenticated 
+    USING (EXISTS (SELECT 1 FROM procedures WHERE procedures.id = procedure_fees.procedure_id AND procedures.status = 'active'));
+
+CREATE POLICY "Public can view related procedure_legal_bases" ON procedure_legal_bases FOR SELECT TO anon, authenticated 
+    USING (EXISTS (SELECT 1 FROM procedures WHERE procedures.id = procedure_legal_bases.procedure_id AND procedures.status = 'active'));
+
+CREATE POLICY "Public can view related procedure_requirements" ON procedure_requirements FOR SELECT TO anon, authenticated 
+    USING (EXISTS (SELECT 1 FROM procedures WHERE procedures.id = procedure_requirements.procedure_id AND procedures.status = 'active'));
 
 -- Admin CUD policies generator block
 DO $$

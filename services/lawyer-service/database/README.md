@@ -12,5 +12,6 @@ Database riêng của Lawyer Service (`LAWYER_DATABASE_URL`). Các bảng chỉ 
 Chạy lần lượt trong Supabase → SQL Editor của database Lawyer. Chạy lại nhiều lần không sao.
 
 1. `001_lawyer_schema.sql`: tạo bảng, index, seed lĩnh vực, bật RLS và thu hồi quyền `anon` / `authenticated`.
-2. Tạo hồ sơ cho luật sư đã có: chạy `user-service/database/007_lawyer_role.sql` rồi `008_export_lawyer_profiles.sql` trên database **User**, copy câu `INSERT` in ra sang đây rồi Run.
-3. `check_lawyer_db.sql`: kiểm tra, cột `ket_qua` phải toàn `OK`.
+2. `002_application_credentials.sql`: thêm cột `credentials` (giấy tờ FE tải lên khi gửi hồ sơ).
+3. Tạo hồ sơ cho luật sư đã có: chạy `user-service/database/007_lawyer_role.sql` rồi `008_export_lawyer_profiles.sql` trên database **User**, copy câu `INSERT` in ra sang đây rồi Run.
+4. `check_lawyer_db.sql`: kiểm tra, cột `ket_qua` phải toàn `OK`.

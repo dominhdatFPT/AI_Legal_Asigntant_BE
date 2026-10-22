@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, Uuid, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, Uuid, false, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -48,6 +48,8 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Tài khoản do admin tạo (NULL = người dùng tự đăng ký).
     created_by: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("users.id"))
+    # Admin tạo tài khoản này cho luật sư; vẫn là citizen cho tới khi được duyệt lên lawyer.
+    created_as_lawyer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -67,7 +69,5 @@ class RefreshToken(Base):
     token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # 'role_changed' = thu hồi vì vai trò vừa đổi → refresh trả 401 ROLE_CHANGED_RELOGIN; NULL = lý do khác.
-    revoked_reason: Mapped[str | None] = mapped_column(String(30))
     user_agent: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

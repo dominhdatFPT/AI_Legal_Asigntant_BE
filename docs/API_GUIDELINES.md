@@ -335,8 +335,7 @@ CI trên GitLab (`.gitlab-ci.yml`, hiện có) chạy `pytest tests` cho mọi M
 | API nội bộ `/internal/v1` + `X-Internal-Token` | Chưa có |
 | Database và migration từng service | Đã có database boundary và thư mục migration cho 10 service; chưa có schema/migration thật |
 | Upload file | Chưa có |
-| Lawyer Service | Hồ sơ luật sư, đơn xin làm luật sư / đổi thẻ, admin tạo luật sư và duyệt đơn, API nội bộ status/hide: có code + test (`docs/api/LAWYER_DESIGN.md`). Danh sách công khai, online, thống kê: planned |
-| Consultation, Notification Service | Đã có skeleton, health check, Gateway route và OpenAPI health contract; nghiệp vụ chưa làm |
+| Lawyer, Consultation, Notification Service | Đã có skeleton, health check, Gateway route và OpenAPI health contract; nghiệp vụ chưa làm |
 | WebSocket chat trong Consultation Service | Gateway route đã chuẩn bị; endpoint realtime chưa có |
 | CI chạy pytest trên GitLab | Hiện có |
 | `openapi.yaml` | Xem file trong từng service; `x-status` phân biệt hiện có/planned. Contract và Notification đã đối chiếu develop dd79b1a; file Document trên nhánh này còn nội dung Procedure cần người phụ trách sửa |

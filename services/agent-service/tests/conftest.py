@@ -17,6 +17,7 @@ def settings_env(monkeypatch):
     monkeypatch.setenv("INTERNAL_TOKEN", "test-internal-token")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

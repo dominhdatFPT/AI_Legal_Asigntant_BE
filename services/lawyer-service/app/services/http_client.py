@@ -65,14 +65,17 @@ def _parse(service: str, response: httpx.Response) -> Any:
     raise UpstreamError(response.status_code, error["code"], error["message"])
 
 
-def call(service: str, method: str, path: str, *, json: dict | None = None) -> Any:
+def call(service: str, method: str, path: str, *, json: dict | None = None, bearer: str | None = None,
+         raw: bool = False) -> Any:
+    """`bearer`: gọi API công khai bằng access token của người dùng thay cho X-Internal-Token.
+    `raw`: 2xx trả nguyên httpx.Response (file nhị phân), lỗi vẫn xử lý như JSON."""
     base = os.getenv(f"{service}_SERVICE_URL", "").rstrip("/")
     token = os.getenv("INTERNAL_TOKEN", "")
-    if not base or not token:
+    if not base or not (token or bearer):
         logger.error("Thiếu %s_SERVICE_URL hoặc INTERNAL_TOKEN", service)
         raise unavailable(service)
 
-    headers = {"X-Internal-Token": token}
+    headers = {"Authorization": f"Bearer {bearer}"} if bearer else {"X-Internal-Token": token}
     rid = current_request_id.get()
     if rid:
         headers["X-Request-ID"] = rid
@@ -93,6 +96,8 @@ def call(service: str, method: str, path: str, *, json: dict | None = None) -> A
                         response.status_code, (time.monotonic() - started) * 1000, rid)
             if response.status_code >= 500 or 300 <= response.status_code < 400:
                 failure = bad_response(service)
+            elif raw and 200 <= response.status_code < 300:
+                return response
             else:
                 return _parse(service, response)
         logger.warning("%s %s %s lỗi %s (lần %d) request_id=%s", service, method, path.split("?")[0],

@@ -8,7 +8,8 @@
 
 ## 1. Dự án này làm gì?
 
-**Legal Assistant AI** là hệ thống web giúp người dân Việt Nam tự giải quyết các việc pháp lý thường gặp, có AI hỗ trợ và có luật sư khi cần. 
+**Legal Assistant AI** là hệ thống web giúp người dân Việt Nam tự giải quyết các việc pháp lý thường gặp, có AI hỗ trợ và có luật sư khi cần. Repo này là phần **Backend**.
+
 Người dùng có thể:
 
 | Nhu cầu | Ví dụ | Service lo việc này |

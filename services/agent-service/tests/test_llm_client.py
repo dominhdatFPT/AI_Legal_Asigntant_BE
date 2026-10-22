@@ -49,7 +49,7 @@ def gemini(monkeypatch):
 
     def install(outcomes):
         fake = FakeGemini(outcomes)
-        monkeypatch.setattr(llm_client, "_get_client", lambda: fake)
+        monkeypatch.setattr(llm_client, "_get_gemini_client", lambda: fake)
         return fake
 
     monkeypatch.setattr(llm_client, "_sleep", fake_sleep)
@@ -63,9 +63,26 @@ def _run(history=None, user_content="Sang tên sổ đỏ cần gì?"):
 
 def test_thanh_cong_ngay_lan_dau(gemini):
     fake = gemini([_Resp("Theo Điều 45...")])
-    assert _run() == ("Theo Điều 45...", 321)
+    assert _run() == ("Theo Điều 45...", 321, "gemini-test")
     assert len(fake.calls) == 1 and gemini.sleeps == []
     assert fake.calls[0]["model"] == "gemini-test"
+
+
+def test_gioi_han_do_dai_va_tat_suy_nghi(gemini):
+    fake = gemini([_Resp()])
+    _run()
+    config = fake.calls[0]["config"]
+    assert config.max_output_tokens == 800
+    assert config.thinking_config.thinking_level == "MINIMAL"
+
+
+def test_gemini_2_tat_suy_nghi_bang_budget():
+    assert llm_client._gemini_thinking_config("gemini-2.5-flash").thinking_budget == 0
+
+
+def test_groq_qwen3_tat_suy_luan():
+    assert llm_client._groq_reasoning_args("qwen/qwen3-32b") == {"reasoning_effort": "none"}
+    assert llm_client._groq_reasoning_args("llama-3.3-70b-versatile") == {}
 
 
 def test_doi_role_assistant_thanh_model(gemini):
@@ -84,11 +101,11 @@ def test_loi_tam_thoi_thu_lai_roi_thanh_cong(gemini, code):
 
 
 def test_het_luot_thu_thi_bao_loi(gemini):
-    fake = gemini([_api_error(503), _api_error(503), _api_error(429)])
-    with pytest.raises(llm_client.LLMError, match="3 lần thử"):
+    fake = gemini([_api_error(503), _api_error(429)])
+    with pytest.raises(llm_client.LLMError, match="2 lần thử"):
         _run()
-    assert len(fake.calls) == 3  # 1 lần đầu + GEMINI_MAX_RETRIES=2
-    assert gemini.sleeps == [2, 4]
+    assert len(fake.calls) == 2  # 1 lần đầu + GEMINI_MAX_RETRIES=1
+    assert gemini.sleeps == [2]
 
 
 @pytest.mark.parametrize("code", [400, 401, 403, 404])
@@ -128,4 +145,4 @@ def test_tra_ve_rong_bao_loi(gemini):
 
 def test_khong_co_usage_thi_tokens_none(gemini):
     gemini([_Resp("OK", usage=False)])
-    assert _run() == ("OK", None)
+    assert _run() == ("OK", None, "gemini-test")

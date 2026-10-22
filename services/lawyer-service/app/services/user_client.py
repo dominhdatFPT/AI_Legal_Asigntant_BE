@@ -41,33 +41,6 @@ def get_citizen_profile(user_id: uuid.UUID) -> dict | None:
     return data
 
 
-def create_lawyer_account(email: str, password: str, full_name: str, created_by: uuid.UUID) -> dict:
-    """Tạo tài khoản role lawyer. 409/422 của User Service (trùng email, SĐT...) trả nguyên cho FE."""
-    body = {"email": email, "password": password, "full_name": full_name, "role": "lawyer",
-            "created_by": str(created_by)}
-    try:
-        data = call(SERVICE, "POST", "/internal/v1/users", json=body)
-    except UpstreamError as e:
-        if e.status in (409, 422):
-            raise ApiError(e.status, e.code, e.message) from None
-        raise bad_response(SERVICE) from None
-    _need(data, "id", "email", "full_name", "role")
-    try:
-        uuid.UUID(str(data["id"]))
-    except ValueError:
-        raise bad_response(SERVICE) from None
-    return data
-
-
-def hard_delete_user(user_id: uuid.UUID) -> None:
-    """Bù trừ khi lưu hồ sơ lỗi. 404 = đã không còn, coi như xong."""
-    try:
-        call(SERVICE, "DELETE", f"/internal/v1/users/{user_id}")
-    except UpstreamError as e:
-        if e.status != 404:
-            raise bad_response(SERVICE) from None
-
-
 def promote_to_lawyer(user_id: uuid.UUID) -> dict:
     """Đổi vai trò sang lawyer khi duyệt đơn (gọi lại an toàn). 404/409 → người gửi không còn hợp lệ."""
     try:

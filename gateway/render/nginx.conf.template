@@ -95,6 +95,13 @@ http {
             proxy_pass $up;
         }
 
+        # POST /api/lawyers (gửi hồ sơ luật sư) không có dấu "/" cuối.
+        location = /api/lawyers {
+            set $up "${LAWYER_SERVICE_URL}";
+            rewrite ^ /api/v1/lawyers break;
+            proxy_pass $up;
+        }
+
         location /api/lawyers/ {
             set $up "${LAWYER_SERVICE_URL}";
             rewrite ^/api/lawyers/(.*)$ /api/v1/lawyers/$1 break;

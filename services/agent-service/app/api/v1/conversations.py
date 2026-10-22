@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/agent/conversations", tags=["conversations"])
 
-HISTORY_LIMIT = 20  # số tin nhắn gần nhất gửi kèm cho Gemini làm ngữ cảnh
+HISTORY_LIMIT = 6  # số tin nhắn gần nhất gửi kèm cho LLM: đủ hiểu câu hỏi nối tiếp, không kéo cả cuộc hội thoại
 
 
 def _request_id(x_request_id: str | None) -> str:

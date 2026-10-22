@@ -27,6 +27,7 @@ class AdminUserOut(UserOut):
     auth_provider: str | None = None
     locked_by: uuid.UUID | None = None
     created_by: uuid.UUID | None = None
+    created_as_lawyer: bool = False
     deleted_at: datetime | None = None
     deleted_by: uuid.UUID | None = None
     # Đã khai hồ sơ cá nhân (CCCD) chưa; FE dùng để hiện "Chưa cập nhật hồ sơ".
@@ -34,9 +35,10 @@ class AdminUserOut(UserOut):
 
 
 class AccountType(str, enum.Enum):
-    """Loại tài khoản admin tạo. Tài khoản luật sư tạo qua Lawyer Service (POST /lawyers/accounts)."""
+    """Loại tài khoản admin tạo. `lawyer` vẫn lưu role `citizen`, chờ duyệt hồ sơ mới lên `lawyer`."""
 
     citizen = "citizen"
+    lawyer = "lawyer"
     admin = "admin"
 
 
@@ -48,29 +50,6 @@ class CreateUserRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=255)
     phone: str | None = Field(default=None, pattern=PHONE_PATTERN, description="10 chữ số, bắt đầu bằng 0")
     account_type: AccountType = AccountType.citizen
-
-    @field_validator("phone", mode="before")
-    @classmethod
-    def clean_phone(cls, value):
-        return clean_phone(value)
-
-    @field_validator("email")
-    @classmethod
-    def lower_email(cls, value: str) -> str:
-        return value.lower()
-
-
-class InternalCreateUserRequest(BaseModel):
-    """Lawyer Service tạo tài khoản luật sư (POST /internal/v1/users)."""
-
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    email: str = Field(min_length=3, max_length=255, pattern=EMAIL_PATTERN)
-    password: str = Field(min_length=8, max_length=128)
-    full_name: str = Field(min_length=1, max_length=255)
-    phone: str | None = Field(default=None, pattern=PHONE_PATTERN)
-    role: Literal["lawyer"]
-    created_by: uuid.UUID
 
     @field_validator("phone", mode="before")
     @classmethod

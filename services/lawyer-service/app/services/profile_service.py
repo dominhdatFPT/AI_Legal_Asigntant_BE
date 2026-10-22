@@ -1,23 +1,15 @@
-"""Hồ sơ luật sư: xem / sửa của tôi, kiểm tra "đủ", trạng thái nội bộ, ẩn hồ sơ.
+"""Hồ sơ luật sư: kiểm tra "đủ", trạng thái nội bộ, ẩn hồ sơ.
 
 Hồ sơ "đủ" = đã khai CCCD (User Service has_citizen_profile) + có số thẻ + ≥ 1 lĩnh vực.
-CCCD nằm ở User Service nên `incomplete → active` được kiểm tra lười: mỗi lần xem / sửa hồ sơ hoặc Consultation
+CCCD nằm ở User Service nên `incomplete → active` được kiểm tra lười: mỗi lần Consultation
 hỏi trạng thái, đủ thì chuyển active luôn. Không có đường active → incomplete (số thẻ không xóa được,
 lĩnh vực luôn ≥ 1, CCCD không xóa được).
 """
 
 import uuid
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.responses import (
-    BAR_CARD_NUMBER_TAKEN,
-    CARD_CHANGE_REQUIRES_REVIEW,
-    FORBIDDEN,
-    LAWYER_NOT_FOUND,
-    ApiError,
-)
 from app.models.lawyer import (
     ACTIVE,
     HIDDEN,
@@ -28,9 +20,7 @@ from app.models.lawyer import (
     utcnow,
 )
 from app.repositories import lawyer_repository as repo
-from app.schemas.lawyer import ProfileUpdateRequest
 from app.services import user_client
-from app.services.views import profile_out
 
 CITIZEN_PROFILE, BAR_CARD, SPECIALIZATIONS = "citizen_profile", "bar_card_number", "specializations"
 
@@ -67,57 +57,6 @@ def set_specializations(profile: LawyerProfile, codes: list[str]) -> None:
     profile.specializations = [s for s in profile.specializations if s.specialization_code in keep]
     have = set(profile.specialization_codes)
     profile.specializations.extend(LawyerProfileSpecialization(specialization_code=c) for c in codes if c not in have)
-
-
-def _out(db: Session, profile: LawyerProfile, complete: bool, missing: list[str]) -> dict:
-    return profile_out(profile, repo.specialization_names(db), is_complete=complete, missing=missing,
-                       pending=repo.get_open_application(db, profile.user_id))
-
-
-def get_my_profile(db: Session, user_id: uuid.UUID) -> dict:
-    profile = repo.get_profile_by_user(db, user_id)
-    if profile is None:
-        raise ApiError(404, LAWYER_NOT_FOUND)
-    complete, missing = refresh_completeness(profile)
-    db.commit()
-    return _out(db, profile, complete, missing)
-
-
-def update_my_profile(db: Session, user_id: uuid.UUID, role: str, body: ProfileUpdateRequest) -> dict:
-    """Lưu ngay, không cần duyệt. Số thẻ chỉ nhận lần đầu (hồ sơ chưa có số thẻ)."""
-    if role != "lawyer":
-        raise ApiError(403, FORBIDDEN)
-    profile = repo.get_profile_by_user(db, user_id, for_update=True)
-    if profile is None or profile.status == HIDDEN:
-        raise ApiError(404, LAWYER_NOT_FOUND)
-
-    changes = body.model_dump(exclude_unset=True)
-    number = changes.pop("bar_card_number", None)
-    if number is not None:
-        if profile.bar_card_number is None:
-            if repo.bar_card_taken(db, number, user_id):
-                raise ApiError(409, BAR_CARD_NUMBER_TAKEN)
-            profile.bar_card_number = number
-        elif profile.bar_card_number.upper() != number.upper():
-            raise ApiError(409, CARD_CHANGE_REQUIRES_REVIEW)
-    codes = changes.pop("specialization_codes", None)
-    if codes is not None:
-        set_specializations(profile, codes)
-    for field, value in changes.items():
-        setattr(profile, field, value)
-
-    try:
-        db.flush()
-        # User Service lỗi → ApiError 5xx, rollback: không lưu dữ liệu nửa vời.
-        complete, missing = refresh_completeness(profile)
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise ApiError(409, BAR_CARD_NUMBER_TAKEN) from None
-    except ApiError:
-        db.rollback()
-        raise
-    return _out(db, profile, complete, missing)
 
 
 def lawyer_status(db: Session, user_id: uuid.UUID) -> dict:

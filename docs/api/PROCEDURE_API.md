@@ -51,8 +51,14 @@ Tài liệu bàn giao danh sách các endpoint, tham số và dữ liệu mẫu 
 | `POST` | `/api/procedures/search` | Tìm kiếm thủ tục bằng câu hỏi hoặc từ khóa (hỗ trợ có dấu và không dấu) |
 | `GET` | `/api/procedures/{id_hoặc_code}` | Chi tiết đầy đủ của một thủ tục (chấp nhận cả UUID lẫn mã `HKD-001`, `DD-001`) |
 | `GET` | `/api/procedures/{id_hoặc_code}/requirements` | Danh mục hồ sơ, giấy tờ cần chuẩn bị (cho màn hình Checklist giấy tờ) |
-| `GET` | `/api/procedures/{id_hoặc_code}/conditions` | Danh sách điều kiện thực hiện thủ tục |
-| `GET` | `/api/procedures/{id_hoặc_code}/fees` | Chi tiết các khoản phí và lệ phí |
+| `GET` | `/api/procedures/fees` | Chi tiết các khoản phí và lệ phí |
+| `GET` | `/api/procedures/form-schema/{procedure_code}` | **Lấy Form Schema động của 25 thủ tục** |
+| `GET` | `/api/procedures/applications` | **Danh sách hồ sơ của tôi** (phân trang, lọc theo domain, status, tìm kiếm - Yêu cầu Bearer Token) |
+| `POST` | `/api/procedures/applications` | Lưu hồ sơ người dùng điền (tạo nháp hoặc nộp) |
+| `GET` | `/api/procedures/applications/{domain}/{record_id}` | Tra cứu chi tiết một hồ sơ đã lưu |
+| `PUT` | `/api/procedures/applications/{domain}/{record_id}` | **Cập nhật hồ sơ bản nháp** (chỉ chủ sở hữu, yêu cầu Bearer Token) |
+| `DELETE` | `/api/procedures/applications/{domain}/{record_id}` | **Xóa hồ sơ bản nháp** (chỉ chủ sở hữu, yêu cầu Bearer Token) |
+| `POST` | `/api/procedures/applications/{domain}/{record_id}/submit` | **Nộp chính thức hồ sơ** (kiểm tra trường bắt buộc, yêu cầu Bearer Token) |
 
 ---
 
@@ -605,4 +611,99 @@ Hệ thống tự động phân loại và lưu hồ sơ vào đúng 1 trong 2 b
   "request_id": "req-789"
 }
 ```
+
+### C. Lấy danh sách hồ sơ của tôi (`GET /api/procedures/applications`) *(MỚI - ƯU TIÊN CẤP 1)*
+- **Xác thực:** Yêu cầu Bearer Token (`Authorization: Bearer <jwt>`).
+- **Query params:**
+  - `domain`: `land` hoặc `business` (tùy chọn)
+  - `status`: `draft` hoặc `submitted` (tùy chọn)
+  - `page`: Số trang (mặc định 1)
+  - `page_size`: Số bản ghi mỗi trang (mặc định 20)
+  - `search`: Từ khóa tìm kiếm (tùy chọn)
+- **Response mẫu (200 OK):**
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
+        "user_id": "11111111-1111-1111-1111-111111111111",
+        "procedure_code": "DD-001",
+        "status": "draft",
+        "applicant_name": "Nguyễn Văn A",
+        "plot_number": "123",
+        "land_address": "Số 10 Đường ABC, Quận 1, TP.HCM",
+        "land_area": 120.5,
+        "form_data": { ... },
+        "domain": "land",
+        "created_at": "2026-10-14T08:00:00Z",
+        "updated_at": "2026-10-14T08:30:00Z"
+      }
+    ],
+    "pagination": {
+      "page": 1,
+      "page_size": 20,
+      "total": 1,
+      "total_pages": 1
+    }
+  },
+  "error": null,
+  "request_id": "req-abc"
+}
+```
+
+### D. Cập nhật hồ sơ bản nháp (`PUT /api/procedures/applications/{domain}/{record_id}`) *(MỚI - ƯU TIÊN CẤP 1)*
+- **Xác thực:** Yêu cầu Bearer Token.
+- **Quy tắc:** Chỉ chủ sở hữu mới có quyền sửa, và chỉ được sửa khi hồ sơ ở trạng thái `draft`.
+- **Request Body (JSON):**
+```json
+{
+  "form_data": {
+    "applicant_name": "Nguyễn Văn A (Cập nhật)",
+    "applicant_phone": "0988999888",
+    "land_area": 150.0
+  },
+  "extra_data": {
+    "note": "Cập nhật lại diện tích"
+  },
+  "status": "draft"
+}
+```
+- **Response mẫu (200 OK):** Trả về bản ghi sau khi cập nhật thành công.
+
+### E. Xóa hồ sơ bản nháp (`DELETE /api/procedures/applications/{domain}/{record_id}`) *(MỚI - ƯU TIÊN CẤP 1)*
+- **Xác thực:** Yêu cầu Bearer Token.
+- **Quy tắc:** Chỉ chủ sở hữu mới có quyền xóa, và chỉ được xóa hồ sơ ở trạng thái `draft`.
+- **Response mẫu (200 OK):**
+```json
+{
+  "data": {
+    "success": true,
+    "message": "Đã xóa bản nháp hồ sơ thành công"
+  },
+  "error": null,
+  "request_id": "req-del"
+}
+```
+
+### F. Nộp chính thức hồ sơ (`POST /api/procedures/applications/{domain}/{record_id}/submit`) *(MỚI - ƯU TIÊN CẤP 1)*
+- **Xác thực:** Yêu cầu Bearer Token.
+- **Quy tắc:**
+  - Kiểm tra quyền sở hữu của user.
+  - Tự động kiểm tra tính đầy đủ của các trường bắt buộc (`required: true`) theo Schema thủ tục.
+  - Trả về `400 VALIDATION_ERROR` nếu thiếu trường; nếu đầy đủ, chuyển `status` sang `submitted` và khóa hồ sơ.
+- **Response mẫu (200 OK):**
+```json
+{
+  "data": {
+    "id": "34c3b7a2-1f03-425a-b4f4-6f2b06f9528a",
+    "procedure_code": "DD-001",
+    "status": "submitted",
+    "updated_at": "2026-10-14T09:00:00Z"
+  },
+  "error": null,
+  "request_id": "req-sub"
+}
+```
+
 

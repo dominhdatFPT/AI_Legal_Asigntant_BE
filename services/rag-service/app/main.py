@@ -1,17 +1,46 @@
 import logging
+import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 
 from app.api.v1 import internal
+from app.core.config import get_settings
+from app.core.database import get_engine
+from app.services.embedding import get_embedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="RAG Service", version="0.2.0")
+
+
+def warmup() -> None:
+    """Mở sẵn kết nối Supabase và tạo client Gemini + gọi thử 1 lần embedding.
+    Lỗi thì chỉ ghi log, service vẫn chạy (lần tìm kiếm đầu sẽ tự kết nối như trước)."""
+    started = time.perf_counter()
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        get_embedder().embed_query("khởi động")
+        logger.info("rag warmup xong sau %.2fs", time.perf_counter() - started)
+    except Exception as e:  # noqa: BLE001 - khởi động không được phép chết vì warmup
+        logger.warning("rag warmup lỗi (bỏ qua): %s", e)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if get_settings().warmup_on_startup:
+        await run_in_threadpool(warmup)
+    yield
+
+
+app = FastAPI(title="RAG Service", version="0.2.0", lifespan=lifespan)
 app.include_router(internal.router)
 
 

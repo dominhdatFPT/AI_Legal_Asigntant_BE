@@ -3,6 +3,7 @@ import uuid
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from . import revocation
 from .core import ACCESS_COOKIE, FORBIDDEN, AuthError, CurrentUser, decode_access_token, extract_token
 
 
@@ -45,3 +46,5 @@ async def _auth_error_response(request: Request, exc: AuthHTTPException) -> JSON
 
 def add_auth_error_handler(app: FastAPI) -> None:
     app.add_exception_handler(AuthHTTPException, _auth_error_response)
+    # Nghe event thu hồi token ngay khi app khởi tạo, không chờ request đầu tiên.
+    revocation.ensure_started()

@@ -51,6 +51,7 @@ services:
       # Trong mạng Docker gọi rag-service theo tên service (không dùng localhost)
       RAG_SERVICE_URL: http://rag-service:8000
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
 
@@ -72,11 +73,11 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_CLOCK_SKEW_SECONDS: ${FIREBASE_CLOCK_SKEW_SECONDS:-10}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
-      LAWYER_SERVICE_URL: ${LAWYER_SERVICE_URL:-http://lawyer-service:8000}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
       AUTH_REFRESH_COOKIE_PATH: ${AUTH_REFRESH_COOKIE_PATH:-/api}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
 
@@ -94,6 +95,7 @@ services:
     environment:
       LAWYER_DATABASE_URL: ${LAWYER_DATABASE_URL:-}
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
       USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
       DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
@@ -115,6 +117,9 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       PROCEDURE_DATABASE_URL: ${PROCEDURE_DATABASE_URL:-}
+      SUPABASE_URL: ${SUPABASE_URL:-https://qqwuhiymixomwrdunfkz.supabase.co}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxd3VoaXltaXhvbXdyZHVuZmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MzgxNzAsImV4cCI6MjEwNzAxNDE3MH0.SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
 
@@ -137,6 +142,7 @@ services:
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
 
@@ -162,6 +168,7 @@ services:
       PROCEDURE_SERVICE_URL: ${PROCEDURE_SERVICE_URL:-http://procedure-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
       CONTRACT_ALLOWED_ORIGINS: ${CONTRACT_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - type: bind
         source: ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem
@@ -190,6 +197,7 @@ services:
       CONTRACT_SUPABASE_URL: ${CONTRACT_SUPABASE_URL:-}
       CONTRACT_SUPABASE_SERVICE_ROLE_KEY: ${CONTRACT_SUPABASE_SERVICE_ROLE_KEY:-}
       CONTRACT_STORAGE_BUCKET: ${CONTRACT_STORAGE_BUCKET:-contract-files}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
 
   document-service:
     user: "65532:65532"
@@ -227,6 +235,7 @@ services:
       DOCUMENT_VIETOCR_MODEL_DIR: /opt/vietocr
       USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - type: bind
         source: ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem
@@ -249,8 +258,15 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       LOCATION_DATABASE_URL: ${LOCATION_DATABASE_URL:-}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
+      GOONG_API_KEY: ${GOONG_API_KEY:-}
+      LOCATION_SEARCH_ENABLED: ${LOCATION_SEARCH_ENABLED:-false}
+      LOCATION_GOONG_TIMEOUT_SECONDS: ${LOCATION_GOONG_TIMEOUT_SECONDS:-5}
+      LOCATION_SEARCH_TIMEOUT_SECONDS: ${LOCATION_SEARCH_TIMEOUT_SECONDS:-20}
+      LOCATION_GOONG_MAX_RPS: ${LOCATION_GOONG_MAX_RPS:-4}
+      LOCATION_GOONG_DAILY_BUDGET: ${LOCATION_GOONG_DAILY_BUDGET:-1000}
     volumes:
-      - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
 
   consultation-service:
     build:
@@ -268,6 +284,7 @@ services:
       LAWYER_SERVICE_URL: ${LAWYER_SERVICE_URL:-http://lawyer-service:8000}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8000}
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
 
@@ -285,7 +302,9 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       NOTIFICATION_DATABASE_URL: ${NOTIFICATION_DATABASE_URL:-}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
+      # Container notification-worker đã nghe event; tắt consumer trong API để không có 2 tiến trình cùng ghi DB.
+      RUN_NOTIFICATION_HUB_IN_API: "false"
     volumes:
       - type: bind
         source: ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem
@@ -293,3 +312,54 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - notification-data:/app/data
+
+  notification-worker:
+    build:
+      context: ./services/notification-service
+      additional_contexts:
+        libs: ./libs
+    command: ["python", "-m", "app.notification_event_worker"]
+    restart: unless-stopped
+    environment:
+      JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
+      NOTIFICATION_DATABASE_URL: ${NOTIFICATION_DATABASE_URL:-}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
+      - notification-data:/app/data
+    depends_on:
+      rabbitmq-core-events:
+        condition: service_healthy
+
+  # ==========================================================
+  # BROKER 1: Điều phối Sự kiện Nghiệp vụ (Business Events Broker)
+  # Quản lý Domain Events: auth, user, lawyer, notification, consultation
+  # ==========================================================
+  rabbitmq-core-events:
+    image: rabbitmq:3-management-alpine
+    # hostname cố định: RabbitMQ lưu dữ liệu theo tên node, đổi hostname là mất queue.
+    hostname: rabbitmq-core-events
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      default:
+        aliases:
+          - rabbitmq
+          - rabbitmq-core-events
+
+volumes:
+  notification-data:
+  rabbitmq-data:

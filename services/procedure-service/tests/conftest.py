@@ -9,6 +9,9 @@ from sqlalchemy.pool import StaticPool
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
+TESTS_DIR = Path(__file__).resolve().parent
+if str(TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(TESTS_DIR))
 
 # Schema rút gọn của database/001 + 003, đủ cột cho các query của service.
 TEST_SCHEMA = """

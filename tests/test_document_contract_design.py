@@ -36,16 +36,14 @@ def test_document_replaces_wrong_procedure_spec_and_tracks_implemented_operation
     assert not any(path.startswith('/procedures') for path in DOC['paths'])
     operations = [(path, op) for path, item in DOC['paths'].items()
                   for method, op in item.items() if method in METHODS]
-    assert len(operations) == 19
-    assert len({op['operationId'] for _, op in operations}) == 19
+    assert len(operations) == 15
+    assert len({op['operationId'] for _, op in operations}) == 15
     for path, op in operations:
         implemented = op['operationId'] in {'getDocumentHealth', 'getDocumentAuthContext', 'uploadDocument', 'listDocuments', 'getDocument',
                                             'getDocumentDownload', 'getDocumentContent', 'deleteDocument',
                                             'createIdentityOcrSession', 'getIdentityOcrSession',
                                               'getMyIdentityProfile', 'confirmMyIdentityProfile', 'unlinkMyIdentityProfile',
-                                              'getDocumentProcessing', 'getDocumentExtraction',
-                                              'createLawyerCardOcr', 'getLawyerCardOcr', 'getLawyerCardInternal',
-                                              'createLawyerCardViewUrlInternal'}
+                                              'getDocumentProcessing', 'getDocumentExtraction'}
         assert op['x-status'] == ('implemented' if implemented else 'planned')
     assert DOC['paths']['/documents/health']['get']['security'] == []
     assert DOC['security'] == [{'BearerAuth': []}, {'CookieAuth': []}]
@@ -95,7 +93,7 @@ def test_erd_has_local_relationships_and_required_sql_invariants():
     text = (ROOT / 'services/document-service/database/erd.dbml').read_text(encoding='utf-8')
     assert re.findall(r'^Table (\w+)', text, re.M) == [
         'user_files', 'document_processing_jobs', 'document_extraction_results', 'user_identity_profiles',
-        'document_identity_ocr_sessions', 'document_notification_outbox', 'document_lawyer_card_ocr']
+        'document_identity_ocr_sessions', 'document_notification_outbox']
     assert 'Ref: user_files.id < document_processing_jobs.document_id' in text
     assert 'Ref: document_processing_jobs.id - document_extraction_results.job_id' in text
     assert '(owner_user_id, idempotency_key) [unique]' in text

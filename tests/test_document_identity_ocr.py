@@ -29,9 +29,10 @@ def pair():
 
 
 def result():
+    from test_document_identity_card_match import mrz_raw
     return {"id":"099000000001", "full_name":"TEST PERSON", "date_of_birth":"01/01/2000",
             "place_of_residence":"TEST ADDRESS", "issue_date":"2020-01-01", "confidence":98,
-            "extra_provider_field":{"original":True}}
+            "extra_provider_field":{"original":True}, "side":"back", "lines":mrz_raw()["lines"]}
 
 
 def test_adapter_exact_java_contract_and_preserves_raw(foundation,vnpt_env):
@@ -126,7 +127,9 @@ def test_sessions_sql_owner_raw_and_replay(sessions,foundation):
     assert caught.value.status==404
     with psycopg.connect(url) as conn:
         raw=conn.execute("SELECT raw_front,raw_back FROM public.document_identity_ocr_sessions WHERE id=%s",(row["session_id"],)).fetchone()
-        assert raw==(result(),result())
+        expected_back = result()
+        expected_back["card_pair_check"] = {"status":"matched", "method":"td1_mrz_consistency", "version":"1"}
+        assert raw==(result(),expected_back)
         conn.execute("SET ROLE authenticated")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("SELECT * FROM public.document_identity_ocr_sessions")

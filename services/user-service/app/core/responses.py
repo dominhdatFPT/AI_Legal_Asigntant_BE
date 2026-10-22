@@ -28,13 +28,7 @@ USER_NOT_DELETED = "USER_NOT_DELETED"
 CANNOT_LOCK_SELF = "CANNOT_LOCK_SELF"
 CANNOT_DELETE_SELF = "CANNOT_DELETE_SELF"
 CANNOT_CHANGE_OWN_ROLE = "CANNOT_CHANGE_OWN_ROLE"
-ROLE_CHANGED_RELOGIN = "ROLE_CHANGED_RELOGIN"
-LAWYER_ROLE_VIA_LAWYER_SERVICE = "LAWYER_ROLE_VIA_LAWYER_SERVICE"
 ROLE_CHANGE_NOT_ALLOWED = "ROLE_CHANGE_NOT_ALLOWED"
-HARD_DELETE_NOT_ALLOWED = "HARD_DELETE_NOT_ALLOWED"
-LAWYER_UNAVAILABLE = "LAWYER_UNAVAILABLE"
-LAWYER_TIMEOUT = "LAWYER_TIMEOUT"
-LAWYER_BAD_RESPONSE = "LAWYER_BAD_RESPONSE"
 
 MESSAGES = {
     INVALID_CREDENTIALS: "Tên đăng nhập hoặc mật khẩu không chính xác.",
@@ -59,13 +53,7 @@ MESSAGES = {
     CANNOT_LOCK_SELF: "Bạn không thể tự khóa tài khoản của mình.",
     CANNOT_DELETE_SELF: "Bạn không thể tự xóa tài khoản của mình.",
     CANNOT_CHANGE_OWN_ROLE: "Bạn không thể tự đổi vai trò của mình.",
-    ROLE_CHANGED_RELOGIN: "Tài khoản của bạn đã được cập nhật quyền, vui lòng đăng nhập lại",
-    LAWYER_ROLE_VIA_LAWYER_SERVICE: "Không đổi trực tiếp sang luật sư. Hãy tạo tài khoản luật sư hoặc duyệt đơn xin làm luật sư.",
-    ROLE_CHANGE_NOT_ALLOWED: "Không thể đổi vai trò của tài khoản này sang luật sư.",
-    HARD_DELETE_NOT_ALLOWED: "Tài khoản này đã được sử dụng nên không thể xóa hẳn.",
-    LAWYER_UNAVAILABLE: "Hệ thống luật sư tạm thời không phản hồi, chưa thay đổi gì. Vui lòng thử lại sau.",
-    LAWYER_TIMEOUT: "Hệ thống luật sư phản hồi quá chậm, chưa thay đổi gì. Vui lòng thử lại sau.",
-    LAWYER_BAD_RESPONSE: "Hệ thống luật sư đang gặp lỗi, chưa thay đổi gì. Vui lòng thử lại sau.",
+    ROLE_CHANGE_NOT_ALLOWED: "Không thể chuyển tài khoản này sang vai trò luật sư.",
 }
 
 

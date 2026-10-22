@@ -1,5 +1,7 @@
 # Contract Service
 
+Kho bản nguồn chỉ xem đã có đủ 30 tài liệu / 114 trang: `GET /api/v1/contracts/reference-catalog`, chi tiết `/{id}` và asset qua `/reference-assets/{filename}`. API này chỉ đọc bộ nguồn trống được đóng gói, không truy cập DB/Storage riêng hay tạo nháp. Tên theo nội dung và phân loại Procedure được xuất cùng snapshot cho FE. Hai bản lỗi nguồn và hai tình huống riêng có nhãn rõ; không tự publish trong catalog điền/xuất hiện có. Xem [bàn giao kho chỉ xem](../../docs/api/REFERENCE_LIBRARY_RELEASE.md).
+
 Dịch vụ quản lý mẫu hợp đồng và dữ liệu cần điền vào hợp đồng.
 
 C1–C8 cập nhật11/10/2026: auth/catalog/nháp/identity/generation và import/mapping mẫu riêng đã có code/test. Xem [tiến độ](../../docs/api/CONTRACT_IMPLEMENTATION_TASKS.md), [C4](README_ADMIN.md), [C5/phụ thuộc nhóm](README_DRAFTS.md), [C6](README_IDENTITY_SUGGESTIONS.md), [C7](README_GENERATIONS.md) và [Postman C8/phạm vi file nguồn](README_PERSONAL_TEMPLATES.md). C8 hỗ trợ DOCX marker rõ ràng hoặc PDF vùng trắng user-confirm, không tự nhận diện mọi ô trống/convert PDF sang Word. Bộ ba hợp đồng Drive có luồng native snapshot riêng: xem [kho mẫu Drive](README_DRIVE_CATALOG.md). Hai mẫu đất đai còn blocker nội dung/bố cục, không coi 30 file là mẫu published.

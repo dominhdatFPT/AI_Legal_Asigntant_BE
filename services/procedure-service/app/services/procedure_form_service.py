@@ -911,6 +911,65 @@ def get_fields_hkd_002() -> List[FormField]:
     return fields
 
 
+def get_fields_hkd_003() -> List[FormField]:
+    """HKD-003: Chấm dứt hoạt động hộ kinh doanh"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend([
+        FormField(
+            name="business_name_vn",
+            label="Tên Hộ kinh doanh chấm dứt",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="HỘ KINH DOANH HOÀNG PHÁT",
+            section="business",
+        ),
+        FormField(
+            name="business_code",
+            label="Mã số đăng ký Hộ kinh doanh / Mã số thuế",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="01E8012345",
+            section="business",
+        ),
+        FormField(
+            name="headquarters_address",
+            label="Địa chỉ địa điểm kinh doanh",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Số nhà, đường/phố, phường/xã, quận/huyện, tỉnh/thành phố",
+            section="business",
+        ),
+        FormField(
+            name="termination_reason",
+            label="Lý do chấm dứt hoạt động",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Kinh doanh không hiệu quả / Chuyển hướng kinh doanh...",
+            section="dissolution",
+        ),
+        FormField(
+            name="tax_clearance_status",
+            label="Tình trạng nghĩa vụ thuế",
+            field_type=FieldType.select,
+            required=True,
+            default_value="completed",
+            options=[
+                FormFieldOption(value="completed", label="Đã hoàn thành toàn bộ nghĩa vụ nộp thuế"),
+                FormFieldOption(value="committed", label="Cam kết thanh toán toàn bộ nợ thuế phát sinh"),
+            ],
+            section="dissolution",
+        ),
+        FormField(
+            name="termination_date",
+            label="Thời điểm dự kiến chấm dứt hoạt động",
+            field_type=FieldType.date,
+            required=True,
+            section="dissolution",
+        ),
+    ])
+    return fields
+
+
 def get_fields_dn_001() -> List[FormField]:
     """DN-001: Thủ tục ủy quyền thực hiện thủ tục đăng ký doanh nghiệp"""
     fields = get_applicant_block(prefix="authorizer", section="authorizer")
@@ -1352,6 +1411,7 @@ PROCEDURE_FIELD_DISPATCHER: Dict[str, Callable[[], List[FormField]]] = {
     # 13 Kinh doanh
     "HKD-001": get_fields_hkd_001,
     "HKD-002": get_fields_hkd_002,
+    "HKD-003": get_fields_hkd_003,
     "DN-001": get_fields_dn_001,
     "DN-002": get_fields_dn_002,
     "DN-003": get_fields_dn_003,
@@ -1378,8 +1438,9 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
     "DD-010": {"name": "Thủ tục đăng ký thế chấp quyền sử dụng đất, tài sản gắn liền với đất", "domain": "land", "template": "Thủ tục đăng ký thế chấp quyền sử dụng đất - Đơn đăng ký thế chấp.doc"},
     "DD-011": {"name": "Thủ tục xóa đăng ký thế chấp quyền sử dụng đất (Giải chấp Sổ đỏ)", "domain": "land", "template": "Thủ tục xóa đăng ký thế chấp quyền sử dụng đất (Giải chấp Sổ đỏ).doc"},
     "DD-012": {"name": "Thủ tục cung cấp thông tin, dữ liệu đất đai, trích lục bản đồ địa chính", "domain": "land", "template": None},
-    "HKD-001": {"name": "Đăng ký thành lập hộ kinh doanh", "domain": "business", "template": "Thủ tục thông báo lập Địa điểm kinh doanh - Đăng ký Hộ kinh doanh.doc"},
-    "HKD-002": {"name": "Thay đổi nội dung đăng ký hộ kinh doanh", "domain": "business", "template": "Thủ tục đăng ký thay đổi nội dung Đăng ký doanh nghiệp.docx"},
+    "HKD-001": {"name": "Đăng ký thành lập hộ kinh doanh", "domain": "business", "template": "Thủ tục đăng ký thành lập Hộ kinh doanh.doc"},
+    "HKD-002": {"name": "Thay đổi nội dung đăng ký hộ kinh doanh", "domain": "business", "template": "Thủ tục đăng ký thay đổi nội dung Đăng ký Hộ kinh doanh.doc"},
+    "HKD-003": {"name": "Chấm dứt hoạt động hộ kinh doanh", "domain": "business", "template": "Thủ tục chấm dứt hoạt động Hộ kinh doanh.doc"},
     "DN-001": {"name": "Thủ tục ủy quyền thực hiện thủ tục đăng ký doanh nghiệp", "domain": "business", "template": "Thủ tục ủy quyền thực hiện thủ tục đăng ký doanh nghiệp.docx"},
     "DN-002": {"name": "Thủ tục đề nghị cấp lại Giấy chứng nhận đăng ký doanh nghiệp", "domain": "business", "template": "Thủ tục đề nghị cấp lại Giấy chứng nhận đăng ký doanh nghiệp.docx"},
     "DN-003": {"name": "Thủ tục đăng ký thành lập Công ty Cổ phần", "domain": "business", "template": "Thủ tục đăng ký thành lập Công ty Cổ phần.pdf"},
@@ -1397,7 +1458,7 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
 def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
     """
     Hàm trung gian (Dispatcher): Nhận vào mã thủ tục (ví dụ: DD-001 hoặc HKD-001),
-    gọi đến đúng hàm tương ứng trong 25 hàm chi tiết để trả về schema các cột/biến
+    gọi đến đúng hàm tương ứng trong 26 hàm chi tiết để trả về schema các cột/biến
     cho Frontend render form.
     """
     code_upper = procedure_code.strip().upper()
@@ -1417,29 +1478,29 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
     # Gọi hàm chi tiết
     fields = handler()
 
-    # Nhóm các section theo field
+    # Nhóm các section theo field (Loại bỏ số thứ tự cứng - L5)
     section_map = {
-        "applicant": FormSection(key="applicant", title="1. Thông tin người làm đơn", order=1),
-        "authorizer": FormSection(key="authorizer", title="1. Thông tin người ủy quyền", order=1),
-        "authorized_person": FormSection(key="authorized_person", title="2. Thông tin người được ủy quyền", order=2),
-        "lessor": FormSection(key="lessor", title="1. Thông tin bên cho thuê", order=1),
-        "lessee": FormSection(key="lessee", title="2. Thông tin bên thuê", order=2),
-        "property": FormSection(key="property", title="2. Thông tin thửa đất / Bất động sản", order=2),
-        "business": FormSection(key="business", title="2. Thông tin tổ chức / Doanh nghiệp", order=2),
-        "governance": FormSection(key="governance", title="3. Cơ cấu quản lý & Người đại diện", order=3),
-        "transfer": FormSection(key="transfer", title="3. Thông tin chuyển nhượng", order=3),
-        "transaction": FormSection(key="transaction", title="3. Thông tin tặng cho / thừa kế", order=3),
-        "conversion": FormSection(key="conversion", title="3. Thông tin chuyển mục đích sử dụng", order=3),
-        "mortgage": FormSection(key="mortgage", title="3. Thông tin biện pháp bảo đảm / thế chấp", order=3),
-        "release": FormSection(key="release", title="3. Thông tin giải chấp / xóa đăng ký", order=3),
-        "suspension": FormSection(key="suspension", title="3. Thông tin tạm ngừng hoạt động", order=3),
-        "dissolution": FormSection(key="dissolution", title="3. Thông tin giải thể doanh nghiệp", order=3),
-        "tax": FormSection(key="tax", title="3. Thông tin đăng ký và kê khai thuế", order=3),
-        "change": FormSection(key="change", title="3. Nội dung đăng ký thay đổi", order=3),
-        "financial": FormSection(key="financial", title="3. Điều khoản thanh toán & Giá thuê", order=3),
-        "scope": FormSection(key="scope", title="3. Phạm vi và thời hạn ủy quyền", order=3),
-        "origin": FormSection(key="origin", title="3. Nguồn gốc đất đai & Cam kết", order=3),
-        "request": FormSection(key="request", title="4. Yêu cầu giải quyết thủ tục", order=4),
+        "applicant": FormSection(key="applicant", title="Thông tin người làm đơn", order=1),
+        "authorizer": FormSection(key="authorizer", title="Thông tin người ủy quyền", order=1),
+        "authorized_person": FormSection(key="authorized_person", title="Thông tin người được ủy quyền", order=2),
+        "lessor": FormSection(key="lessor", title="Thông tin bên cho thuê", order=1),
+        "lessee": FormSection(key="lessee", title="Thông tin bên thuê", order=2),
+        "property": FormSection(key="property", title="Thông tin thửa đất / Bất động sản", order=2),
+        "business": FormSection(key="business", title="Thông tin tổ chức / Doanh nghiệp", order=2),
+        "governance": FormSection(key="governance", title="Cơ cấu quản lý & Người đại diện", order=3),
+        "transfer": FormSection(key="transfer", title="Thông tin chuyển nhượng", order=3),
+        "transaction": FormSection(key="transaction", title="Thông tin tặng cho / thừa kế", order=3),
+        "conversion": FormSection(key="conversion", title="Thông tin chuyển mục đích sử dụng", order=3),
+        "mortgage": FormSection(key="mortgage", title="Thông tin biện pháp bảo đảm / thế chấp", order=3),
+        "release": FormSection(key="release", title="Thông tin giải chấp / xóa đăng ký", order=3),
+        "suspension": FormSection(key="suspension", title="Thông tin tạm ngừng hoạt động", order=3),
+        "dissolution": FormSection(key="dissolution", title="Thông tin giải thể / chấm dứt hoạt động", order=3),
+        "tax": FormSection(key="tax", title="Thông tin đăng ký và kê khai thuế", order=3),
+        "change": FormSection(key="change", title="Nội dung đăng ký thay đổi", order=3),
+        "financial": FormSection(key="financial", title="Điều khoản thanh toán & Giá thuê", order=3),
+        "scope": FormSection(key="scope", title="Phạm vi và thời hạn ủy quyền", order=3),
+        "origin": FormSection(key="origin", title="Nguồn gốc đất đai & Cam kết", order=3),
+        "request": FormSection(key="request", title="Yêu cầu giải quyết thủ tục", order=4),
         "general": FormSection(key="general", title="Thông tin chung", order=5),
     }
 
@@ -1448,7 +1509,17 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
         sec = section_map.get(f.section, FormSection(key=f.section, title=f.section.capitalize()))
         used_sections[sec.key] = sec
 
-    sorted_sections = sorted(used_sections.values(), key=lambda s: s.order)
+    raw_sorted = sorted(used_sections.values(), key=lambda s: s.order)
+    # Tự động đánh số thứ tự liên tục 1, 2, 3... (L5)
+    final_sections = [
+        FormSection(
+            key=s.key,
+            title=f"{idx + 1}. {s.title}",
+            description=s.description,
+            order=idx + 1,
+        )
+        for idx, s in enumerate(raw_sorted)
+    ]
 
     return ProcedureFormSchema(
         procedure_code=code_upper,
@@ -1456,7 +1527,7 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
         domain=domain,
         target_table=target_table,
         template_filename=meta.get("template"),
-        sections=sorted_sections,
+        sections=final_sections,
         fields=fields,
     )
 

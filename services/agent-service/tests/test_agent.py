@@ -11,14 +11,14 @@ def fake_services(monkeypatch, chunk):
     calls = {}
 
     async def fake_search(query, top_k=5, request_id=None, transport=None):
-        calls["search"] = {"query": query, "request_id": request_id}
+        calls["search"] = {"query": query, "top_k": top_k, "request_id": request_id}
         return calls.get("chunks", [chunk])
 
     async def fake_generate(system_prompt, history, user_content):
         calls["generate"] = {
             "system_prompt": system_prompt, "history": history, "user_content": user_content,
         }
-        return "Theo Khoản 1 Điều 188 Luật Đất đai 2024...", 512
+        return "Theo Khoản 1 Điều 188 Luật Đất đai 2024...", 512, "gemini-test"
 
     monkeypatch.setattr(rag_client, "search", fake_search)
     monkeypatch.setattr(llm_client, "generate", fake_generate)
@@ -46,10 +46,11 @@ def test_process_message_uses_rag_context_and_history(fake_services, chunk):
         "Sang tên sổ đỏ cần gì?", history, request_id="req-9",
     ))
 
-    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "request_id": "req-9"}
+    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "top_k": 4, "request_id": "req-9"}
     prompt = fake_services["generate"]["system_prompt"]
     assert "Khoản 1 Điều 188, Luật Đất đai 2024 (31/2024/QH15)" in prompt
-    assert "Chỉ trả lời dựa trên các trích đoạn" in prompt
+    assert "Chỉ dùng thông tin trong các trích đoạn" in prompt
+    assert "Câu đầu tiên trả lời thẳng câu hỏi" in prompt
     assert fake_services["generate"]["history"] == history
     assert fake_services["generate"]["user_content"] == "Sang tên sổ đỏ cần gì?"
 

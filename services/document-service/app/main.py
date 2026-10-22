@@ -5,10 +5,9 @@ from common_auth import CurrentUser
 from app.core.errors import install_error_handlers, success
 from app.core.security import document_user
 from app.api.files import router as files_router
+from app.api.internal_files import router as internal_files_router
 from app.api.identity_ocr import router as identity_router
 from app.api.identity_profile import router as profile_router
-from app.api.internal_lawyer_cards import router as internal_lawyer_cards_router
-from app.api.lawyer_card_ocr import router as lawyer_card_router
 from app.api.processing import router as processing_router
 
 
@@ -30,8 +29,7 @@ def auth_context(request: Request, user: CurrentUser = Depends(document_user)):
 
 authenticated_router.include_router(identity_router)
 authenticated_router.include_router(profile_router)
-authenticated_router.include_router(lawyer_card_router)
 authenticated_router.include_router(processing_router)
 authenticated_router.include_router(files_router)
 app.include_router(authenticated_router)
-app.include_router(internal_lawyer_cards_router)
+app.include_router(internal_files_router)

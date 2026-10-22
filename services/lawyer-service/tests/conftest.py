@@ -64,8 +64,8 @@ class Upstream:
 
     def __init__(self):
         self.users = {}      # user_id -> {"has_citizen_profile", "is_locked", "full_name", "role"}
-        self.cards = {}      # card_id -> {"owner_user_id", "ocr_result"}
-        self.taken_emails = set()
+        self.documents = {}  # document_id -> owner user_id (Document Service chỉ trả tài liệu cho chủ sở hữu)
+        self.not_ready = set()  # document_id chưa quét virus xong (409 FILE_NOT_READY)
         self.role_error = None   # (status, code) cho PUT role
         self.fail = {}
         self.calls = []
@@ -75,15 +75,15 @@ class Upstream:
         self.users[user_id] = {"has_citizen_profile": cccd, "is_locked": locked, "full_name": full_name, "role": role}
         return user_id
 
-    def card(self, owner, *, full_name="NGUYEN VAN A", number="12345/TP", status="completed"):
-        card_id = uuid.uuid4()
-        fields = None if status == "failed" else {"full_name": full_name, "bar_card_number": number,
-                                                  "bar_association": "Đoàn Luật sư TP. Hồ Chí Minh",
-                                                  "issue_date": "2020-05-12"}
-        self.cards[card_id] = {"owner_user_id": str(owner), "ocr_result": {
-            "status": status, "fields": fields, "warnings": [], "engine": "tesseract-local",
-            "error_code": "OCR_UNREADABLE" if status == "failed" else None}}
-        return card_id
+    def document(self, owner):
+        document_id = uuid.uuid4()
+        self.documents[document_id] = owner
+        return document_id
+
+    def credentials(self, owner):
+        """Đủ 2 loại giấy tờ bắt buộc, đã tải lên Document Service bởi `owner`."""
+        return [{"document_id": str(self.document(owner)), "type": "the_luat_su"},
+                {"document_id": str(self.document(owner)), "type": "chung_chi_hanh_nghe"}]
 
     @staticmethod
     def _ok(data, status=200):
@@ -97,7 +97,6 @@ class Upstream:
     def handler(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
         self.calls.append((method, path))
-        assert request.headers["X-Internal-Token"] == INTERNAL_TOKEN
         for prefix, kind in self.fail.items():
             if path.startswith(prefix):
                 if kind == "timeout":
@@ -106,6 +105,24 @@ class Upstream:
                     raise httpx.ConnectError("down", request=request)
                 return httpx.Response(500, text="boom")
 
+        if m := re.fullmatch(r"/api/v1/documents/([^/]+)", path):
+            # API công khai: gọi bằng access token của người gửi, không dùng X-Internal-Token.
+            assert "X-Internal-Token" not in request.headers
+            caller = jwt.decode(request.headers["Authorization"].removeprefix("Bearer "),
+                                options={"verify_signature": False})["sub"]
+            owner = self.documents.get(uuid.UUID(m[1]))
+            if owner is None or str(owner) != caller:
+                return self._err(404, "DOCUMENT_NOT_FOUND")
+            return self._ok({"document_id": m[1], "owner_user_id": caller, "file_status": "available"})
+        assert request.headers["X-Internal-Token"] == INTERNAL_TOKEN
+        if m := re.fullmatch(r"/internal/v1/documents/([^/]+)/content", path):
+            document_id = uuid.UUID(m[1])
+            if str(self.documents.get(document_id)) != request.url.params.get("owner_user_id"):
+                return self._err(404, "DOCUMENT_NOT_FOUND")
+            if document_id in self.not_ready:
+                return self._err(409, "FILE_NOT_READY", "File chưa kiểm tra xong, vui lòng thử lại sau.")
+            return httpx.Response(200, content=b"%PDF-test", headers={
+                "Content-Type": "application/pdf", "Content-Disposition": 'attachment; filename="the.pdf"'})
         if m := re.fullmatch(r"/internal/v1/users/([^/]+)/status", path):
             u = self.users.get(uuid.UUID(m[1]))
             if u is None:
@@ -118,31 +135,11 @@ class Upstream:
                 return self._err(404, "USER_NOT_FOUND")
             return self._ok({"full_name": u["full_name"], "id_number": "079090001234"} if u["has_citizen_profile"]
                             else None)
-        if path == "/internal/v1/users" and method == "POST":
-            body = json.loads(request.content)
-            if body["email"] in self.taken_emails:
-                return self._err(409, "EMAIL_IN_USE", "Email này đã được dùng cho một tài khoản khác.")
-            new_id = self.user(cccd=False, full_name=body["full_name"], role="lawyer")
-            return self._ok({"id": str(new_id), "email": body["email"], "full_name": body["full_name"],
-                             "role": "lawyer"}, 201)
-        if (m := re.fullmatch(r"/internal/v1/users/([^/]+)", path)) and method == "DELETE":
-            self.users.pop(uuid.UUID(m[1]), None)
-            return httpx.Response(204)
         if m := re.fullmatch(r"/internal/v1/users/([^/]+)/role", path):
             if self.role_error:
                 return self._err(*self.role_error)
             self.users[uuid.UUID(m[1])]["role"] = "lawyer"
             return self._ok({"id": m[1], "role": "lawyer"})
-        if m := re.fullmatch(r"/internal/v1/documents/lawyer-cards/([^/]+)", path):
-            card = self.cards.get(uuid.UUID(m[1]))
-            if card is None:
-                return self._err(404, "NOT_FOUND")
-            return self._ok({"card_id": m[1], **card, "created_at": "2026-10-15T02:00:00Z"})
-        if m := re.fullmatch(r"/internal/v1/documents/lawyer-cards/([^/]+)/view-url", path):
-            if uuid.UUID(m[1]) not in self.cards:
-                return self._err(404, "NOT_FOUND")
-            return self._ok({"card_id": m[1], "url": "https://x.supabase.co/storage/v1/object/sign/a?token=t",
-                             "expires_in": 300})
         return self._err(404, "NOT_FOUND")
 
 

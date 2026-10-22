@@ -1,15 +1,16 @@
-"""Admin: tạo tài khoản luật sư (bù trừ xóa cứng), danh sách / đếm, chi tiết đơn, duyệt, từ chối."""
+"""Admin: danh sách hồ sơ xin làm luật sư, duyệt (đổi vai trò + tạo hồ sơ), từ chối rồi người dùng gửi lại."""
 
 import uuid
+from datetime import timedelta
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import text
 
-from app.models import LawyerProfile, LawyerProfileSpecialization
+from app.models import LawyerApplication, LawyerProfile, LawyerProfileSpecialization
 from app.models.lawyer import utcnow
 
 LAWYERS = "/api/v1/lawyers"
-APPS = f"{LAWYERS}/me/applications"
+ME = f"{LAWYERS}/me"
 ADMIN_APPS = f"{LAWYERS}/applications"
 
 
@@ -22,145 +23,83 @@ def admin(upstream, auth):
     return auth(upstream.user(role="admin"), "admin")
 
 
-def _pending(client, upstream, auth, *, uid=None, number="12345/TP", ocr_number=None, full_name="NGUYEN VAN A"):
+def _body(upstream, uid, number):
+    return {"bar_card_number": number, "bio": "Tư vấn", "specialization_codes": ["land", "business"],
+            "credentials": upstream.credentials(uid)}
+
+
+def _pending(client, upstream, auth, *, uid=None, number="12345/TP"):
     uid = uid or upstream.user()
-    card = upstream.card(uid, number=ocr_number or number, full_name=full_name)
-    data = client.post(APPS, headers=auth(uid), json={
-        "type": "new", "bar_card_number": number, "bio": "Tư vấn", "specialization_codes": ["land", "business"],
-        "card_document_id": str(card)}).json()["data"]
-    res = client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    assert res.status_code == 200, res.text
+    res = client.post(LAWYERS, headers=auth(uid), json=_body(upstream, uid, number))
+    assert res.status_code == 201, res.text
     return uid, res.json()["data"]
 
 
-# ---------------------------------------------------------------- Tạo tài khoản luật sư
-def test_admin_tao_luat_su(client, upstream, admin):
-    res = client.post(f"{LAWYERS}/accounts", headers=admin,
-                      json={"email": "LuatSu.C@gmail.com", "password": "matkhau123", "full_name": "Lê Văn C"})
-    assert res.status_code == 201, res.text
-    data = res.json()["data"]
-    assert data["user"]["role"] == "lawyer" and data["user"]["email"] == "luatsu.c@gmail.com"
-    assert data["profile"]["status"] == "incomplete" and data["profile"]["source"] == "admin_created"
-    assert data["profile"]["card_document_id"] is None
-    assert ("POST", "/internal/v1/users") in upstream.calls
+def _status(client, admin, app_id):
+    for status in ("pending", "approved", "rejected"):
+        items = client.get(ADMIN_APPS, headers=admin, params={"approval_status": status}).json()["data"]["items"]
+        if any(a["id"] == app_id for a in items):
+            return status
 
 
-def test_tao_luat_su_chi_admin(client, upstream, auth):
-    body = {"email": "a@b.vn", "password": "matkhau123", "full_name": "A"}
-    assert client.post(f"{LAWYERS}/accounts", json=body).status_code == 401
-    res = client.post(f"{LAWYERS}/accounts", headers=auth(upstream.user()), json=body)
-    assert res.status_code == 403 and _code(res) == "FORBIDDEN"
-
-
-@pytest.mark.parametrize("body", [{}, {"email": "x", "password": "matkhau123", "full_name": "A"},
-                                  {"email": "a@b.vn", "password": "123", "full_name": "A"},
-                                  {"email": "a@b.vn", "password": "matkhau123", "full_name": "  "},
-                                  {"email": "a@b.vn", "password": "matkhau123", "full_name": "A", "role": "admin"}])
-def test_tao_luat_su_du_lieu_sai(client, admin, body):
-    assert client.post(f"{LAWYERS}/accounts", headers=admin, json=body).status_code == 422
-
-
-def test_tao_luat_su_trung_email_tra_nguyen_ma(client, upstream, admin):
-    upstream.taken_emails.add("a@b.vn")
-    res = client.post(f"{LAWYERS}/accounts", headers=admin,
-                      json={"email": "a@b.vn", "password": "matkhau123", "full_name": "A"})
-    assert res.status_code == 409 and _code(res) == "EMAIL_IN_USE"
-
-
-@pytest.mark.parametrize("kind,status", [("down", 503), ("timeout", 504), ("bad", 502)])
-def test_tao_luat_su_user_service_loi(client, upstream, admin, kind, status):
-    upstream.fail["/internal/v1/users"] = kind
-    res = client.post(f"{LAWYERS}/accounts", headers=admin,
-                      json={"email": "a@b.vn", "password": "matkhau123", "full_name": "A"})
-    assert res.status_code == status
-    # Thao tác ghi không tự retry.
-    assert upstream.calls == [("POST", "/internal/v1/users")]
-
-
-def test_luu_ho_so_loi_thi_xoa_cung_tai_khoan(client, db, upstream, admin, monkeypatch):
-    def broken_commit():
-        raise OperationalError("insert", {}, Exception("db down"))
-    monkeypatch.setattr(db, "commit", broken_commit)
-    res = client.post(f"{LAWYERS}/accounts", headers=admin,
-                      json={"email": "a@b.vn", "password": "matkhau123", "full_name": "A"})
-    assert res.status_code == 503 and _code(res) == "LAWYER_DB_UNAVAILABLE"
-    deleted = [path for method, path in upstream.calls if method == "DELETE"]
-    assert len(deleted) == 1 and deleted[0].startswith("/internal/v1/users/")
-
-
-# ---------------------------------------------------------------- Danh sách, đếm
-def test_danh_sach_va_dem_khong_tinh_nhap(client, upstream, auth, admin):
-    _pending(client, upstream, auth)
-    uid = upstream.user()
-    client.post(APPS, headers=auth(uid), json={"type": "new"})  # nháp
-    listing = client.get(ADMIN_APPS, headers=admin).json()["data"]
-    assert [a["status"] for a in listing["items"]] == ["pending"] and listing["pagination"]["total"] == 1
-    assert client.get(ADMIN_APPS, headers=admin, params={"type": "card_change"}).json()["data"]["items"] == []
-    summary = client.get(f"{ADMIN_APPS}/summary", headers=admin).json()["data"]
-    assert summary == {"total": 1, "by_status": {"pending": 1, "approved": 0, "rejected": 0, "withdrawn": 0},
-                       "by_type": {"new": 1, "card_change": 0}}
-
-
-def test_danh_sach_admin_phan_quyen_va_422(client, upstream, auth, admin):
-    citizen = auth(upstream.user())
-    for path in (ADMIN_APPS, f"{ADMIN_APPS}/summary", f"{ADMIN_APPS}/{uuid.uuid4()}"):
-        assert client.get(path, headers=citizen).status_code == 403
-        assert client.get(path).status_code == 401
-    assert client.get(ADMIN_APPS, headers=admin, params={"status": "draft"}).status_code == 422
-    assert client.get(ADMIN_APPS, headers=admin, params={"page_size": 101}).status_code == 422
-    assert client.get(f"{ADMIN_APPS}/summary", headers=admin, params={"type": "x"}).status_code == 422
-
-
-# ---------------------------------------------------------------- Chi tiết đơn
-def test_chi_tiet_don_co_anh_cccd_va_co_khong_khop(client, upstream, auth, admin):
-    _, app = _pending(client, upstream, auth, number="12345/TP", ocr_number="12346/TP", full_name="NGUYỄN VĂN A")
-    res = client.get(f"{ADMIN_APPS}/{app['id']}", headers=admin)
+# ---------------------------------------------------------------- Danh sách
+def test_danh_sach_cho_duyet(client, upstream, auth, admin):
+    _, app = _pending(client, upstream, auth)
+    res = client.get(ADMIN_APPS, headers=admin)
     assert res.status_code == 200, res.text
     data = res.json()["data"]
-    assert data["card_image"]["expires_in"] == 300 and data["card_image"]["url"].startswith("https://")
-    assert data["citizen_profile"]["full_name"] == "Nguyễn Văn A" and data["current_profile"] is None
-    assert data["checks"] == {"is_name_mismatch": False, "is_card_number_mismatch": True}
+    assert [a["id"] for a in data["items"]] == [app["id"]]
+    assert data["items"][0]["full_name"] == "Nguyễn Văn A" and len(data["items"][0]["credentials"]) == 2
+    assert data["pagination"] == {"page": 1, "page_size": 20, "total": 1, "total_pages": 1}
+    assert client.get(ADMIN_APPS, headers=admin, params={"approval_status": "approved"}).json()["data"]["items"] == []
 
 
-def test_chi_tiet_ocr_loi_thi_co_la_null(client, upstream, auth, admin):
-    uid = upstream.user()
-    card = upstream.card(uid, status="failed")
-    data = client.post(APPS, headers=auth(uid), json={"type": "new", "bar_card_number": "1/TP",
-                                                      "specialization_codes": ["land"],
-                                                      "card_document_id": str(card)}).json()["data"]
-    client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid))
-    checks = client.get(f"{ADMIN_APPS}/{data['id']}", headers=admin).json()["data"]["checks"]
-    assert checks == {"is_name_mismatch": None, "is_card_number_mismatch": None}
+def test_danh_sach_sap_xep_va_phan_trang(client, upstream, auth, admin):
+    _, first = _pending(client, upstream, auth, number="1/TP")
+    _, second = _pending(client, upstream, auth, number="2/TP")
+    asc = client.get(ADMIN_APPS, headers=admin).json()["data"]["items"]
+    assert [a["id"] for a in asc] == [first["id"], second["id"]]
+    page = client.get(ADMIN_APPS, headers=admin, params={"order": "desc", "page_size": 1}).json()["data"]
+    assert [a["id"] for a in page["items"]] == [second["id"]] and page["pagination"]["total_pages"] == 2
 
 
-def test_admin_khong_thay_nhap(client, upstream, auth, admin):
-    uid = upstream.user()
-    data = client.post(APPS, headers=auth(uid), json={"type": "new"}).json()["data"]
-    assert client.get(f"{ADMIN_APPS}/{data['id']}", headers=admin).status_code == 404
-    assert client.post(f"{ADMIN_APPS}/{data['id']}/approve", headers=admin).status_code == 404
+@pytest.mark.parametrize("params", [{"approval_status": "draft"}, {"order": "x"}, {"page": 0}, {"page_size": 101}])
+def test_danh_sach_tham_so_sai_422(client, admin, params):
+    assert client.get(ADMIN_APPS, headers=admin, params=params).status_code == 422
 
 
-@pytest.mark.parametrize("prefix,kind,status", [("/internal/v1/documents", "down", 503),
-                                                ("/internal/v1/documents", "bad", 502),
-                                                ("/internal/v1/users", "timeout", 504)])
-def test_chi_tiet_service_phu_loi(client, upstream, auth, admin, prefix, kind, status):
-    _, app = _pending(client, upstream, auth)
-    upstream.fail[prefix] = kind
-    assert client.get(f"{ADMIN_APPS}/{app['id']}", headers=admin).status_code == status
+def test_route_admin_phan_quyen(client, upstream, auth):
+    uid, app = _pending(client, upstream, auth)
+    calls = [("get", ADMIN_APPS, {}), ("post", f"{LAWYERS}/{app['id']}/approve", {}),
+             ("post", f"{LAWYERS}/{app['id']}/reject", {"json": {"reason": "x"}})]
+    for method, path, kw in calls:
+        res = getattr(client, method)(path, headers=auth(uid), **kw)
+        assert res.status_code == 403 and _code(res) == "FORBIDDEN"
+        assert getattr(client, method)(path, headers=auth(uid, "lawyer"), **kw).status_code == 403
+        assert getattr(client, method)(path, **kw).status_code == 401
 
 
 # ---------------------------------------------------------------- Duyệt
-def test_duyet_don_new_doi_vai_tro_va_tao_ho_so(client, upstream, auth, admin):
+def test_gui_danh_sach_duyet_tao_ho_so_luat_su(client, db, upstream, auth, admin):
     uid, app = _pending(client, upstream, auth)
-    res = client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=admin)
+    card_id = next(c["document_id"] for c in app["credentials"] if c["type"] == "the_luat_su")
+    res = client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin)
     assert res.status_code == 200, res.text
-    assert res.json()["data"]["status"] == "approved" and res.json()["data"]["reviewed_by"]
-    assert upstream.users[uid]["role"] == "lawyer"
-    me = client.get(f"{LAWYERS}/me", headers=auth(uid, "lawyer")).json()["data"]
-    assert me["status"] == "active" and me["source"] == "self_applied" and me["bar_card_number"] == "12345/TP"
-    assert {s["code"] for s in me["specializations"]} == {"land", "business"}
-    again = client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=admin)
+    data = res.json()["data"]
+    assert data["approval_status"] == "approved" and data["reviewed_at"]
+    assert upstream.users[uid]["role"] == "lawyer" and ("PUT", f"/internal/v1/users/{uid}/role") in upstream.calls
+    db.expire_all()
+    profile = db.query(LawyerProfile).filter_by(user_id=uid).one()
+    assert (profile.status, profile.source, profile.bar_card_number, str(profile.card_document_id)) == \
+        ("active", "self_applied", "12345/TP", card_id)
+    assert sorted(profile.specialization_codes) == ["business", "land"]
+    me = client.get(ME, headers=auth(uid, "lawyer")).json()["data"]
+    assert me["approval_status"] == "approved" and me["id"] == app["id"]
+    assert _status(client, admin, app["id"]) == "approved"
+    again = client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin)
     assert again.status_code == 409 and _code(again) == "APPLICATION_NOT_PENDING"
+    # Không có OCR thì phải là SQL NULL: JSON 'null' vi phạm CHECK jsonb_typeof(...) = 'object' trên Postgres.
+    assert db.execute(text("select card_ocr_result is null from lawyer_profiles")).scalar() == 1
 
 
 def test_duyet_lai_ho_so_da_an(client, db, upstream, auth, admin):
@@ -171,7 +110,7 @@ def test_duyet_lai_ho_so_da_an(client, db, upstream, auth, admin):
     db.add(hidden)
     db.commit()
     _, app = _pending(client, upstream, auth, uid=uid, number="NEW/TP")
-    assert client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=admin).status_code == 200
+    assert client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin).status_code == 200
     db.expire_all()
     profile = db.query(LawyerProfile).filter_by(user_id=uid).one()
     assert (profile.status, profile.source, profile.bar_card_number, profile.hidden_at) == \
@@ -179,56 +118,98 @@ def test_duyet_lai_ho_so_da_an(client, db, upstream, auth, admin):
     assert sorted(profile.specialization_codes) == ["business", "land"]
 
 
-def test_duyet_khi_tai_khoan_khong_con_hop_le(client, upstream, auth, admin):
+@pytest.mark.parametrize("action,kw", [("approve", {}), ("reject", {"json": {"reason": "x"}})])
+def test_don_khong_ton_tai_404(client, admin, action, kw):
+    res = client.post(f"{LAWYERS}/{uuid.uuid4()}/{action}", headers=admin, **kw)
+    assert res.status_code == 404 and _code(res) == "APPLICATION_NOT_FOUND"
+    assert client.post(f"{LAWYERS}/not-uuid/{action}", headers=admin, **kw).status_code == 422
+
+
+@pytest.mark.parametrize("error", [(409, "USER_DELETED"), (404, "USER_NOT_FOUND")])
+def test_duyet_khi_tai_khoan_khong_con_hop_le(client, upstream, auth, admin, error):
     _, app = _pending(client, upstream, auth)
-    upstream.role_error = (409, "USER_DELETED")
-    res = client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=admin)
+    upstream.role_error = error
+    res = client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin)
     assert res.status_code == 409 and _code(res) == "APPLICANT_UNAVAILABLE"
+    assert _status(client, admin, app["id"]) == "pending"
 
 
 @pytest.mark.parametrize("kind,status", [("down", 503), ("timeout", 504), ("bad", 502)])
-def test_duyet_user_service_loi_thi_don_van_cho(client, upstream, auth, admin, kind, status):
+def test_duyet_user_service_loi_thi_don_van_cho(client, db, upstream, auth, admin, kind, status):
     uid, app = _pending(client, upstream, auth)
     upstream.fail["/internal/v1/users"] = kind
-    assert client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=admin).status_code == status
+    upstream.calls.clear()
+    assert client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin).status_code == status
+    assert upstream.calls == [("PUT", f"/internal/v1/users/{uid}/role")]  # thao tác ghi không tự retry
     upstream.fail.clear()
-    assert client.get(f"{APPS}/{app['id']}", headers=auth(uid)).json()["data"]["status"] == "pending"
+    assert _status(client, admin, app["id"]) == "pending"
+    assert db.query(LawyerProfile).filter_by(user_id=uid).first() is None
 
 
-def test_duyet_doi_the_ghi_de_thong_tin_the(client, db, upstream, auth, admin):
-    uid = upstream.user(role="lawyer")
-    profile = LawyerProfile(user_id=uid, source="admin_created", status="active", bar_card_number="111/TP")
-    profile.specializations = [LawyerProfileSpecialization(specialization_code="land")]
-    db.add(profile)
-    db.commit()
-    card = upstream.card(uid, number="222/TP")
-    data = client.post(APPS, headers=auth(uid, "lawyer"), json={"type": "card_change", "bar_card_number": "222/TP",
-                                                                 "card_document_id": str(card)}).json()["data"]
-    client.post(f"{APPS}/{data['id']}/submit", headers=auth(uid, "lawyer"))
-    detail = client.get(f"{ADMIN_APPS}/{data['id']}", headers=admin).json()["data"]
-    assert detail["current_profile"]["bar_card_number"] == "111/TP"
-    assert client.post(f"{ADMIN_APPS}/{data['id']}/approve", headers=admin).status_code == 200
-    assert all(m != "PUT" for m, _ in upstream.calls)  # đổi thẻ không đổi vai trò
-    me = client.get(f"{LAWYERS}/me", headers=auth(uid, "lawyer")).json()["data"]
-    assert me["bar_card_number"] == "222/TP" and me["card_document_id"] == str(card)
-
-
-def test_duyet_chi_admin(client, upstream, auth):
-    uid, app = _pending(client, upstream, auth)
-    assert client.post(f"{ADMIN_APPS}/{app['id']}/approve", headers=auth(uid)).status_code == 403
-    assert client.post(f"{ADMIN_APPS}/{app['id']}/approve").status_code == 401
-    assert client.post(f"{ADMIN_APPS}/not-uuid/approve", headers=auth(uid, "admin")).status_code == 422
-
-
-# ---------------------------------------------------------------- Từ chối
+# ---------------------------------------------------------------- Từ chối rồi gửi lại
 def test_tu_choi_bat_buoc_ly_do(client, upstream, auth, admin):
+    _, app = _pending(client, upstream, auth)
+    for body in ({}, {"reason": "   "}, {"reason": "x" * 501}, {"reason": "x", "extra": 1}):
+        res = client.post(f"{LAWYERS}/{app['id']}/reject", headers=admin, json=body)
+        assert res.status_code == 422 and _code(res) == "VALIDATION_ERROR"
+    assert _status(client, admin, app["id"]) == "pending"
+
+
+def test_tu_choi_roi_gui_lai_sau_thoi_gian_cho(client, db, upstream, auth, admin):
     uid, app = _pending(client, upstream, auth)
-    for body in ({}, {"reason": "   "}, {"reason": "x" * 501}):
-        assert client.post(f"{ADMIN_APPS}/{app['id']}/reject", headers=admin, json=body).status_code == 422
-    res = client.post(f"{ADMIN_APPS}/{app['id']}/reject", headers=admin, json={"reason": " Ảnh mờ "})
-    assert res.status_code == 200
+    res = client.post(f"{LAWYERS}/{app['id']}/reject", headers=admin, json={"reason": " Ảnh mờ "})
+    assert res.status_code == 200, res.text
     data = res.json()["data"]
-    assert data["status"] == "rejected" and data["reject_reason"] == "Ảnh mờ" and data["can_reapply_at"]
-    again = client.post(f"{ADMIN_APPS}/{app['id']}/reject", headers=admin, json={"reason": "x"})
+    assert data["approval_status"] == "rejected" and data["rejected_reason"] == "Ảnh mờ" and data["reviewed_at"]
+    assert upstream.users[uid]["role"] == "citizen"
+    again = client.post(f"{LAWYERS}/{app['id']}/reject", headers=admin, json={"reason": "x"})
     assert again.status_code == 409 and _code(again) == "APPLICATION_NOT_PENDING"
-    assert client.post(f"{ADMIN_APPS}/{app['id']}/reject", headers=auth(uid), json={"reason": "x"}).status_code == 403
+    assert client.post(f"{LAWYERS}/{app['id']}/approve", headers=admin).status_code == 409
+
+    me = client.get(ME, headers=auth(uid)).json()["data"]
+    assert me["approval_status"] == "rejected" and me["rejected_reason"] == "Ảnh mờ"
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid, "12345/TP"))
+    assert res.status_code == 409 and _code(res) == "REAPPLY_COOLDOWN"
+
+    db.get(LawyerApplication, uuid.UUID(app["id"])).reviewed_at = utcnow() - timedelta(hours=25)
+    db.commit()
+    res = client.put(ME, headers=auth(uid), json=_body(upstream, uid, "12345/TP"))
+    assert res.status_code == 200, res.text
+    new_id = res.json()["data"]["id"]
+    assert new_id != app["id"] and client.get(ME, headers=auth(uid)).json()["data"]["approval_status"] == "pending"
+    assert _status(client, admin, new_id) == "pending" and _status(client, admin, app["id"]) == "rejected"
+    assert client.post(f"{LAWYERS}/{new_id}/approve", headers=admin).status_code == 200
+
+
+# ---------------------------------------------------------------- Xem giấy tờ
+def test_admin_xem_giay_to_trong_ho_so(client, upstream, auth, admin):
+    uid, app = _pending(client, upstream, auth)
+    doc = app["credentials"][0]["document_id"]
+    res = client.get(f"{LAWYERS}/{app['id']}/credentials/{doc}", headers=admin)
+    assert res.status_code == 200 and res.content == b"%PDF-test"
+    assert res.headers["content-type"] == "application/pdf"
+    assert res.headers["content-disposition"].startswith("inline;")
+    assert res.headers["x-content-type-options"] == "nosniff" and res.headers["cache-control"] == "no-store"
+    # Chính chủ hay luật sư khác cũng không mở được qua API admin.
+    assert client.get(f"{LAWYERS}/{app['id']}/credentials/{doc}", headers=auth(uid)).status_code == 403
+
+
+def test_chi_mo_duoc_giay_to_dinh_kem_ho_so(client, upstream, auth, admin):
+    uid, app = _pending(client, upstream, auth)
+    other = upstream.document(uid)  # cùng chủ nhưng không gửi kèm hồ sơ
+    res = client.get(f"{LAWYERS}/{app['id']}/credentials/{other}", headers=admin)
+    assert res.status_code == 404 and _code(res) == "CREDENTIAL_NOT_FOUND"
+    doc = app["credentials"][0]["document_id"]
+    res = client.get(f"{LAWYERS}/{uuid.uuid4()}/credentials/{doc}", headers=admin)
+    assert res.status_code == 404 and _code(res) == "APPLICATION_NOT_FOUND"
+
+
+def test_giay_to_chua_quet_xong_409(client, upstream, auth, admin):
+    _, app = _pending(client, upstream, auth)
+    doc = app["credentials"][0]["document_id"]
+    upstream.not_ready.add(uuid.UUID(doc))
+    res = client.get(f"{LAWYERS}/{app['id']}/credentials/{doc}", headers=admin)
+    assert res.status_code == 409 and _code(res) == "FILE_NOT_READY"
+    upstream.documents.pop(uuid.UUID(doc))  # Document Service không còn file
+    res = client.get(f"{LAWYERS}/{app['id']}/credentials/{doc}", headers=admin)
+    assert res.status_code == 404 and _code(res) == "CREDENTIAL_NOT_FOUND"

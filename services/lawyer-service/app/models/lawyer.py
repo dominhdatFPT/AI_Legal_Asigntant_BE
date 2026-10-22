@@ -9,7 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
-JsonType = JSON().with_variant(JSONB(), "postgresql")
+# none_as_null: None của Python ghi thành SQL NULL, không phải JSON 'null' (CHECK jsonb_typeof sẽ chặn).
+JsonType = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 # Trạng thái hồ sơ / đơn (lưu dạng chữ, CHECK trong SQL)
 INCOMPLETE, ACTIVE, HIDDEN = "incomplete", "active", "hidden"
@@ -94,6 +95,7 @@ class LawyerApplication(Base):
     specialization_codes: Mapped[list | None] = mapped_column(JsonType)
     card_document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     ocr_result: Mapped[dict | None] = mapped_column(JsonType)
+    credentials: Mapped[list | None] = mapped_column(JsonType)  # [{document_id, type}] giấy tờ ở Document Service
     applicant_full_name: Mapped[str | None] = mapped_column(String(255))
     reject_reason: Mapped[str | None] = mapped_column(String(500))
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(Uuid)

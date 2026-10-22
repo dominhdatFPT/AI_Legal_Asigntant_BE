@@ -15,7 +15,6 @@ from app.core.responses import (
     INVALID_FIREBASE_TOKEN,
     INVALID_REFRESH_TOKEN,
     PHONE_IN_USE,
-    ROLE_CHANGED_RELOGIN,
     ApiError,
 )
 from app.models import User, UserRole, UserStatus
@@ -139,9 +138,6 @@ def refresh(db: Session, raw_token: str, user_agent: str | None = None) -> dict:
         raise ApiError(401, INVALID_REFRESH_TOKEN)
 
     if token.revoked_at is not None:
-        if token.revoked_reason == refresh_tokens.ROLE_CHANGED:
-            # Không phải dùng lại token bị đánh cắp: vai trò vừa đổi, FE hiện câu này rồi chuyển về trang đăng nhập.
-            raise ApiError(401, ROLE_CHANGED_RELOGIN)
         refresh_tokens.revoke_all_for_user(db, token.user_id)
         db.commit()
         raise ApiError(401, INVALID_REFRESH_TOKEN)

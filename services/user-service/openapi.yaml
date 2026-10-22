@@ -314,32 +314,18 @@ paths:
                 error: null
                 request_id: req-123
         "401":
-          description: |
-            Refresh token sai, hết hạn hoặc đã bị thu hồi.
-            `ROLE_CHANGED_RELOGIN`: token bị thu hồi vì vai trò vừa đổi (admin đổi vai trò,
-            duyệt đơn luật sư). FE hiện `message` rồi chuyển về trang đăng nhập.
+          description: Refresh token sai, hết hạn hoặc đã bị thu hồi
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                het_han:
-                  summary: Token sai / hết hạn / đã thu hồi
-                  value:
-                    data: null
-                    error:
-                      code: INVALID_REFRESH_TOKEN
-                      message: Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.
-                    request_id: req-123
-                doi_vai_tro:
-                  summary: Vai trò vừa thay đổi
-                  value:
-                    data: null
-                    error:
-                      code: ROLE_CHANGED_RELOGIN
-                      message: Tài khoản của bạn đã được cập nhật quyền, vui lòng đăng nhập lại
-                    request_id: req-124
+              example:
+                data: null
+                error:
+                  code: INVALID_REFRESH_TOKEN
+                  message: Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại.
+                request_id: req-123
         "403": { $ref: "#/components/responses/AccountLocked" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -593,9 +579,8 @@ paths:
       description: |
         Chỉ `admin`. Tạo tài khoản đăng nhập bằng email + mật khẩu do admin đặt (không gửi email; admin tự
         đưa thông tin cho người dùng, người dùng đổi mật khẩu sau). Email cũng là tên đăng nhập.
-        `account_type`: `citizen` | `admin`, lưu đúng vai trò đó.
-        Tạo tài khoản luật sư dùng Lawyer Service `POST /lawyers/accounts` (tạo kèm hồ sơ luật sư);
-        `account_type = lawyer` đã bỏ (gửi lên → 422).
+        `account_type`: `citizen` | `admin` lưu đúng vai trò đó; `lawyer` vẫn lưu vai trò `citizen` và
+        `created_as_lawyer = true`, chỉ lên `lawyer` khi được duyệt hồ sơ.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -607,7 +592,7 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/CreateUserRequest" }
-            example: { email: nguyenvana@gmail.com, password: "matkhau123", full_name: Nguyễn Văn A, account_type: citizen }
+            example: { email: luatsu.c@gmail.com, password: "matkhau123", full_name: Lê Văn C, account_type: lawyer }
       responses:
         "201":
           description: Tài khoản vừa tạo
@@ -703,10 +688,6 @@ paths:
         chặn ngay ở User Service. Email không đăng ký lại được; admin khôi phục bằng `/restore`.
         Luật sư bị xóa thì các cuộc tư vấn đang mở bị kết thúc (Consultation Service).
         Không được tự xóa chính mình (409 `CANNOT_DELETE_SELF`); tài khoản đã xóa rồi → 409 `USER_DELETED`.
-
-        Xóa tài khoản vai trò `lawyer` thì **trước khi lưu** gọi Lawyer Service
-        `POST /internal/v1/lawyers/{user_id}/hide` (`reason = deleted`) để ẩn hồ sơ luật sư. Lawyer Service lỗi
-        → 502/503/504 `LAWYER_*`, tài khoản chưa bị xóa; admin thử lại sau.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -728,9 +709,6 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/LawyerBadResponse" }
-        "503": { $ref: "#/components/responses/LawyerUnavailable" }
-        "504": { $ref: "#/components/responses/LawyerTimeout" }
 
   /users/{user_id}/restore:
     post:
@@ -799,18 +777,12 @@ paths:
       operationId: changeUserRole
       summary: Đổi vai trò người dùng
       description: |
-        Chỉ `admin`. Đổi vai trò sẽ thu hồi mọi refresh token của người đó, nên họ phải đăng nhập lại để
+        Chỉ `admin`. Lawyer Service gọi API này (chuyển tiếp JWT của admin) khi admin duyệt
+        hồ sơ luật sư, để đổi vai trò từ `citizen` sang `lawyer`.
+        Đổi vai trò sẽ thu hồi mọi refresh token của người đó, nên họ phải đăng nhập lại để
         nhận token có vai trò mới (API_GUIDELINES mục 7). Gửi đúng vai trò hiện tại thì không đổi gì (200).
         Hạ vai trò luật sư thì các cuộc tư vấn đang mở bị kết thúc (Consultation Service).
         Không tự đổi vai trò của mình (409 `CANNOT_CHANGE_OWN_ROLE`); tài khoản đã xóa → 409 `USER_DELETED`.
-
-        Chức năng Luật sư:
-        - Không đổi **lên** `lawyer` bằng API này → 409 `LAWYER_ROLE_VIA_LAWYER_SERVICE`. Luật sư chỉ có qua
-          Lawyer Service (admin tạo tài khoản luật sư hoặc duyệt đơn), để luôn có hồ sơ luật sư đi kèm.
-          Lawyer Service duyệt đơn gọi `PUT /internal/v1/users/{user_id}/role`, không gọi API này.
-        - Hạ `lawyer` → vai trò khác: **trước khi lưu** gọi Lawyer Service `POST /internal/v1/lawyers/{user_id}/hide`
-          (`reason = role_changed`). Lawyer Service lỗi → 502/503/504 `LAWYER_*`, vai trò chưa đổi.
-        - Refresh token bị thu hồi được đánh dấu lý do `role_changed`, lần refresh sau trả 401 `ROLE_CHANGED_RELOGIN`.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -823,7 +795,7 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/ChangeRoleRequest" }
-            example: { role: citizen }
+            example: { role: lawyer }
       responses:
         "200":
           description: Thông tin người dùng sau khi đổi vai trò
@@ -835,35 +807,8 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/UserNotFound" }
-        "409":
-          description: Tự đổi vai trò của mình, tài khoản đã xóa, hoặc đổi lên `lawyer`
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                len_luat_su:
-                  summary: Đổi lên lawyer
-                  value:
-                    data: null
-                    error:
-                      code: LAWYER_ROLE_VIA_LAWYER_SERVICE
-                      message: Không đổi trực tiếp sang luật sư. Hãy tạo tài khoản luật sư hoặc duyệt đơn xin làm luật sư.
-                    request_id: req-123
-                tu_doi:
-                  summary: Tự đổi vai trò của mình
-                  value:
-                    data: null
-                    error:
-                      code: CANNOT_CHANGE_OWN_ROLE
-                      message: Bạn không thể tự đổi vai trò của mình.
-                    request_id: req-124
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/LawyerBadResponse" }
-        "503": { $ref: "#/components/responses/LawyerUnavailable" }
-        "504": { $ref: "#/components/responses/LawyerTimeout" }
 
   /users/{user_id}/lock:
     post:
@@ -1009,165 +954,6 @@ paths:
                 error: null
                 request_id: req-123
         "401": { $ref: "#/components/responses/Unauthorized" }
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
-  /internal/v1/users:
-    post:
-      tags: [Internal]
-      operationId: createLawyerAccountInternal
-      summary: Tạo tài khoản luật sư (Lawyer Service gọi)
-      description: |
-        Chỉ Lawyer Service gọi khi admin tạo tài khoản luật sư (`POST /lawyers/accounts`), kèm `X-Internal-Token`.
-        Tạo tài khoản `local` đăng nhập bằng email + mật khẩu (email cũng là tên đăng nhập), vai trò `lawyer` ngay.
-        `role` chỉ nhận `lawyer`. `created_by` = `sub` của admin trong JWT mà Lawyer Service đã kiểm tra.
-        Lỗi trùng giống `POST /users`: 409 `EMAIL_IN_USE` / `EMAIL_DELETED` / `PHONE_IN_USE`.
-        Không log mật khẩu.
-      x-status: implemented
-      servers:
-        - url: http://user-service:8000
-          description: Chỉ gọi được trong mạng Docker
-      security:
-        - InternalToken: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/InternalCreateUserRequest" }
-            example:
-              email: luatsu.c@gmail.com
-              password: matkhau123
-              full_name: Lê Văn C
-              role: lawyer
-              created_by: 1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b
-      responses:
-        "201":
-          description: Tài khoản vừa tạo
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AdminUserResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "409":
-          description: Email / số điện thoại đã được dùng
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              example:
-                data: null
-                error:
-                  code: EMAIL_IN_USE
-                  message: Email này đã được dùng cho một tài khoản khác.
-                request_id: req-123
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
-  /internal/v1/users/{user_id}:
-    delete:
-      tags: [Internal]
-      operationId: hardDeleteUserInternal
-      summary: Xóa cứng tài khoản vừa tạo (bù trừ khi Lawyer Service lưu hồ sơ lỗi)
-      description: |
-        Chỉ Lawyer Service gọi, kèm `X-Internal-Token`. Xóa hẳn dòng `users` (không xóa mềm, để email đăng ký
-        lại được). Chỉ cho xóa tài khoản an toàn để xóa: do admin tạo (`created_by` khác null), chưa đăng nhập
-        lần nào (không có refresh token) và chưa khai CCCD; không thì 409 `HARD_DELETE_NOT_ALLOWED`.
-        Không tồn tại → 404 (Lawyer Service coi như đã xóa xong). Gọi lại an toàn.
-      x-status: implemented
-      servers:
-        - url: http://user-service:8000
-          description: Chỉ gọi được trong mạng Docker
-      security:
-        - InternalToken: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/UserId"
-      responses:
-        "204":
-          description: Đã xóa cứng, không có body
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/UserNotFound" }
-        "409":
-          description: Tài khoản đã được dùng, không được xóa cứng
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              example:
-                data: null
-                error:
-                  code: HARD_DELETE_NOT_ALLOWED
-                  message: Tài khoản này đã được sử dụng nên không thể xóa hẳn.
-                request_id: req-123
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
-  /internal/v1/users/{user_id}/role:
-    put:
-      tags: [Internal]
-      operationId: changeUserRoleInternal
-      summary: Đổi vai trò sang luật sư khi duyệt đơn (Lawyer Service gọi)
-      description: |
-        Chỉ Lawyer Service gọi khi admin duyệt đơn xin làm luật sư, kèm `X-Internal-Token`.
-        `role` chỉ nhận `lawyer`. Chỉ đổi từ `citizen`: tài khoản `admin` → 409 `ROLE_CHANGE_NOT_ALLOWED`;
-        đã xóa mềm → 409 `USER_DELETED`; không tồn tại → 404. Đã là `lawyer` thì trả 200, không đổi gì
-        (gọi lại an toàn khi Lawyer Service duyệt lại sau lỗi).
-        Đổi thật thì thu hồi mọi refresh token với lý do `role_changed` → lần refresh sau trả
-        401 `ROLE_CHANGED_RELOGIN`.
-      x-status: implemented
-      servers:
-        - url: http://user-service:8000
-          description: Chỉ gọi được trong mạng Docker
-      security:
-        - InternalToken: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/UserId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/InternalChangeRoleRequest" }
-            example: { role: lawyer }
-      responses:
-        "200":
-          description: Thông tin người dùng sau khi đổi vai trò
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AdminUserResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/UserNotFound" }
-        "409":
-          description: Tài khoản đã xóa hoặc là admin
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                da_xoa:
-                  summary: Tài khoản đã xóa mềm
-                  value:
-                    data: null
-                    error:
-                      code: USER_DELETED
-                      message: Tài khoản này đã bị xóa, hãy khôi phục trước khi thao tác.
-                    request_id: req-123
-                la_admin:
-                  summary: Tài khoản admin
-                  value:
-                    data: null
-                    error:
-                      code: ROLE_CHANGE_NOT_ALLOWED
-                      message: Không thể đổi vai trò của tài khoản này sang luật sư.
-                    request_id: req-124
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -1340,45 +1126,6 @@ components:
       schema: { type: string }
 
   responses:
-    LawyerBadResponse:
-      description: Lawyer Service trả lỗi 5xx hoặc dữ liệu sai cấu trúc khi ẩn hồ sơ luật sư
-      headers:
-        X-Request-ID: { $ref: "#/components/headers/RequestId" }
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-          example:
-            data: null
-            error:
-              code: LAWYER_BAD_RESPONSE
-              message: Hệ thống luật sư đang gặp lỗi, chưa thay đổi gì. Vui lòng thử lại sau.
-            request_id: req-123
-    LawyerUnavailable:
-      description: Không kết nối được Lawyer Service khi ẩn hồ sơ luật sư
-      headers:
-        X-Request-ID: { $ref: "#/components/headers/RequestId" }
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-          example:
-            data: null
-            error:
-              code: LAWYER_UNAVAILABLE
-              message: Hệ thống luật sư tạm thời không phản hồi, chưa thay đổi gì. Vui lòng thử lại sau.
-            request_id: req-123
-    LawyerTimeout:
-      description: Lawyer Service quá 5 giây khi ẩn hồ sơ luật sư
-      headers:
-        X-Request-ID: { $ref: "#/components/headers/RequestId" }
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-          example:
-            data: null
-            error:
-              code: LAWYER_TIMEOUT
-              message: Hệ thống luật sư phản hồi quá chậm, chưa thay đổi gì. Vui lòng thử lại sau.
-            request_id: req-123
     ValidationError:
       description: Dữ liệu gửi lên không hợp lệ
       headers:
@@ -1570,14 +1317,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/User"
         - type: object
-          required: [has_citizen_profile]
-          description: |
-            Đã bỏ trường `created_as_lawyer` (cột bị xóa ở `007_lawyer_role.sql`; tài khoản admin tạo cho
-            luật sư có vai trò `lawyer` ngay).
+          required: [created_as_lawyer, has_citizen_profile]
           properties:
             auth_provider: { type: string, nullable: true, example: local }
             locked_by: { type: string, format: uuid, nullable: true, description: Admin đã khóa }
             created_by: { type: string, format: uuid, nullable: true, description: Admin đã tạo (null = tự đăng ký) }
+            created_as_lawyer:
+              type: boolean
+              description: Admin tạo tài khoản này cho luật sư (vẫn là `citizen` cho tới khi được duyệt)
             deleted_at: { type: string, format: date-time, nullable: true, description: Khác null = đã xóa mềm }
             deleted_by: { type: string, format: uuid, nullable: true }
             has_citizen_profile: { type: boolean, description: Đã khai hồ sơ cá nhân (CCCD) chưa }
@@ -1692,31 +1439,9 @@ components:
           description: 10 chữ số bắt đầu bằng 0; dấu chấm, khoảng trắng, gạch ngang được bỏ đi trước khi kiểm tra
         account_type:
           type: string
-          enum: [citizen, admin]
+          enum: [citizen, lawyer, admin]
           default: citizen
-          description: Tài khoản luật sư tạo qua Lawyer Service `POST /lawyers/accounts`
-
-    InternalCreateUserRequest:
-      type: object
-      required: [email, password, full_name, role, created_by]
-      additionalProperties: false
-      properties:
-        email: { type: string, format: email, maxLength: 255, description: Cũng là tên đăng nhập (lưu chữ thường) }
-        password: { type: string, minLength: 8, maxLength: 128, description: Mật khẩu do admin đặt }
-        full_name: { type: string, minLength: 1, maxLength: 255 }
-        phone:
-          type: string
-          nullable: true
-          pattern: '^0\d{9}$'
-        role: { type: string, enum: [lawyer] }
-        created_by: { type: string, format: uuid, description: Admin đã tạo (lấy từ JWT ở Lawyer Service) }
-
-    InternalChangeRoleRequest:
-      type: object
-      required: [role]
-      additionalProperties: false
-      properties:
-        role: { type: string, enum: [lawyer] }
+          description: "`lawyer` = tài khoản cấp cho luật sư, vẫn lưu vai trò `citizen` cho tới khi được duyệt"
 
     UserSummaryResponse:
       type: object

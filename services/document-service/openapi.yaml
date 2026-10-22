@@ -21,8 +21,6 @@ info:
     PDF tối đa 100 trang; DOCX/PDF cho contract_template, thêm JPEG/PNG cho supporting_document.
     Không nhận DOCM, file hỏng/nguy hiểm, PDF mã hóa/khóa/ký số. Không log PII.
     Contract quản lý nháp/mapping/sinh hợp đồng; Document không quản lý generated contract.
-    Luật sư (15/10/2026): lawyer-card-ocr + API nội bộ lawyer-cards cho Lawyer Service, migration 006; file riêng,
-    không đổi API CCCD/upload hiện có.
 servers:
   - url: http://localhost:8080/api
     description: FE/Postman qua Gateway; collection /documents/ phải có dấu slash cuối.
@@ -567,182 +565,10 @@ paths:
         '503': {$ref: '#/components/responses/Error503'}
         '502': {$ref: '#/components/responses/Error502'}
         '504': {$ref: '#/components/responses/Error504'}
-  /documents/lawyer-card-ocr:
-    post:
-      operationId: createLawyerCardOcr
-      tags: [documents]
-      x-status: implemented
-      summary: Tải ảnh thẻ luật sư và đọc OCR (cho đơn xin làm luật sư)
-      description: |
-        Multipart một file `file`, JPEG/PNG tối đa 4 MiB, tổng body tối đa 10 MiB; Idempotency-Key bắt buộc.
-        Kiểm tra User internal status như upload (khóa → 403 ACCOUNT_LOCKED; User lỗi → 503).
-        Backend sửa orientation, bỏ EXIF/metadata, mã hóa lại thành JPEG mới (pixel mới, không giữ byte gốc) rồi lưu
-        private ở `safe/<owner>/lawyer-card/<card_id>.jpg`; DB chỉ lưu storage key, hash, JSON OCR.
-        OCR chạy sau interface `LawyerCardOcrProvider` (hiện Tesseract local giống identity-ocr, sau đổi được sang Gemini).
-        **OCR lỗi không làm hỏng upload**: ảnh mờ / không đọc được / OCR bận hoặc quá giờ vẫn trả 201 với
-        `ocr_status = failed`, `error_code` + `error_message` rõ ràng để FE báo người dùng tự nhập số thẻ.
-        Chỉ lỗi file (400/413/415/422) hoặc DB/Storage (502/503/504) mới không tạo ảnh.
-        Replay cùng key + cùng ảnh trả kết quả cũ, không chạy OCR lại; cùng key khác ảnh → 409 IDEMPOTENCY_CONFLICT.
-        Không xác minh thẻ thật/giả; admin đối chiếu khi duyệt đơn. `card_id` dùng làm `card_document_id`
-        trong Lawyer Service. Không trả storage key, raw OCR.
-      parameters:
-        - {$ref: '#/components/parameters/RequestId'}
-        - {$ref: '#/components/parameters/IdempotencyKey'}
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [file]
-              properties:
-                file: {type: string, format: binary}
-      responses:
-        '201':
-          description: Đã lưu ảnh; OCR có thể completed hoặc failed
-          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/LawyerCardOcrResponse'}
-              example:
-                data:
-                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                  ocr_status: failed
-                  fields: null
-                  warnings: []
-                  error_code: OCR_UNREADABLE
-                  error_message: Ảnh thẻ mờ hoặc không đọc được, vui lòng tự nhập số thẻ hoặc chụp lại rõ hơn.
-                  created_at: '2026-10-15T02:00:00Z'
-                error: null
-                request_id: req-lawyer-card-demo
-        '400': {$ref: '#/components/responses/Error400'}
-        '401': {$ref: '#/components/responses/Error401'}
-        '403': {$ref: '#/components/responses/Error403'}
-        '409': {$ref: '#/components/responses/Error409'}
-        '413': {$ref: '#/components/responses/Error413'}
-        '415': {$ref: '#/components/responses/Error415'}
-        '422': {$ref: '#/components/responses/Error422'}
-        '502': {$ref: '#/components/responses/Error502'}
-        '503': {$ref: '#/components/responses/Error503'}
-        '504': {$ref: '#/components/responses/Error504'}
-  /documents/lawyer-card-ocr/{card_id}:
-    get:
-      operationId: getLawyerCardOcr
-      tags: [documents]
-      x-status: implemented
-      summary: Chủ xem lại kết quả OCR thẻ luật sư
-      description: Owner-only lấy từ JWT; admin không bypass (admin xem qua Lawyer Service). Không trả storage key, raw OCR.
-      parameters:
-        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
-        - {$ref: '#/components/parameters/RequestId'}
-      responses:
-        '200':
-          description: Kết quả OCR của ảnh thẻ thuộc chủ
-          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/LawyerCardOcrResponse'}
-              example:
-                data:
-                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                  ocr_status: completed
-                  fields: {full_name: NGUYỄN VĂN A, bar_card_number: 12345/TP, bar_association: Đoàn Luật sư TP. Hồ Chí Minh, issue_date: '2020-05-12'}
-                  warnings: [OCR_REQUIRES_USER_REVIEW]
-                  error_code: null
-                  error_message: null
-                  created_at: '2026-10-15T02:00:00Z'
-                error: null
-                request_id: req-lawyer-card-detail
-        '401': {$ref: '#/components/responses/Error401'}
-        '403': {$ref: '#/components/responses/Error403'}
-        '404': {$ref: '#/components/responses/Error404'}
-        '422': {$ref: '#/components/responses/Error422'}
-        '503': {$ref: '#/components/responses/Error503'}
-  /internal/v1/documents/lawyer-cards/{card_id}:
-    get:
-      operationId: getLawyerCardInternal
-      tags: [documents]
-      x-status: implemented
-      summary: Lawyer Service lấy chủ + JSON OCR của ảnh thẻ
-      description: |
-        Chỉ service khác gọi, header X-Internal-Token; Gateway không chuyển tiếp /internal/.
-        Lawyer Service gọi khi người dùng gắn `card_document_id` vào đơn: tự so `owner_user_id` với JWT sub của
-        người gửi, rồi lưu `ocr_result` (status, fields, warnings, error_code, engine) vào đơn.
-        Không tồn tại → 404 NOT_FOUND. Không trả storage key, raw OCR.
-      servers:
-        - {url: 'http://document-service:8000', description: Chỉ gọi được trong mạng Docker}
-      security:
-        - InternalToken: []
-      parameters:
-        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
-        - {$ref: '#/components/parameters/RequestId'}
-      responses:
-        '200':
-          description: Chủ và JSON OCR
-          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/LawyerCardInternalResponse'}
-              example:
-                data:
-                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                  owner_user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                  ocr_result:
-                    status: completed
-                    fields: {full_name: NGUYỄN VĂN A, bar_card_number: 12345/TP, bar_association: Đoàn Luật sư TP. Hồ Chí Minh, issue_date: '2020-05-12'}
-                    warnings: [OCR_REQUIRES_USER_REVIEW]
-                    error_code: null
-                    engine: tesseract-local
-                  created_at: '2026-10-15T02:00:00Z'
-                error: null
-                request_id: req-lawyer-card-internal
-        '401': {$ref: '#/components/responses/Error401'}
-        '404': {$ref: '#/components/responses/Error404'}
-        '422': {$ref: '#/components/responses/Error422'}
-        '503': {$ref: '#/components/responses/Error503'}
-  /internal/v1/documents/lawyer-cards/{card_id}/view-url:
-    post:
-      operationId: createLawyerCardViewUrlInternal
-      tags: [documents]
-      x-status: implemented
-      summary: Lawyer Service xin link xem ảnh thẻ cho admin
-      description: |
-        Chỉ service khác gọi, header X-Internal-Token. Lawyer Service đã kiểm tra người gọi là admin và đơn có
-        `card_document_id` này. Trả signed URL Storage hạn 300 giây cho bản JPEG đã mã hóa lại trong `safe/`.
-        Không nhận body. Không tồn tại → 404.
-      servers:
-        - {url: 'http://document-service:8000', description: Chỉ gọi được trong mạng Docker}
-      security:
-        - InternalToken: []
-      parameters:
-        - {name: card_id, in: path, required: true, schema: {type: string, format: uuid}}
-        - {$ref: '#/components/parameters/RequestId'}
-      responses:
-        '200':
-          description: Link xem có hạn
-          headers: {X-Request-ID: {$ref: '#/components/headers/RequestId'}, Cache-Control: {schema: {type: string, enum: [no-store]}}}
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/LawyerCardViewUrlResponse'}
-              example:
-                data:
-                  card_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                  url: https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/sign/document-files/safe/5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e/lawyer-card/2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d.jpg?token=demo&download=lawyer-card.jpg
-                  expires_in: 300
-                error: null
-                request_id: req-lawyer-card-url
-        '401': {$ref: '#/components/responses/Error401'}
-        '404': {$ref: '#/components/responses/Error404'}
-        '422': {$ref: '#/components/responses/Error422'}
-        '502': {$ref: '#/components/responses/Error502'}
-        '503': {$ref: '#/components/responses/Error503'}
-        '504': {$ref: '#/components/responses/Error504'}
 components:
   securitySchemes:
     BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
     CookieAuth: {type: apiKey, in: cookie, name: access_token, description: Cookie HttpOnly của hệ thống; write request cần Origin/CSRF check}
-    InternalToken: {type: apiKey, in: header, name: X-Internal-Token, description: 'INTERNAL_TOKEN trong .env, chỉ cho /internal/v1/...'}
   headers:
     RequestId: {schema: {type: string}, description: Mã lần gọi; truyền tiếp sang service khác}
   parameters:
@@ -802,11 +628,20 @@ components:
               additionalProperties: false
               required: [sex, nationality, place_of_origin, expiry_date]
               properties:
-                sex: {type: string, nullable: true, enum: [male, female]}
+                sex: {type: string, nullable: true, enum: [male, female, null]}
                 nationality: {type: string, nullable: true, maxLength: 100}
                 place_of_origin: {type: string, nullable: true, maxLength: 2000}
                 expiry_date: {type: string, format: date, nullable: true}
                 residence_address: {type: string, nullable: true, maxLength: 2000, description: Nơi cư trú trên thẻ căn cước mới; không mặc định là thường trú.}
+                residence_address_components:
+                  type: object
+                  description: Ánh xạ form từ hai dòng cư trú đọc trực tiếp; chỉ có khi đủ chi tiết và địa giới. Không lấy dữ liệu nơi khai sinh. Chuỗi residence_address gốc giữ nguyên dấu phẩy.
+                  additionalProperties: false
+                  required: [detail, ward, province]
+                  properties:
+                    detail: {type: string, minLength: 1, maxLength: 2000}
+                    ward: {type: string, minLength: 1, maxLength: 2000}
+                    province: {type: string, minLength: 1, maxLength: 2000}
                 registered_birth_place: {type: string, nullable: true, maxLength: 2000, description: Nơi đăng ký khai sinh trên thẻ căn cước mới; không mặc định là quê quán.}
             warnings: {type: array, items: {type: string}}
             verification_status: {type: string, enum: [not_performed]}
@@ -869,81 +704,6 @@ components:
     ProcessingStatus: {type: string, enum: [queued, processing, completed, failed]}
     Sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
     SuccessError: {type: object, nullable: true, enum: [null]}
-    LawyerCardFields:
-      type: object
-      nullable: true
-      additionalProperties: false
-      description: Gợi ý OCR từ thẻ luật sư; đọc không chắc thì null. Người dùng tự kiểm tra, admin đối chiếu.
-      required: [full_name, bar_card_number, bar_association, issue_date]
-      properties:
-        full_name: {type: string, nullable: true, minLength: 1, maxLength: 200}
-        bar_card_number: {type: string, nullable: true, minLength: 1, maxLength: 50}
-        bar_association: {type: string, nullable: true, minLength: 1, maxLength: 200, description: Đoàn luật sư}
-        issue_date: {type: string, format: date, nullable: true}
-    LawyerCardOcrStatus: {type: string, enum: [completed, failed]}
-    LawyerCardOcrResponse:
-      type: object
-      additionalProperties: false
-      required: [data, error, request_id]
-      properties:
-        error: {$ref: '#/components/schemas/SuccessError'}
-        request_id: {type: string, minLength: 1, maxLength: 128}
-        data:
-          type: object
-          additionalProperties: false
-          required: [card_id, ocr_status, fields, warnings, error_code, error_message, created_at]
-          properties:
-            card_id: {type: string, format: uuid}
-            ocr_status: {$ref: '#/components/schemas/LawyerCardOcrStatus'}
-            fields: {$ref: '#/components/schemas/LawyerCardFields'}
-            warnings: {type: array, items: {type: string}}
-            error_code:
-              type: string
-              nullable: true
-              description: Chỉ có khi ocr_status = failed
-              enum: [OCR_UNREADABLE, OCR_TIMEOUT, OCR_BUSY, OCR_UNAVAILABLE, OCR_MODEL_UNAVAILABLE, OCR_BAD_RESPONSE, null]
-            error_message: {type: string, nullable: true, description: Câu tiếng Việt hiển thị cho người dùng khi OCR lỗi}
-            created_at: {type: string, format: date-time}
-    LawyerCardInternalResponse:
-      type: object
-      additionalProperties: false
-      required: [data, error, request_id]
-      properties:
-        error: {$ref: '#/components/schemas/SuccessError'}
-        request_id: {type: string, minLength: 1, maxLength: 128}
-        data:
-          type: object
-          additionalProperties: false
-          required: [card_id, owner_user_id, ocr_result, created_at]
-          properties:
-            card_id: {type: string, format: uuid}
-            owner_user_id: {type: string, format: uuid}
-            ocr_result:
-              type: object
-              additionalProperties: false
-              required: [status, fields, warnings, error_code, engine]
-              properties:
-                status: {$ref: '#/components/schemas/LawyerCardOcrStatus'}
-                fields: {$ref: '#/components/schemas/LawyerCardFields'}
-                warnings: {type: array, items: {type: string}}
-                error_code: {type: string, nullable: true}
-                engine: {type: string, minLength: 1, maxLength: 100}
-            created_at: {type: string, format: date-time}
-    LawyerCardViewUrlResponse:
-      type: object
-      additionalProperties: false
-      required: [data, error, request_id]
-      properties:
-        error: {$ref: '#/components/schemas/SuccessError'}
-        request_id: {type: string, minLength: 1, maxLength: 128}
-        data:
-          type: object
-          additionalProperties: false
-          required: [card_id, url, expires_in]
-          properties:
-            card_id: {type: string, format: uuid}
-            url: {type: string, format: uri, pattern: '^https://'}
-            expires_in: {type: integer, minimum: 1, maximum: 300}
     Document:
       type: object
       additionalProperties: false

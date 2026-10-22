@@ -61,14 +61,4 @@ union all
 select 9, 'SĐT không trùng (index users_phone_key)',
        case when to_regclass('public.users_phone_key') is not null then 'OK'
             else 'THIẾU → chạy 006_users_phone_unique.sql' end
-union all
-select 10, 'Cột refresh_tokens.revoked_reason (chức năng Luật sư)',
-       case when exists (select 1 from information_schema.columns
-                         where table_schema = 'public' and table_name = 'refresh_tokens'
-                           and column_name = 'revoked_reason')
-            then 'OK' else 'THIẾU → chạy 007_lawyer_role.sql (khi deploy code Luật sư)' end
-union all
-select 11, 'Đã bỏ cột users.created_as_lawyer',
-       case when not exists (select 1 from cols where column_name = 'created_as_lawyer')
-            then 'OK' else 'CÒN → chạy 007_lawyer_role.sql (khi deploy code Luật sư)' end
 order by stt;

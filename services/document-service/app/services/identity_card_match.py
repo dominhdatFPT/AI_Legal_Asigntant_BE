@@ -6,7 +6,7 @@ No OCR character substitutions or identity-number guessing are permitted.
 """
 import re
 from app.core.errors import DocumentError
-from app.services.identity_parser import folded, parse_additional_fields
+from app.services.identity_parser import folded, parse_additional_fields, parse_fields
 
 
 def check_digit(value):
@@ -21,6 +21,9 @@ def _parse_td1(rows):
     if not re.fullmatch(r"[0-9]{7}[MF<][0-9]{7}VNM[A-Z0-9<]{11}[0-9]", second):
         return None
     if not re.fullmatch(r"[A-Z<]{30}", name) or "<<" not in name:
+        return None
+    if not re.fullmatch(r"[A-Z]+(?:<[A-Z]+)*<<[A-Z]+(?:<[A-Z]+)*<*", name):
+        # Letters after a filler run are OCR noise, not another name token.
         return None
     if first[5:14] != first[18:27]:
         return None
@@ -62,10 +65,32 @@ def ensure_card_pair(front_fields, front_raw, back_raw):
         name = front_fields.get("full_name")
         if name:
             mismatch |= " ".join(folded(name).upper().split()) != candidate["name"]
+        else:
+            visual_names = {parse_fields(a).get("full_name") for a in front_raw.get("attempts", [])
+                            if a.get("source") == "vietocr_field" and a.get("field") == "full_name"}
+            agreement = [value for value in visual_names if value and
+                         " ".join(folded(value).upper().split()) == candidate["name"]]
+            if len(agreement) == 1:
+                corrections["full_name"] = agreement[0]
+            else:
+                # Missing/ambiguous visual text is insufficient evidence, not
+                # evidence that the two cards belong to different people.
+                # Keep the exact citizen-number and checksum-valid MRZ gates,
+                # but report the distinction accurately so a clearer front can
+                # be retried instead of falsely accusing a pair mismatch.
+                raise DocumentError("IDENTITY_PAIR_UNVERIFIABLE",
+                    "Chưa đọc đủ họ tên ở mặt trước để đối chiếu hai mặt CCCD. Hãy chụp rõ vùng họ tên và thử lại.", 422)
         for field, mrz_field in (("date_of_birth", "birth"),):
             value = front_fields.get(field)
-            if value:
-                mismatch |= value[2:4] + value[5:7] + value[8:10] != candidate[mrz_field]
+            readings = {parse_fields(a).get(field) for a in front_raw.get("attempts", [])
+                        if a.get("source") in {"numeric_field", "vietocr_field"} and a.get("field") == field}
+            agreement = [reading for reading in readings if reading and
+                         reading[2:4]+reading[5:7]+reading[8:10] == candidate[mrz_field]]
+            if not value or value[2:4]+value[5:7]+value[8:10] != candidate[mrz_field]:
+                if len(agreement) == 1:
+                    corrections[field] = agreement[0]
+                elif value:
+                    mismatch = True
         if extra.get("expiry_date"):
             value = extra["expiry_date"]
             if value[2:4] + value[5:7] + value[8:10] != candidate["expiry"]:

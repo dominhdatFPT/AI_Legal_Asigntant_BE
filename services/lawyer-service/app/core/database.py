@@ -15,8 +15,10 @@ class Base(DeclarativeBase):
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
-# DB ở Supabase cloud: giống User Service, bỏ kết nối cũ quá 5 phút và bật TCP keepalive thay cho pool_pre_ping.
+# DB ở Supabase cloud: giống User Service, pool_pre_ping + bỏ kết nối cũ quá 5 phút + TCP keepalive
+# (thiếu pre_ping thì kết nối bị pooler cắt vẫn nằm trong pool, request lấy trúng sẽ treo rồi lỗi).
 _POOL_OPTIONS = {
+    "pool_pre_ping": True,
     "pool_size": 5,
     "max_overflow": 10,
     "pool_recycle": 300,

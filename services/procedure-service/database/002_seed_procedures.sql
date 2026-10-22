@@ -53,13 +53,13 @@ INSERT INTO procedure_conditions (procedure_id, condition_code, title, descripti
 VALUES
 ('e3b2c140-6b1a-4f51-8d2c-3965158a8a41', 'COND-01', 'Công dân Việt Nam', 'Cá nhân, thành viên hộ gia đình là công dân Việt Nam đủ 18 tuổi, có năng lực hành vi dân sự đầy đủ.', 1, true),
 ('d5d9c792-5b9e-4e42-9a3b-2856247c7c30', 'COND-02', 'Đất không có tranh chấp', 'Thửa đất chuyển nhượng phải không có tranh chấp, quyền sử dụng đất không bị kê biên để bảo đảm thi hành án.', 1, true)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (procedure_id, condition_code) DO NOTHING;
 
 -- 4. Fees
 INSERT INTO procedure_fees (procedure_id, fee_type, name, amount, unit, is_exemptible, note)
 VALUES
 ('e3b2c140-6b1a-4f51-8d2c-3965158a8a41', 'administrative_fee', 'Lệ phí cấp Giấy chứng nhận đăng ký hộ kinh doanh', 100000, 'lần', true, 'Miễn lệ phí nếu đăng ký qua mạng điện tử')
-ON CONFLICT DO NOTHING;
+ON CONFLICT (procedure_id, fee_type, name) DO NOTHING;
 
 -- 5. Legal bases (aligned with Các thủ tục chi tiết hạng mục kinh doanh.md & Các thủ tục chi tiết hạng mục đất đai.md)
 INSERT INTO procedure_legal_bases (procedure_id, doc_number, title, article_ref, source_url, order_index)
@@ -158,7 +158,8 @@ VALUES
 
 -- DD-012
 ('d2e3f4a5-b6c7-4d8e-f9a0-1b2c3d4e5f6a', '31/2024/QH15', 'Luật Đất đai 2024', 'Điều 166, 167 (Khai thác thông tin đất đai)', 'https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=164627', 1),
-('d2e3f4a5-b6c7-4d8e-f9a0-1b2c3d4e5f6a', '101/2024/NĐ-CP', 'Nghị định 101/2024/NĐ-CP về điều tra cơ bản đất đai, cấp GCN', 'Điều 58, 60 (Cung cấp dữ liệu đất đai)', 'https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=168270', 2);
+('d2e3f4a5-b6c7-4d8e-f9a0-1b2c3d4e5f6a', '101/2024/NĐ-CP', 'Nghị định 101/2024/NĐ-CP về điều tra cơ bản đất đai, cấp GCN', 'Điều 58, 60 (Cung cấp dữ liệu đất đai)', 'https://vbpl.vn/TW/Pages/vbpq-toanvan.aspx?ItemID=168270', 2)
+ON CONFLICT (procedure_id, doc_number, article_ref) DO NOTHING;
 
 -- 6. Requirements
 INSERT INTO procedure_requirements (procedure_id, name, description, is_required, copies, document_form, form_code, note, order_index)
@@ -167,4 +168,4 @@ VALUES
 ('e3b2c140-6b1a-4f51-8d2c-3965158a8a41', 'Bản sao CCCD/CMND/Hộ chiếu', 'Bản sao hợp lệ giấy tờ pháp lý của cá nhân/thành viên hộ gia đình', true, 1, 'copy', '', '', 2),
 ('d5d9c792-5b9e-4e42-9a3b-2856247c7c30', 'Hợp đồng chuyển nhượng quyền sử dụng đất', 'Hợp đồng chuyển nhượng đã được công chứng/chứng thực hợp pháp', true, 1, 'certified_copy', '', '', 1),
 ('d5d9c792-5b9e-4e42-9a3b-2856247c7c30', 'Giấy chứng nhận quyền sử dụng đất', 'Bản gốc Giấy chứng nhận (sổ đỏ/sổ hồng)', true, 1, 'original', '', '', 2)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (procedure_id, name) DO NOTHING;

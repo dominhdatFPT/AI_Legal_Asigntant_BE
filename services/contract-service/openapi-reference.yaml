@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: Read-only Source Document Library
+  version: 1.0.0
+  description: Public blank source documents only. No drafts, uploads or generation; private Contract APIs retain their existing authorization.
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/contracts/reference-catalog:
+    get:
+      summary: List blank source documents
+      security: []
+      parameters:
+        - {in: query, name: domain, schema: {type: string}}
+        - {in: query, name: procedure, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string, maxLength: 200}}
+        - in: query
+          name: status
+          schema: {type: string, enum: [source, needs_review, specific_case]}
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: Standard data/error/request_id envelope with items, pagination, domains, classifications, counts, revision and read_only=true.
+        '422': {description: Invalid query}
+        '503': {description: Packaged catalogue unavailable}
+  /api/contracts/reference-catalog/{template_id}:
+    get:
+      summary: Read one source document's metadata and page URLs
+      security: []
+      parameters:
+        - {in: path, name: template_id, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Standard envelope with one read-only document}
+        '404': {description: Unknown document}
+        '422': {description: Invalid UUID}
+  /api/contracts/reference-assets/{asset_name}:
+    get:
+      summary: Read a whitelisted immutable PNG or PDF
+      security: []
+      parameters:
+        - {in: path, name: asset_name, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Inline PNG/PDF, X-Content-Type-Options=nosniff. Filenames must belong to the packaged asset whitelist.
+          content:
+            image/png: {schema: {type: string, format: binary}}
+            application/pdf: {schema: {type: string, format: binary}}
+        '404': {description: Not a whitelisted asset}
+        '503': {description: Packaged asset unavailable}
+  /api/procedures/reference-classifications:
+    get:
+      summary: Read document classifications from Procedure without the database
+      security: []
+      responses:
+        '200':
+          description: Standard envelope with schema_version, domains and items. Project procedures have existing codes/IDs; document groups have code=null and procedure_id=null.

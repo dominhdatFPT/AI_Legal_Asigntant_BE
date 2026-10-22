@@ -4,17 +4,14 @@ info:
   title: Lawyer Service API
   version: 0.2.0
   description: |
-    Hồ sơ luật sư và đơn xin làm luật sư / đổi thông tin thẻ; admin tạo tài khoản luật sư và duyệt đơn.
+    Hồ sơ xin làm luật sư (trang `lawyer-registration` của FE) và tab duyệt luật sư của admin.
 
-    Hai cách trở thành luật sư:
-    1. Admin tạo tài khoản luật sư (`POST /lawyers/accounts`): tài khoản có vai trò `lawyer` ngay, hồ sơ ở
-       trạng thái `incomplete`. Luật sư tự điền số thẻ, lĩnh vực... lần đầu không cần duyệt (`PATCH /lawyers/me`).
-    2. Người dùng tự gửi đơn (`POST /lawyers/me/applications`, loại `new`), admin duyệt.
-
-    Hồ sơ "đủ" (`is_complete`) = đã khai CCCD ở User Service + có số thẻ + ít nhất 1 lĩnh vực.
-    Chưa đủ thì người đó chỉ dùng được chức năng citizen. Luật sư vẫn dùng được mọi chức năng citizen.
-    Chưa có Notification: kết quả duyệt/từ chối chỉ xem qua trạng thái đơn.
-    Xem thiết kế đầy đủ ở `docs/api/LAWYER_DESIGN.md`.
+    Luồng: người dùng `citizen` đã khai CCCD gửi hồ sơ (`POST /lawyers`) → `pending` → admin duyệt
+    (`approved`, tài khoản đổi sang vai trò `lawyer`) hoặc từ chối (`rejected`, kèm lý do).
+    Bị từ chối thì sửa và gửi lại bằng `PUT /lawyers/me` (sau thời gian chờ `LAWYER_REAPPLY_COOLDOWN_HOURS`).
+    Giấy tờ (thẻ luật sư, chứng chỉ hành nghề...) tải lên Document Service trước, ở đây chỉ gửi `document_id`.
+    Chưa có Notification: kết quả duyệt/từ chối chỉ xem qua `GET /lawyers/me`.
+    Operation `x-status: planned` là thiết kế, chưa có code.
   x-owner: "Người 1 · Đạt"
 
 servers:
@@ -31,11 +28,9 @@ tags:
   - name: Public
     description: Thông tin công khai (lĩnh vực, danh sách luật sư)
   - name: My Lawyer Profile
-    description: Luật sư xem / sửa hồ sơ của mình
-  - name: My Applications
-    description: Người dùng tạo, sửa, gửi, rút đơn xin làm luật sư hoặc đổi thông tin thẻ
+    description: Người dùng gửi / xem / gửi lại hồ sơ xin làm luật sư của mình
   - name: Admin
-    description: Tạo tài khoản luật sư, xem và duyệt đơn (chỉ vai trò `admin`)
+    description: Duyệt hồ sơ luật sư (chỉ vai trò `admin`)
   - name: Internal
     description: |
       Chỉ service khác gọi trong mạng Docker, header `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`.
@@ -66,7 +61,7 @@ paths:
       tags: [Public]
       operationId: listSpecializations
       summary: Danh sách lĩnh vực tư vấn
-      description: Không cần đăng nhập. Dùng cho form hồ sơ luật sư và bộ lọc danh sách luật sư.
+      description: Không cần đăng nhập. Dùng cho form hồ sơ luật sư.
       x-status: implemented
       parameters:
         - $ref: "#/components/parameters/RequestId"
@@ -88,6 +83,7 @@ paths:
                 error: null
                 request_id: req-123
         "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
 
   /lawyers:
     get:
@@ -95,10 +91,9 @@ paths:
       operationId: listLawyers
       summary: Danh sách luật sư
       description: |
-        Chỉ trả hồ sơ `active` (đã đủ thông tin, không bị ẩn) của tài khoản không bị khóa.
+        Chỉ trả luật sư đang hành nghề (hồ sơ `active`) của tài khoản không bị khóa.
         Tên, ảnh đại diện lấy từ User Service `POST /internal/v1/users/search` (kèm `X-Internal-Token`).
-        Lọc `is_online=true` để xem ai đang online. Trạng thái online sẽ làm bằng WebSocket cùng
-        Consultation Service; hiện cột `is_online` luôn là `false`.
+        Lọc `is_online=true` để xem ai đang online.
       x-status: planned
       security:
         - BearerAuth: []
@@ -122,24 +117,87 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LawyerPublicListResponse" }
-              example:
-                data:
-                  items:
-                    - id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
-                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                      full_name: Luật sư Trần Thị B
-                      avatar_url: null
-                      law_firm: Văn phòng Luật sư ABC
-                      years_experience: 8
-                      bio: Chuyên tư vấn tranh chấp đất đai.
-                      specializations:
-                        - code: land
-                          name: Đất đai
-                      is_online: false
-                  pagination: { page: 1, page_size: 20, total: 1, total_pages: 1 }
-                error: null
-                request_id: req-123
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
+    post:
+      tags: [My Lawyer Profile]
+      operationId: submitLawyerApplication
+      summary: Gửi hồ sơ xin làm luật sư
+      description: |
+        Chỉ vai trò `citizen`, tài khoản không bị khóa và đã khai CCCD ở User Service (họ tên trên CCCD được lưu
+        vào `full_name` cho admin xem). Hồ sơ vào hàng chờ duyệt ngay (`pending`).
+        Mỗi người chỉ gửi một lần; bị từ chối thì dùng `PUT /lawyers/me`.
+        `credentials` bắt buộc có `the_luat_su` và `chung_chi_hanh_nghe`. Lawyer Service đọc từng giấy tờ ở
+        Document Service bằng chính token của người gửi; giấy tờ không tồn tại / không thuộc người gửi → 422
+        (`details[].field = credentials`).
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LawyerSubmitRequest" }
+            example:
+              bar_card_number: "12345/TP"
+              law_firm: Văn phòng Luật sư ABC
+              years_experience: 8
+              bio: Chuyên tư vấn tranh chấp đất đai.
+              specialization_codes: [land]
+              credentials:
+                - document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                  type: the_luat_su
+                - document_id: 3d5f7b9c-1e2a-4b4c-8d6e-8f0a2b4c6d8e
+                  type: chung_chi_hanh_nghe
+      responses:
+        "201":
+          description: Đã gửi hồ sơ, chờ admin duyệt
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LawyerProfileResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Đã gửi hồ sơ, trùng số thẻ hành nghề, hoặc chưa khai CCCD
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                da_co_ho_so:
+                  summary: Người dùng đã gửi hồ sơ / đã là luật sư
+                  value:
+                    data: null
+                    error:
+                      code: LAWYER_PROFILE_EXISTS
+                      message: Bạn đã gửi hồ sơ luật sư trước đó.
+                    request_id: req-123
+                trung_so_the:
+                  summary: Trùng số thẻ hành nghề
+                  value:
+                    data: null
+                    error:
+                      code: BAR_CARD_NUMBER_TAKEN
+                      message: Số thẻ hành nghề này đã được đăng ký.
+                    request_id: req-124
+                chua_khai_cccd:
+                  summary: Chưa khai hồ sơ cá nhân (CCCD)
+                  value:
+                    data: null
+                    error:
+                      code: CITIZEN_PROFILE_REQUIRED
+                      message: Bạn cần khai hồ sơ cá nhân (CCCD) trước khi gửi đơn.
+                    request_id: req-125
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/ServiceBadResponse" }
@@ -152,7 +210,7 @@ paths:
       operationId: getLawyer
       summary: Chi tiết một luật sư
       description: |
-        Chỉ xem được hồ sơ `active`. Hồ sơ `incomplete` / `hidden` trả 404 như không tồn tại.
+        Chỉ xem được luật sư đang hành nghề. Hồ sơ chưa duyệt / bị ẩn trả 404 như không tồn tại.
         Tên, ảnh đại diện lấy từ User Service như `GET /lawyers`.
       x-status: planned
       security:
@@ -183,12 +241,8 @@ paths:
       operationId: getMyLawyerProfile
       summary: Xem hồ sơ luật sư của tôi
       description: |
-        Mọi vai trò đã đăng nhập gọi được. Chưa từng có hồ sơ thì trả 404 `LAWYER_NOT_FOUND`
-        (FE hiện nút "Đăng ký làm luật sư").
-        `is_complete` / `missing_requirements` cho biết còn thiếu gì. Khi hồ sơ `incomplete` đã có số thẻ và
-        lĩnh vực, service hỏi User Service `GET /internal/v1/users/{id}/status` (`has_citizen_profile`);
-        đủ thì tự chuyển hồ sơ sang `active`. Vì vậy API này có thể trả 502/503/504 khi User Service lỗi.
-        `pending_application` là đơn đang `draft`/`pending` (nếu có); trong lúc chờ duyệt, thông tin cũ vẫn hiệu lực.
+        Hồ sơ gửi gần nhất, kể cả khi đang `pending` hoặc `rejected` (kèm `rejected_reason`).
+        Chưa từng gửi → 404 `LAWYER_NOT_FOUND` (FE hiện form gửi hồ sơ).
       x-status: implemented
       security:
         - BearerAuth: []
@@ -202,76 +256,42 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LawyerProfileResponse" }
-              examples:
-                chua_hoan_thien:
-                  summary: Luật sư do admin tạo, chưa điền số thẻ
-                  value:
-                    data:
-                      id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
-                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                      source: admin_created
-                      status: incomplete
-                      bar_card_number: null
-                      card_document_id: null
-                      law_firm: null
-                      years_experience: null
-                      bio: null
-                      specializations: []
-                      is_online: false
-                      is_complete: false
-                      missing_requirements: [citizen_profile, bar_card_number, specializations]
-                      pending_application: null
-                      hidden_at: null
-                      created_at: "2026-10-15T02:00:00Z"
-                      updated_at: "2026-10-15T02:00:00Z"
-                    error: null
-                    request_id: req-123
-                dang_hoat_dong:
-                  summary: Luật sư đủ hồ sơ, đang chờ duyệt đổi số thẻ
-                  value:
-                    data:
-                      id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
-                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                      source: self_applied
-                      status: active
-                      bar_card_number: "12345/TP"
-                      card_document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                      law_firm: Văn phòng Luật sư ABC
-                      years_experience: 8
-                      bio: Chuyên tư vấn tranh chấp đất đai.
-                      specializations:
-                        - code: land
-                          name: Đất đai
-                      is_online: false
-                      is_complete: true
-                      missing_requirements: []
-                      pending_application:
-                        id: 7d6c5b4a-3f2e-4d1c-9b8a-7f6e5d4c3b2a
-                        type: card_change
-                        status: pending
-                      hidden_at: null
-                      created_at: "2026-10-01T02:00:00Z"
-                      updated_at: "2026-10-10T08:30:00Z"
-                    error: null
-                    request_id: req-124
+              example:
+                data:
+                  id: 7d6c5b4a-3f2e-4d1c-9b8a-7f6e5d4c3b2a
+                  user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                  full_name: Nguyễn Văn A
+                  approval_status: rejected
+                  rejected_reason: Ảnh thẻ hành nghề bị mờ, vui lòng tải lại.
+                  bar_card_number: "12345/TP"
+                  law_firm: Văn phòng Luật sư ABC
+                  years_experience: 8
+                  bio: Chuyên tư vấn tranh chấp đất đai.
+                  specializations:
+                    - code: land
+                      name: Đất đai
+                  credentials:
+                    - document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
+                      type: the_luat_su
+                    - document_id: 3d5f7b9c-1e2a-4b4c-8d6e-8f0a2b4c6d8e
+                      type: chung_chi_hanh_nghe
+                  reviewed_at: "2026-10-06T03:00:00Z"
+                  created_at: "2026-10-05T09:00:00Z"
+                  updated_at: "2026-10-06T03:00:00Z"
+                error: null
+                request_id: req-123
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/LawyerNotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503": { $ref: "#/components/responses/ServiceUnavailable" }
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-    patch:
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+    put:
       tags: [My Lawyer Profile]
       operationId: updateMyLawyerProfile
-      summary: Sửa hồ sơ (lưu ngay, không cần duyệt)
+      summary: Gửi lại hồ sơ sau khi bị từ chối
       description: |
-        Chỉ vai trò `lawyer` (token), hồ sơ không bị ẩn. Gửi trường nào sửa trường đó.
-        - `law_firm`, `years_experience`, `bio`, `specialization_codes`: lưu ngay.
-        - `bar_card_number`: chỉ nhận khi hồ sơ **chưa có** số thẻ (lần điền đầu của luật sư do admin tạo),
-          lưu ngay không cần duyệt. Hồ sơ đã có số thẻ mà gửi số khác → 409 `CARD_CHANGE_REQUIRES_REVIEW`;
-          muốn đổi thì tạo đơn `card_change`. Gửi lại đúng số đang có thì bỏ qua.
-        Sau khi lưu, nếu hồ sơ đủ (kể cả đã khai CCCD) thì chuyển `incomplete` → `active` (hỏi User Service,
-        nên có thể trả 502/503/504; khi đó dữ liệu đã gửi **không** được lưu).
+        Chỉ khi hồ sơ gần nhất đang `rejected` và đã hết thời gian chờ sau lần từ chối.
+        Gửi lại toàn bộ hồ sơ (cùng body với `POST /lawyers`), kiểm tra như lần đầu; tạo hồ sơ mới `pending`
+        (`id` mới), hồ sơ cũ giữ làm lịch sử.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -281,53 +301,104 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/LawyerProfileUpdateRequest" }
-            example:
-              bar_card_number: "12345/TP"
-              law_firm: Văn phòng Luật sư ABC
-              years_experience: 8
-              bio: Chuyên tư vấn tranh chấp đất đai.
-              specialization_codes: [land, business]
+            schema: { $ref: "#/components/schemas/LawyerSubmitRequest" }
       responses:
         "200":
-          description: Hồ sơ sau khi sửa
+          description: Hồ sơ mới, chờ admin duyệt
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LawyerProfileResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/LawyerNotFound" }
         "409":
-          description: Đổi số thẻ cần duyệt, hoặc số thẻ đã được dùng
+          description: Hồ sơ không ở trạng thái bị từ chối, chưa hết thời gian chờ, trùng số thẻ hoặc chưa khai CCCD
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
               examples:
-                can_duyet:
-                  summary: Hồ sơ đã có số thẻ
+                khong_sua_duoc:
+                  summary: Hồ sơ đang `pending` / `approved`
                   value:
                     data: null
                     error:
-                      code: CARD_CHANGE_REQUIRES_REVIEW
-                      message: Đổi số thẻ hành nghề cần admin duyệt, vui lòng tạo đơn đổi thông tin thẻ.
+                      code: APPLICATION_NOT_EDITABLE
+                      message: Chỉ gửi lại được hồ sơ đã bị từ chối.
                     request_id: req-123
+                cho_gui_lai:
+                  summary: Chưa hết thời gian chờ sau lần bị từ chối
+                  value:
+                    data: null
+                    error:
+                      code: REAPPLY_COOLDOWN
+                      message: Hồ sơ trước của bạn vừa bị từ chối, vui lòng chờ đến 10:00 06/10/2026 rồi gửi lại.
+                    request_id: req-124
                 trung_so_the:
-                  summary: Trùng số thẻ
+                  summary: Trùng số thẻ hành nghề
                   value:
                     data: null
                     error:
                       code: BAR_CARD_NUMBER_TAKEN
                       message: Số thẻ hành nghề này đã được đăng ký.
-                    request_id: req-124
+                    request_id: req-125
+                da_co_ho_so:
+                  summary: Đã là luật sư
+                  value:
+                    data: null
+                    error:
+                      code: LAWYER_PROFILE_EXISTS
+                      message: Bạn đã gửi hồ sơ luật sư trước đó.
+                    request_id: req-126
+                chua_khai_cccd:
+                  summary: Chưa khai hồ sơ cá nhân (CCCD)
+                  value:
+                    data: null
+                    error:
+                      code: CITIZEN_PROFILE_REQUIRED
+                      message: Bạn cần khai hồ sơ cá nhân (CCCD) trước khi gửi đơn.
+                    request_id: req-127
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/ServiceBadResponse" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
         "504": { $ref: "#/components/responses/ServiceTimeout" }
+
+  /lawyers/me/status:
+    put:
+      tags: [My Lawyer Profile]
+      operationId: setMyOnlineStatus
+      summary: Bật/tắt trạng thái Online
+      description: |
+        Chỉ luật sư đang hành nghề. Khi Online, luật sư thấy phòng chờ và nhận được yêu cầu tư vấn mới.
+        Sẽ làm bằng WebSocket cùng Consultation Service.
+      x-status: planned
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnlineStatusRequest" }
+            example: { is_online: true }
+      responses:
+        "200":
+          description: Trạng thái sau khi cập nhật
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnlineStatusResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
 
   /lawyers/me/stats:
     get:
@@ -335,7 +406,7 @@ paths:
       operationId: getMyLawyerStats
       summary: Thống kê cơ bản của tôi
       description: |
-        Chỉ luật sư có hồ sơ `active`. Số liệu lấy từ Consultation Service `GET /consultations/stats`
+        Chỉ luật sư đang hành nghề. Số liệu lấy từ Consultation Service `GET /consultations/stats`
         (chuyển tiếp JWT của luật sư); Lawyer Service không tự lưu các con số này.
       x-status: planned
       security:
@@ -350,725 +421,111 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LawyerStatsResponse" }
-              example:
-                data:
-                  accepted_count: 12
-                  in_progress_count: 2
-                  closed_count: 10
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/NotActiveLawyer" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503": { $ref: "#/components/responses/ServiceUnavailable" }
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-
-  # ---------------------------------------------------------------- My applications
-  /lawyers/me/applications:
-    get:
-      tags: [My Applications]
-      operationId: listMyLawyerApplications
-      summary: Danh sách đơn của tôi
-      description: Mọi vai trò đã đăng nhập. Mới nhất lên trước. Đơn bị từ chối có `reject_reason` và `can_reapply_at`.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-      responses:
-        "200":
-          description: Danh sách đơn (rỗng thì `items` = `[]`)
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationListResponse" }
-              example:
-                data:
-                  items:
-                    - id: 7d6c5b4a-3f2e-4d1c-9b8a-7f6e5d4c3b2a
-                      user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                      type: new
-                      status: rejected
-                      bar_card_number: "12345/TP"
-                      law_firm: Văn phòng Luật sư ABC
-                      years_experience: 8
-                      bio: Chuyên tư vấn tranh chấp đất đai.
-                      specializations:
-                        - code: land
-                          name: Đất đai
-                      card_document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                      ocr_result:
-                        status: completed
-                        fields:
-                          full_name: NGUYỄN VĂN A
-                          bar_card_number: "12345/TP"
-                          bar_association: Đoàn Luật sư TP. Hồ Chí Minh
-                          issue_date: "2020-05-12"
-                        warnings: [OCR_REQUIRES_USER_REVIEW]
-                        error_code: null
-                        engine: tesseract-local
-                      applicant_full_name: Nguyễn Văn A
-                      reject_reason: Ảnh thẻ bị mờ, vui lòng chụp lại.
-                      reviewed_by: 1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b
-                      reviewed_at: "2026-10-14T03:00:00Z"
-                      submitted_at: "2026-10-13T09:00:00Z"
-                      withdrawn_at: null
-                      can_reapply_at: "2026-10-15T03:00:00Z"
-                      created_at: "2026-10-13T08:50:00Z"
-                      updated_at: "2026-10-14T03:00:00Z"
-                  pagination: { page: 1, page_size: 20, total: 1, total_pages: 1 }
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-    post:
-      tags: [My Applications]
-      operationId: createMyLawyerApplication
-      summary: Tạo đơn nháp
-      description: |
-        Luôn tạo đơn ở trạng thái `draft`; gửi duyệt bằng `POST /lawyers/me/applications/{id}/submit`.
-        Mỗi người chỉ có **một** đơn `draft`/`pending` (mọi loại) tại một thời điểm → 409 `OPEN_APPLICATION_EXISTS`.
-        - `type = new`: chỉ vai trò `citizen`; không có hồ sơ luật sư hoặc hồ sơ đang `hidden` (xin lại).
-          Có hồ sơ chưa ẩn → 409 `LAWYER_PROFILE_EXISTS`.
-        - `type = card_change`: chỉ vai trò `lawyer`, hồ sơ không ẩn và đã có số thẻ. Chỉ gửi
-          `bar_card_number` và/hoặc `card_document_id`; các trường khác bị từ chối (422).
-        Nháp được để trống trường, kiểm tra đủ khi gửi duyệt.
-        `card_document_id` là `card_id` lấy từ Document Service `POST /documents/lawyer-card-ocr`.
-        Lawyer Service gọi Document Service `GET /internal/v1/documents/lawyer-cards/{card_id}` để kiểm tra
-        ảnh thuộc người gửi và lấy JSON OCR; không thuộc người gửi → 422 (field `card_document_id`).
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LawyerApplicationCreateRequest" }
-            examples:
-              xin_lam_luat_su:
-                summary: Đơn xin làm luật sư
-                value:
-                  type: new
-                  bar_card_number: "12345/TP"
-                  law_firm: Văn phòng Luật sư ABC
-                  years_experience: 8
-                  bio: Chuyên tư vấn tranh chấp đất đai.
-                  specialization_codes: [land]
-                  card_document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-              doi_the:
-                summary: Đơn đổi thông tin thẻ
-                value:
-                  type: card_change
-                  bar_card_number: "67890/TP"
-                  card_document_id: 3d5f7b9c-1e2a-4b4c-8d6e-8f0a2b4c6d8e
-      responses:
-        "201":
-          description: Đã tạo đơn nháp
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409":
-          description: Đã có đơn đang mở, đã có hồ sơ luật sư, hoặc chưa có số thẻ để đổi
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                don_dang_mo:
-                  summary: Đã có đơn draft/pending
-                  value:
-                    data: null
-                    error:
-                      code: OPEN_APPLICATION_EXISTS
-                      message: Bạn đang có một đơn chưa xử lý xong, hãy sửa hoặc rút đơn đó trước.
-                    request_id: req-123
-                da_co_ho_so:
-                  summary: Đã là luật sư
-                  value:
-                    data: null
-                    error:
-                      code: LAWYER_PROFILE_EXISTS
-                      message: Bạn đã có hồ sơ luật sư.
-                    request_id: req-124
-                chua_co_so_the:
-                  summary: Đổi thẻ khi hồ sơ chưa có số thẻ
-                  value:
-                    data: null
-                    error:
-                      code: CARD_NOT_SET
-                      message: Hồ sơ chưa có số thẻ hành nghề, hãy điền trực tiếp ở hồ sơ luật sư.
-                    request_id: req-125
-        "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
         "502": { $ref: "#/components/responses/ServiceBadResponse" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
         "504": { $ref: "#/components/responses/ServiceTimeout" }
-
-  /lawyers/me/applications/{application_id}:
-    get:
-      tags: [My Applications]
-      operationId: getMyLawyerApplication
-      summary: Xem một đơn của tôi
-      description: Đơn không phải của người gọi trả 404 như không tồn tại.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
-      responses:
-        "200":
-          description: Đơn
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/ApplicationNotFound" }
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-    patch:
-      tags: [My Applications]
-      operationId: updateMyLawyerApplication
-      summary: Sửa đơn draft hoặc pending
-      description: |
-        Gửi trường nào sửa trường đó; gửi `null` để xóa trường (chỉ với nháp). Đơn khác `draft`/`pending`
-        → 409 `APPLICATION_NOT_EDITABLE`. Sửa đơn `pending` thì đơn vẫn `pending`, dữ liệu sau khi sửa vẫn phải
-        đủ như lúc gửi duyệt (422 nếu thiếu) và số thẻ không trùng (409).
-        Đổi `card_document_id` thì lấy lại JSON OCR từ Document Service.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/LawyerApplicationUpdateRequest" }
-            example:
-              bio: Chuyên tư vấn tranh chấp đất đai và thủ tục hộ kinh doanh.
-              specialization_codes: [land, business]
-      responses:
-        "200":
-          description: Đơn sau khi sửa
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/ApplicationNotFound" }
-        "409":
-          description: Đơn không còn sửa được, hoặc số thẻ đã được dùng
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                khong_sua_duoc:
-                  summary: Đơn đã được xử lý
-                  value:
-                    data: null
-                    error:
-                      code: APPLICATION_NOT_EDITABLE
-                      message: Đơn này đã được xử lý, không sửa được nữa.
-                    request_id: req-123
-                trung_so_the:
-                  summary: Trùng số thẻ
-                  value:
-                    data: null
-                    error:
-                      code: BAR_CARD_NUMBER_TAKEN
-                      message: Số thẻ hành nghề này đã được đăng ký.
-                    request_id: req-124
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503": { $ref: "#/components/responses/ServiceUnavailable" }
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-
-  /lawyers/me/applications/{application_id}/submit:
-    post:
-      tags: [My Applications]
-      operationId: submitMyLawyerApplication
-      summary: Gửi đơn nháp cho admin duyệt
-      description: |
-        Chỉ đơn `draft` → `pending`, ghi `submitted_at`.
-        Điều kiện:
-        - Đã khai CCCD (User Service `GET /internal/v1/users/{id}/status`, `has_citizen_profile`) → không thì
-          409 `CITIZEN_PROFILE_REQUIRED`. Tài khoản bị khóa → 403 `ACCOUNT_LOCKED`.
-        - Đủ trường: `new` cần `bar_card_number`, ≥ 1 `specialization_codes`, `card_document_id`;
-          `card_change` cần `card_document_id` (và `bar_card_number` nếu đổi số). Thiếu → 422 kèm `details`.
-        - Số thẻ không trùng hồ sơ đang hoạt động / đơn đang chờ của người khác → 409 `BAR_CARD_NUMBER_TAKEN`.
-        - Đơn gần nhất bị từ chối chưa quá `LAWYER_REAPPLY_COOLDOWN_HOURS` giờ (mặc định 24) →
-          409 `REAPPLY_COOLDOWN`; thời điểm được gửi lại xem ở `can_reapply_at` của đơn bị từ chối.
-        Khi gửi, lưu `applicant_full_name` lấy từ hồ sơ CCCD (User Service `GET /internal/v1/users/{id}/citizen-profile`)
-        để admin xem danh sách.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
-      responses:
-        "200":
-          description: Đơn sau khi gửi (`pending`)
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/ApplicationNotFound" }
-        "409":
-          description: Không đủ điều kiện gửi
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                chua_khai_cccd:
-                  summary: Chưa khai CCCD
-                  value:
-                    data: null
-                    error:
-                      code: CITIZEN_PROFILE_REQUIRED
-                      message: Bạn cần khai hồ sơ cá nhân (CCCD) trước khi gửi đơn.
-                    request_id: req-123
-                cho_gui_lai:
-                  summary: Đang trong thời gian chờ sau khi bị từ chối
-                  value:
-                    data: null
-                    error:
-                      code: REAPPLY_COOLDOWN
-                      message: Đơn trước của bạn vừa bị từ chối, vui lòng chờ 24 giờ rồi gửi lại.
-                    request_id: req-124
-                khong_phai_nhap:
-                  summary: Đơn không ở trạng thái nháp
-                  value:
-                    data: null
-                    error:
-                      code: APPLICATION_NOT_DRAFT
-                      message: Chỉ gửi được đơn đang ở trạng thái nháp.
-                    request_id: req-125
-                trung_so_the:
-                  summary: Trùng số thẻ
-                  value:
-                    data: null
-                    error:
-                      code: BAR_CARD_NUMBER_TAKEN
-                      message: Số thẻ hành nghề này đã được đăng ký.
-                    request_id: req-126
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503": { $ref: "#/components/responses/ServiceUnavailable" }
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-
-  /lawyers/me/applications/{application_id}/withdraw:
-    post:
-      tags: [My Applications]
-      operationId: withdrawMyLawyerApplication
-      summary: Rút đơn
-      description: |
-        Đơn `draft` hoặc `pending` → `withdrawn` (bỏ nháp cũng dùng API này). Rút đơn không tính thời gian chờ.
-        Đơn đã duyệt / từ chối / đã rút → 409 `APPLICATION_NOT_EDITABLE`.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
-      responses:
-        "200":
-          description: Đơn sau khi rút
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404": { $ref: "#/components/responses/ApplicationNotFound" }
-        "409":
-          description: Đơn đã được xử lý
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              example:
-                data: null
-                error:
-                  code: APPLICATION_NOT_EDITABLE
-                  message: Đơn này đã được xử lý, không sửa được nữa.
-                request_id: req-123
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
 
   # ---------------------------------------------------------------- Admin
-  /lawyers/accounts:
-    post:
-      tags: [Admin]
-      operationId: createLawyerAccount
-      summary: Admin tạo tài khoản luật sư
-      description: |
-        Chỉ `admin`. Các bước:
-        1. Gọi User Service `POST /internal/v1/users` (X-Internal-Token) tạo tài khoản `local` đăng nhập bằng
-           email + mật khẩu, vai trò `lawyer` ngay, `created_by` = admin đang gọi.
-           Lỗi 409 của User Service (email/SĐT đã dùng) trả nguyên mã cho FE.
-        2. Tạo hồ sơ luật sư `incomplete`, nguồn `admin_created`, không cần ảnh thẻ.
-        3. Lưu hồ sơ lỗi → gọi User Service `DELETE /internal/v1/users/{id}` để **xóa cứng** tài khoản vừa tạo
-           (không xóa mềm vì email xóa mềm không đăng ký lại được), rồi trả 503 `LAWYER_DB_UNAVAILABLE`.
-        Không tự retry (không phải thao tác gọi lại an toàn).
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CreateLawyerAccountRequest" }
-            example:
-              email: luatsu.c@gmail.com
-              password: matkhau123
-              full_name: Lê Văn C
-      responses:
-        "201":
-          description: Đã tạo tài khoản và hồ sơ chưa hoàn thiện
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LawyerAccountResponse" }
-              example:
-                data:
-                  user:
-                    id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                    email: luatsu.c@gmail.com
-                    full_name: Lê Văn C
-                    role: lawyer
-                  profile:
-                    id: 9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d
-                    user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                    source: admin_created
-                    status: incomplete
-                    bar_card_number: null
-                    card_document_id: null
-                    law_firm: null
-                    years_experience: null
-                    bio: null
-                    specializations: []
-                    is_online: false
-                    is_complete: false
-                    missing_requirements: [citizen_profile, bar_card_number, specializations]
-                    pending_application: null
-                    hidden_at: null
-                    created_at: "2026-10-15T02:00:00Z"
-                    updated_at: "2026-10-15T02:00:00Z"
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "409":
-          description: Email hoặc số điện thoại đã được dùng (mã lỗi lấy nguyên từ User Service)
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                trung_email:
-                  summary: Email đã dùng
-                  value:
-                    data: null
-                    error:
-                      code: EMAIL_IN_USE
-                      message: Email này đã được dùng cho một tài khoản khác.
-                    request_id: req-123
-                email_da_xoa:
-                  summary: Email thuộc tài khoản đã xóa mềm
-                  value:
-                    data: null
-                    error:
-                      code: EMAIL_DELETED
-                      message: Email này thuộc một tài khoản đã bị xóa. Hãy khôi phục tài khoản đó thay vì tạo mới.
-                    request_id: req-124
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503":
-          description: Không kết nối được User Service, hoặc không lưu được hồ sơ (đã xóa cứng tài khoản vừa tạo)
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                user:
-                  summary: User Service không phản hồi
-                  value:
-                    data: null
-                    error:
-                      code: USER_UNAVAILABLE
-                      message: Hệ thống tài khoản tạm thời không phản hồi, vui lòng thử lại sau.
-                    request_id: req-123
-                lawyer_db:
-                  summary: Không lưu được hồ sơ luật sư
-                  value:
-                    data: null
-                    error:
-                      code: LAWYER_DB_UNAVAILABLE
-                      message: Không lưu được hồ sơ luật sư, tài khoản chưa được tạo. Vui lòng thử lại sau.
-                    request_id: req-124
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-
   /lawyers/applications:
     get:
       tags: [Admin]
       operationId: listLawyerApplications
-      summary: Danh sách đơn (admin)
-      description: |
-        Chỉ `admin`. Không bao giờ trả đơn `draft` (nháp là của riêng người dùng).
-        Mặc định `status=pending`, sắp xếp theo `submitted_at` tăng dần (cũ nhất lên trước).
+      summary: Danh sách hồ sơ luật sư cần duyệt
+      description: Chỉ `admin`. Mặc định trả hồ sơ `pending`, gửi sớm nhất lên trước.
       x-status: implemented
       security:
         - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/RequestId"
-        - name: status
+        - name: approval_status
           in: query
-          description: Lọc theo trạng thái (tab).
+          description: Lọc theo trạng thái duyệt.
           schema:
-            type: string
-            enum: [pending, approved, rejected, withdrawn]
+            allOf:
+              - $ref: "#/components/schemas/ApprovalStatus"
             default: pending
-        - name: type
-          in: query
-          description: Lọc theo loại đơn. Bỏ trống = tất cả.
-          schema: { $ref: "#/components/schemas/ApplicationType" }
         - name: order
           in: query
-          description: Thứ tự theo `submitted_at`.
+          description: Sắp theo thời gian gửi hồ sơ (`asc` = cũ nhất trước).
           schema: { type: string, enum: [asc, desc], default: asc }
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: Danh sách đơn (rỗng thì `items` = `[]`)
+          description: Danh sách hồ sơ (rỗng thì `items` = `[]`)
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationListResponse" }
+              schema: { $ref: "#/components/schemas/LawyerProfileListResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
 
-  /lawyers/applications/summary:
-    get:
-      tags: [Admin]
-      operationId: getLawyerApplicationSummary
-      summary: Số đơn theo từng tab
-      description: Chỉ `admin`. Đếm theo trạng thái (không tính `draft`), lọc theo loại nếu có `type`.
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - name: type
-          in: query
-          description: Chỉ đếm một loại đơn. Bỏ trống = tất cả.
-          schema: { $ref: "#/components/schemas/ApplicationType" }
-      responses:
-        "200":
-          description: Số đếm
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApplicationSummaryResponse" }
-              example:
-                data:
-                  total: 18
-                  by_status: { pending: 3, approved: 12, rejected: 2, withdrawn: 1 }
-                  by_type: { new: 15, card_change: 3 }
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-
-  /lawyers/applications/{application_id}:
-    get:
-      tags: [Admin]
-      operationId: getLawyerApplicationReview
-      summary: Chi tiết đơn để duyệt
-      description: |
-        Chỉ `admin`. Đơn `draft` trả 404. Gồm:
-        - `application`: thông tin đơn, kể cả `ocr_result`.
-        - `card_image`: link xem ảnh thẻ có hạn 300 giây, Document Service cấp qua
-          `POST /internal/v1/documents/lawyer-cards/{card_id}/view-url`.
-        - `citizen_profile`: hồ sơ CCCD của người gửi, User Service `GET /internal/v1/users/{id}/citizen-profile`
-          (`null` nếu người đó chưa khai).
-        - `current_profile`: hồ sơ luật sư đang hiệu lực (đơn `card_change` để so số thẻ cũ/mới), `null` nếu chưa có.
-        - `checks`: cờ không khớp. `is_name_mismatch` so họ tên CCCD với họ tên OCR; `is_card_number_mismatch`
-          so số thẻ người dùng nhập với số thẻ OCR. So sánh không phân biệt hoa thường, dấu, khoảng trắng.
-          `null` khi thiếu dữ liệu để so (OCR lỗi, chưa khai CCCD...).
-        User Service hoặc Document Service lỗi → 502/503/504 (không trả dữ liệu thiếu).
-      x-status: implemented
-      security:
-        - BearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
-      responses:
-        "200":
-          description: Chi tiết đơn
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ApplicationReviewResponse" }
-              example:
-                data:
-                  application:
-                    id: 7d6c5b4a-3f2e-4d1c-9b8a-7f6e5d4c3b2a
-                    user_id: 5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e
-                    type: new
-                    status: pending
-                    bar_card_number: "12345/TP"
-                    law_firm: Văn phòng Luật sư ABC
-                    years_experience: 8
-                    bio: Chuyên tư vấn tranh chấp đất đai.
-                    specializations:
-                      - code: land
-                        name: Đất đai
-                    card_document_id: 2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d
-                    ocr_result:
-                      status: completed
-                      fields:
-                        full_name: NGUYEN VAN A
-                        bar_card_number: "12346/TP"
-                        bar_association: Đoàn Luật sư TP. Hồ Chí Minh
-                        issue_date: "2020-05-12"
-                      warnings: [OCR_REQUIRES_USER_REVIEW]
-                      error_code: null
-                      engine: tesseract-local
-                    applicant_full_name: Nguyễn Văn A
-                    reject_reason: null
-                    reviewed_by: null
-                    reviewed_at: null
-                    submitted_at: "2026-10-15T01:00:00Z"
-                    withdrawn_at: null
-                    can_reapply_at: null
-                    created_at: "2026-10-15T00:50:00Z"
-                    updated_at: "2026-10-15T01:00:00Z"
-                  card_image:
-                    url: https://abcdefghijklmnopqrst.supabase.co/storage/v1/object/sign/document-files/quarantine/5b1e2c3d-4f5a-4b6c-8d7e-9f0a1b2c3d4e/lawyer-card/2c4e6a8b-0d1f-4a3b-9c5d-7e9f1a3b5c7d/card.jpg?token=eyJ...
-                    expires_in: 300
-                  citizen_profile:
-                    full_name: Nguyễn Văn A
-                    id_number: "079090001234"
-                    date_of_birth: "1990-01-15"
-                  current_profile: null
-                  checks:
-                    is_name_mismatch: false
-                    is_card_number_mismatch: true
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/ApplicationNotFound" }
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "502": { $ref: "#/components/responses/ServiceBadResponse" }
-        "503": { $ref: "#/components/responses/ServiceUnavailable" }
-        "504": { $ref: "#/components/responses/ServiceTimeout" }
-
-  /lawyers/applications/{application_id}/approve:
+  /lawyers/{lawyer_id}/approve:
     post:
       tags: [Admin]
       operationId: approveLawyerApplication
-      summary: Duyệt đơn
+      summary: Duyệt hồ sơ luật sư
       description: |
-        Chỉ `admin`, chỉ đơn `pending`. Kiểm tra lại số thẻ không trùng (409).
-        - `new`: gọi User Service `PUT /internal/v1/users/{id}/role` đổi vai trò sang `lawyer` **trước**
-          (User Service thu hồi mọi refresh token → lần refresh sau trả 401 `ROLE_CHANGED_RELOGIN`).
-          User Service lỗi 5xx/timeout → 502/503/504, đơn vẫn `pending`. User Service trả 404/409 (tài khoản đã
-          xóa, là admin...) → 409 `APPLICANT_UNAVAILABLE`. Sau đó tạo hồ sơ (hoặc dùng lại hồ sơ `hidden`),
-          nguồn `self_applied`, ghi đè toàn bộ trường từ đơn, trạng thái `active`.
-          Nếu lưu DB lỗi sau khi đã đổi vai trò: admin bấm duyệt lại (đổi vai trò lặp lại an toàn).
-        - `card_change`: không gọi User Service; ghi đè `bar_card_number` (nếu có) và ảnh thẻ + JSON OCR lên hồ sơ.
+        Chỉ `admin`, chỉ duyệt được hồ sơ `pending`.
+        Gọi User Service `PUT /internal/v1/users/{user_id}/role` (kèm `X-Internal-Token`) đổi vai trò sang
+        `lawyer`; User Service lỗi thì hồ sơ vẫn `pending`. Tài khoản người gửi không còn hợp lệ (đã xóa,
+        không đổi được vai trò) → 409 `APPLICANT_UNAVAILABLE`, admin nên từ chối hồ sơ.
+        Người được duyệt phải đăng nhập lại (hoặc refresh token) để token có vai trò `lawyer`.
       x-status: implemented
       security:
         - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
+        - $ref: "#/components/parameters/ApplicationLawyerId"
       responses:
         "200":
-          description: Đơn sau khi duyệt
+          description: Hồ sơ sau khi duyệt (`approval_status = approved`)
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
+              schema: { $ref: "#/components/schemas/LawyerProfileResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/ApplicationNotFound" }
         "409":
-          description: Đơn không còn chờ duyệt, số thẻ đã được dùng, hoặc người gửi không còn hợp lệ
+          description: Hồ sơ đã xử lý, trùng số thẻ với luật sư khác, hoặc tài khoản người gửi không còn hợp lệ
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
               examples:
-                khong_cho_duyet:
-                  summary: Đơn đã được xử lý
+                da_xu_ly:
+                  summary: Hồ sơ không còn `pending`
                   value:
                     data: null
                     error:
                       code: APPLICATION_NOT_PENDING
                       message: Đơn này đã được xử lý trước đó.
                     request_id: req-123
-                nguoi_gui:
-                  summary: Tài khoản người gửi đã bị xóa
-                  value:
-                    data: null
-                    error:
-                      code: APPLICANT_UNAVAILABLE
-                      message: Tài khoản người gửi đơn không còn hợp lệ, hãy từ chối đơn này.
-                    request_id: req-124
                 trung_so_the:
-                  summary: Trùng số thẻ
+                  summary: Số thẻ đã thuộc luật sư khác
                   value:
                     data: null
                     error:
                       code: BAR_CARD_NUMBER_TAKEN
                       message: Số thẻ hành nghề này đã được đăng ký.
+                    request_id: req-124
+                nguoi_gui_khong_hop_le:
+                  summary: Tài khoản người gửi đã xóa / không đổi được vai trò
+                  value:
+                    data: null
+                    error:
+                      code: APPLICANT_UNAVAILABLE
+                      message: Tài khoản người gửi đơn không còn hợp lệ, hãy từ chối đơn này.
                     request_id: req-125
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -1076,41 +533,87 @@ paths:
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
         "504": { $ref: "#/components/responses/ServiceTimeout" }
 
-  /lawyers/applications/{application_id}/reject:
+  /lawyers/{lawyer_id}/reject:
     post:
       tags: [Admin]
       operationId: rejectLawyerApplication
-      summary: Từ chối đơn
-      description: |
-        Chỉ `admin`, chỉ đơn `pending`. Bắt buộc ghi lý do (người gửi thấy câu này).
-        Người bị từ chối phải chờ `LAWYER_REAPPLY_COOLDOWN_HOURS` giờ mới gửi đơn mới.
-        Đơn `card_change` bị từ chối thì hồ sơ giữ nguyên thông tin thẻ cũ.
+      summary: Từ chối hồ sơ luật sư
+      description: Chỉ `admin`, chỉ từ chối được hồ sơ `pending`. Bắt buộc ghi lý do; người gửi thấy ở `rejected_reason`.
       x-status: implemented
       security:
         - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/ApplicationId"
+        - $ref: "#/components/parameters/ApplicationLawyerId"
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: "#/components/schemas/RejectRequest" }
-            example: { reason: "Ảnh thẻ hành nghề bị mờ, vui lòng chụp lại." }
+            example: { reason: Ảnh thẻ hành nghề bị mờ, vui lòng tải lại. }
       responses:
         "200":
-          description: Đơn sau khi từ chối
+          description: Hồ sơ sau khi từ chối (`approval_status = rejected`)
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/LawyerApplicationResponse" }
+              schema: { $ref: "#/components/schemas/LawyerProfileResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/ApplicationNotFound" }
         "409": { $ref: "#/components/responses/NotPending" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /lawyers/{lawyer_id}/credentials/{document_id}:
+    get:
+      tags: [Admin]
+      operationId: viewLawyerCredential
+      summary: Admin mở giấy tờ đính kèm hồ sơ luật sư
+      description: |
+        Chỉ `admin`. Chỉ mở được giấy tờ có trong `credentials` của hồ sơ. Lawyer Service đọc file từ Document Service
+        (API nội bộ, vẫn kiểm tra chủ sở hữu) và trả nguyên file với `Content-Disposition: inline` để xem ngay trên
+        trình duyệt. File chưa quét virus xong → 409 `FILE_NOT_READY`; bị chặn → 409 `FILE_REJECTED`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ApplicationLawyerId"
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Nội dung file (PDF / JPG / PNG)
+          headers:
+            Content-Disposition: { schema: { type: string }, example: "inline; filename=\"the.pdf\"" }
+            X-Content-Type-Options: { schema: { type: string, enum: [nosniff] } }
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`APPLICATION_NOT_FOUND` hoặc `CREDENTIAL_NOT_FOUND`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: "`FILE_NOT_READY` (chưa quét virus xong) hoặc `FILE_REJECTED`"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "502": { $ref: "#/components/responses/ServiceBadResponse" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+        "504": { $ref: "#/components/responses/ServiceTimeout" }
 
   # ---------------------------------------------------------------- Internal
   /internal/v1/lawyers/{user_id}/status:
@@ -1122,7 +625,7 @@ paths:
         Header `X-Internal-Token`. Luôn trả 200 (kể cả người chưa từng có hồ sơ: `has_profile = false`).
         `can_practice` = có hồ sơ, không bị ẩn và đủ (`is_complete`). Khóa tài khoản / vai trò trong token vẫn do
         User Service quyết định; Consultation Service nên kiểm tra cả hai.
-        Hồ sơ `incomplete` đã có số thẻ + lĩnh vực thì hỏi User Service `has_citizen_profile` (có thể 502/503/504).
+        Hồ sơ `incomplete` thì hỏi User Service `has_citizen_profile` (có thể 502/503/504).
       x-status: implemented
       servers:
         - url: http://lawyer-service:8000
@@ -1184,8 +687,8 @@ paths:
       description: |
         Header `X-Internal-Token`. User Service gọi **trước** khi lưu việc hạ vai trò `lawyer` → `citizen` hoặc
         xóa tài khoản luật sư; gọi lỗi thì User Service không đổi gì và trả 503.
-        Hồ sơ → `hidden` (không xóa), ghi `hidden_at`, `hidden_reason`, tắt `is_online`. Đơn `draft`/`pending`
-        của người đó chuyển `withdrawn`. Người đó được xin làm luật sư lại sau (đơn `new`).
+        Hồ sơ → `hidden` (không xóa), ghi `hidden_at`, `hidden_reason`, tắt `is_online`. Hồ sơ đang chờ duyệt
+        của người đó chuyển `withdrawn`.
         Gọi lại nhiều lần an toàn (idempotent). Không có hồ sơ vẫn trả 200 với `profile_found = false`.
         Đóng các cuộc tư vấn đang mở do User Service gọi Consultation Service (TODO ở
         `services/user-service/app/clients/consultation_client.py`).
@@ -1220,9 +723,11 @@ paths:
                   withdrawn_application_ids: [7d6c5b4a-3f2e-4d1c-9b8a-7f6e5d4c3b2a]
                 error: null
                 request_id: req-123
+        "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
 
 components:
   securitySchemes:
@@ -1230,7 +735,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: "`access_token` lấy từ User Service (`POST /users/auth/firebase` hoặc `POST /users/auth/refresh`)."
+      description: |
+        `access_token` lấy từ User Service (`POST /users/auth/firebase` hoặc `POST /users/auth/refresh`).
+        Trình duyệt có thể gửi bằng cookie HttpOnly thay cho header.
     InternalToken:
       type: apiKey
       in: header
@@ -1258,13 +765,13 @@ components:
       name: lawyer_id
       in: path
       required: true
-      description: ID hồ sơ luật sư (UUID, `lawyer_profiles.id`)
+      description: ID luật sư (UUID, `id` trong `LawyerPublic`)
       schema: { type: string, format: uuid }
-    ApplicationId:
-      name: application_id
+    ApplicationLawyerId:
+      name: lawyer_id
       in: path
       required: true
-      description: ID đơn (UUID, `lawyer_applications.id`)
+      description: ID hồ sơ cần duyệt (UUID, trường `id` của `LawyerProfile` trong `GET /lawyers/applications`)
       schema: { type: string, format: uuid }
     UserIdPath:
       name: user_id
@@ -1279,8 +786,21 @@ components:
       schema: { type: string }
 
   responses:
+    BadRequest:
+      description: Body không phải JSON hợp lệ
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: BAD_REQUEST
+              message: JSON gửi lên không đọc được.
+            request_id: req-123
     ValidationError:
-      description: Dữ liệu gửi lên không hợp lệ
+      description: Dữ liệu gửi lên không hợp lệ (kể cả ID trên đường dẫn không phải UUID)
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1292,8 +812,8 @@ components:
               code: VALIDATION_ERROR
               message: Dữ liệu gửi lên không hợp lệ.
               details:
-                - field: specialization_codes
-                  message: Phải chọn ít nhất 1 lĩnh vực.
+                - field: credentials
+                  message: Giấy tờ không tồn tại hoặc không thuộc về bạn.
             request_id: req-123
     Unauthorized:
       description: Thiếu token, token sai hoặc đã hết hạn (API nội bộ - sai `X-Internal-Token`)
@@ -1302,12 +822,23 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
-          example:
-            data: null
-            error:
-              code: UNAUTHORIZED
-              message: Bạn cần đăng nhập để tiếp tục.
-            request_id: req-123
+          examples:
+            chua_dang_nhap:
+              summary: Thiếu / sai token
+              value:
+                data: null
+                error:
+                  code: UNAUTHORIZED
+                  message: Bạn cần đăng nhập để tiếp tục.
+                request_id: req-123
+            het_han:
+              summary: Token hết hạn (FE gọi refresh rồi thử lại)
+              value:
+                data: null
+                error:
+                  code: TOKEN_EXPIRED
+                  message: Phiên đăng nhập đã hết hạn.
+                request_id: req-124
     Forbidden:
       description: Đã đăng nhập nhưng không đủ quyền (sai vai trò) hoặc tài khoản bị khóa
       headers:
@@ -1325,26 +856,13 @@ components:
                   message: Bạn không có quyền thực hiện thao tác này.
                 request_id: req-123
             bi_khoa:
-              summary: Tài khoản bị khóa (khi gửi đơn)
+              summary: Tài khoản bị khóa (khi gửi hồ sơ)
               value:
                 data: null
                 error:
                   code: ACCOUNT_LOCKED
                   message: Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.
                 request_id: req-124
-    NotActiveLawyer:
-      description: Chỉ luật sư có hồ sơ đủ (`active`) mới dùng được API này
-      headers:
-        X-Request-ID: { $ref: "#/components/headers/RequestId" }
-      content:
-        application/json:
-          schema: { $ref: "#/components/schemas/ErrorResponse" }
-          example:
-            data: null
-            error:
-              code: LAWYER_PROFILE_INCOMPLETE
-              message: Hồ sơ luật sư của bạn chưa đủ thông tin.
-            request_id: req-123
     LawyerNotFound:
       description: Không có hồ sơ luật sư phù hợp
       headers:
@@ -1359,7 +877,7 @@ components:
               message: Không tìm thấy hồ sơ luật sư.
             request_id: req-123
     ApplicationNotFound:
-      description: Không có đơn, hoặc đơn không phải của người gọi
+      description: Không có hồ sơ với ID này
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1369,10 +887,10 @@ components:
             data: null
             error:
               code: APPLICATION_NOT_FOUND
-              message: Không tìm thấy đơn.
+              message: Không tìm thấy hồ sơ xin làm luật sư.
             request_id: req-123
     NotPending:
-      description: Đơn không ở trạng thái chờ duyệt
+      description: Hồ sơ không ở trạng thái chờ duyệt
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1406,18 +924,10 @@ components:
                 data: null
                 error:
                   code: DOCUMENT_BAD_RESPONSE
-                  message: Không kiểm tra được ảnh thẻ, vui lòng thử lại sau.
+                  message: Hệ thống giấy tờ đang gặp lỗi, vui lòng thử lại sau.
                 request_id: req-124
-            consultation:
-              summary: Consultation Service trả lỗi
-              value:
-                data: null
-                error:
-                  code: CONSULTATION_BAD_RESPONSE
-                  message: Không lấy được số liệu tư vấn, vui lòng thử lại sau.
-                request_id: req-125
     ServiceUnavailable:
-      description: Không kết nối được service phụ
+      description: Không kết nối được service phụ hoặc Lawyer DB
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1440,8 +950,29 @@ components:
                   code: DOCUMENT_UNAVAILABLE
                   message: Hệ thống giấy tờ tạm thời không phản hồi, vui lòng thử lại sau.
                 request_id: req-124
+            db:
+              summary: Lawyer DB không kết nối được
+              value:
+                data: null
+                error:
+                  code: LAWYER_DB_UNAVAILABLE
+                  message: Hệ thống luật sư tạm thời không truy cập được dữ liệu, vui lòng thử lại sau.
+                request_id: req-125
+    DbUnavailable:
+      description: Lawyer DB không kết nối được
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: LAWYER_DB_UNAVAILABLE
+              message: Hệ thống luật sư tạm thời không truy cập được dữ liệu, vui lòng thử lại sau.
+            request_id: req-123
     ServiceTimeout:
-      description: Service phụ quá thời gian chờ (5 giây)
+      description: Service phụ quá thời gian chờ
       headers:
         X-Request-ID: { $ref: "#/components/headers/RequestId" }
       content:
@@ -1542,42 +1073,29 @@ components:
       description: "`land` = Đất đai, `business` = Hộ kinh doanh"
       enum: [land, business]
 
+    ApprovalStatus:
+      type: string
+      description: "`pending` = chờ duyệt, `approved` = đã duyệt, `rejected` = bị từ chối"
+      enum: [pending, approved, rejected]
+
+    CredentialType:
+      type: string
+      description: |
+        Loại giấy tờ theo các ô tải lên ở trang `lawyer-registration`: `the_luat_su` = thẻ luật sư,
+        `chung_chi_hanh_nghe` = chứng chỉ hành nghề, `bang_cu_nhan` = bằng cử nhân luật, `khac` = khác.
+      enum: [the_luat_su, chung_chi_hanh_nghe, bang_cu_nhan, khac]
+
     ProfileStatus:
       type: string
       description: |
-        `incomplete` = chưa đủ (thiếu CCCD / số thẻ / lĩnh vực), `active` = đủ và đang hiệu lực,
+        Trạng thái hồ sơ hành nghề (chỉ dùng ở API nội bộ): `incomplete` = chưa đủ, `active` = đang hiệu lực,
         `hidden` = bị ẩn do hạ vai trò hoặc xóa tài khoản
       enum: [incomplete, active, hidden]
-
-    ProfileSource:
-      type: string
-      description: "`admin_created` = admin tạo tài khoản, `self_applied` = người dùng tự xin và được duyệt"
-      enum: [admin_created, self_applied]
-
-    ApplicationType:
-      type: string
-      description: "`new` = xin làm luật sư, `card_change` = đổi số thẻ / ảnh thẻ"
-      enum: [new, card_change]
-
-    ApplicationStatus:
-      type: string
-      description: |
-        `draft` → `pending` → `approved` | `rejected`; `draft`/`pending` → `withdrawn` (người dùng rút hoặc
-        hồ sơ bị ẩn).
-      enum: [draft, pending, approved, rejected, withdrawn]
 
     MissingRequirement:
       type: string
       description: "Điều kiện còn thiếu để hồ sơ đủ"
       enum: [citizen_profile, bar_card_number, specializations]
-
-    BarCardNumber:
-      type: string
-      minLength: 1
-      maxLength: 50
-      pattern: '\S'
-      description: Số thẻ hành nghề luật sư (bỏ khoảng trắng hai đầu; so trùng không phân biệt hoa thường)
-      example: "12345/TP"
 
     # ---------- Luật sư ----------
     Specialization:
@@ -1587,9 +1105,54 @@ components:
         code: { $ref: "#/components/schemas/SpecializationCode" }
         name: { type: string, example: Đất đai }
 
+    Credential:
+      type: object
+      additionalProperties: false
+      required: [document_id, type]
+      properties:
+        document_id:
+          type: string
+          format: uuid
+          description: ID giấy tờ trong Document Service (người gửi tải lên trước)
+        type: { $ref: "#/components/schemas/CredentialType" }
+
+    LawyerProfile:
+      type: object
+      description: |
+        Một hồ sơ xin làm luật sư; chỉ chủ hồ sơ và admin xem được. `id` là mã hồ sơ, dùng cho
+        `POST /lawyers/{lawyer_id}/approve | reject` (gửi lại sau khi bị từ chối sẽ có `id` mới).
+      additionalProperties: false
+      required: [id, user_id, full_name, approval_status, rejected_reason, bar_card_number, law_firm,
+                 years_experience, bio, specializations, credentials, reviewed_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        full_name:
+          type: string
+          nullable: true
+          description: Họ tên trên CCCD (lấy từ User Service lúc gửi hồ sơ)
+        approval_status: { $ref: "#/components/schemas/ApprovalStatus" }
+        rejected_reason:
+          type: string
+          nullable: true
+          description: Chỉ có khi `approval_status` = `rejected`
+        bar_card_number: { type: string, example: "12345/TP" }
+        law_firm: { type: string, nullable: true }
+        years_experience: { type: integer, minimum: 0, nullable: true }
+        bio: { type: string, nullable: true }
+        specializations:
+          type: array
+          items: { $ref: "#/components/schemas/Specialization" }
+        credentials:
+          type: array
+          items: { $ref: "#/components/schemas/Credential" }
+        reviewed_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time, description: Thời điểm gửi hồ sơ }
+        updated_at: { type: string, format: date-time, nullable: true }
+
     LawyerPublic:
       type: object
-      description: Thông tin công khai, người dân xem được
+      description: Thông tin công khai, người dân xem được (dùng cho API planned)
       required: [id, user_id, full_name, avatar_url, law_firm, years_experience, bio, specializations, is_online]
       properties:
         id: { type: string, format: uuid }
@@ -1606,154 +1169,6 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Specialization" }
         is_online: { type: boolean }
-
-    ApplicationRef:
-      type: object
-      required: [id, type, status]
-      properties:
-        id: { type: string, format: uuid }
-        type: { $ref: "#/components/schemas/ApplicationType" }
-        status: { $ref: "#/components/schemas/ApplicationStatus" }
-
-    LawyerProfile:
-      type: object
-      description: Hồ sơ đầy đủ, chỉ chủ hồ sơ và admin xem được
-      required: [id, user_id, source, status, bar_card_number, card_document_id, law_firm, years_experience, bio,
-                 specializations, is_online, is_complete, missing_requirements, pending_application, hidden_at,
-                 created_at, updated_at]
-      properties:
-        id: { type: string, format: uuid }
-        user_id: { type: string, format: uuid }
-        source: { $ref: "#/components/schemas/ProfileSource" }
-        status: { $ref: "#/components/schemas/ProfileStatus" }
-        bar_card_number: { type: string, nullable: true, example: "12345/TP" }
-        card_document_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: Ảnh thẻ đang hiệu lực (`null` với luật sư admin tạo chưa từng đổi thẻ)
-        law_firm: { type: string, nullable: true }
-        years_experience: { type: integer, minimum: 0, nullable: true }
-        bio: { type: string, nullable: true }
-        specializations:
-          type: array
-          items: { $ref: "#/components/schemas/Specialization" }
-        is_online:
-          type: boolean
-          description: Luôn `false` cho tới khi làm WebSocket cùng Consultation Service
-        is_complete: { type: boolean }
-        missing_requirements:
-          type: array
-          items: { $ref: "#/components/schemas/MissingRequirement" }
-        pending_application:
-          anyOf:
-            - $ref: "#/components/schemas/ApplicationRef"
-            - $ref: "#/components/schemas/NullValue"
-          description: Đơn `draft`/`pending` đang mở (nếu có)
-        hidden_at: { type: string, format: date-time, nullable: true }
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    OcrFields:
-      type: object
-      description: Trường đọc được từ ảnh thẻ; đọc không chắc thì `null`
-      required: [full_name, bar_card_number, bar_association, issue_date]
-      properties:
-        full_name: { type: string, nullable: true }
-        bar_card_number: { type: string, nullable: true }
-        bar_association: { type: string, nullable: true, description: Đoàn luật sư }
-        issue_date: { type: string, format: date, nullable: true }
-
-    OcrResult:
-      type: object
-      description: JSON OCR lấy từ Document Service lúc gắn ảnh vào đơn (Lawyer Service không tự chạy OCR)
-      required: [status, fields, warnings, error_code, engine]
-      properties:
-        status:
-          type: string
-          enum: [completed, failed]
-          description: "`failed` = ảnh mờ / OCR lỗi; người dùng tự nhập, admin đối chiếu bằng ảnh"
-        fields:
-          anyOf:
-            - $ref: "#/components/schemas/OcrFields"
-            - $ref: "#/components/schemas/NullValue"
-        warnings:
-          type: array
-          items: { type: string }
-        error_code: { type: string, nullable: true, example: null }
-        engine: { type: string, example: tesseract-local }
-
-    LawyerApplication:
-      type: object
-      required: [id, user_id, type, status, bar_card_number, law_firm, years_experience, bio, specializations,
-                 card_document_id, ocr_result, applicant_full_name, reject_reason, reviewed_by, reviewed_at,
-                 submitted_at, withdrawn_at, can_reapply_at, created_at, updated_at]
-      properties:
-        id: { type: string, format: uuid }
-        user_id: { type: string, format: uuid }
-        type: { $ref: "#/components/schemas/ApplicationType" }
-        status: { $ref: "#/components/schemas/ApplicationStatus" }
-        bar_card_number:
-          type: string
-          nullable: true
-          description: Với `card_change`, `null` = giữ số thẻ cũ, chỉ đổi ảnh
-        law_firm: { type: string, nullable: true, description: "Luôn `null` với `card_change`" }
-        years_experience: { type: integer, nullable: true }
-        bio: { type: string, nullable: true }
-        specializations:
-          type: array
-          nullable: true
-          description: "`null` với `card_change`"
-          items: { $ref: "#/components/schemas/Specialization" }
-        card_document_id: { type: string, format: uuid, nullable: true }
-        ocr_result:
-          anyOf:
-            - $ref: "#/components/schemas/OcrResult"
-            - $ref: "#/components/schemas/NullValue"
-        applicant_full_name:
-          type: string
-          nullable: true
-          description: Họ tên trên CCCD lúc gửi đơn (để admin xem danh sách)
-        reject_reason: { type: string, nullable: true }
-        reviewed_by: { type: string, format: uuid, nullable: true }
-        reviewed_at: { type: string, format: date-time, nullable: true }
-        submitted_at: { type: string, format: date-time, nullable: true }
-        withdrawn_at: { type: string, format: date-time, nullable: true }
-        can_reapply_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: Chỉ có với đơn `rejected` = `reviewed_at` + thời gian chờ
-        created_at: { type: string, format: date-time }
-        updated_at: { type: string, format: date-time }
-
-    ApplicationReview:
-      type: object
-      required: [application, card_image, citizen_profile, current_profile, checks]
-      properties:
-        application: { $ref: "#/components/schemas/LawyerApplication" }
-        card_image:
-          type: object
-          nullable: true
-          required: [url, expires_in]
-          properties:
-            url: { type: string, format: uri }
-            expires_in: { type: integer, example: 300, description: Số giây link còn hiệu lực }
-        citizen_profile:
-          type: object
-          nullable: true
-          additionalProperties: true
-          description: Nguyên `data` của User Service `GET /internal/v1/users/{id}/citizen-profile`
-        current_profile:
-          anyOf:
-            - $ref: "#/components/schemas/LawyerProfile"
-            - $ref: "#/components/schemas/NullValue"
-        checks:
-          type: object
-          required: [is_name_mismatch, is_card_number_mismatch]
-          properties:
-            is_name_mismatch: { type: boolean, nullable: true }
-            is_card_number_mismatch: { type: boolean, nullable: true }
 
     LawyerStats:
       type: object
@@ -1783,80 +1198,42 @@ components:
         can_practice: { type: boolean, description: Được dùng chức năng luật sư (nhận tư vấn...) }
 
     # ---------- Body gửi lên ----------
-    SpecializationCodes:
-      type: array
-      minItems: 1
-      uniqueItems: true
-      items: { $ref: "#/components/schemas/SpecializationCode" }
-      description: Mã lĩnh vực, lấy từ `GET /lawyers/specializations`
-
-    LawyerProfileUpdateRequest:
+    LawyerSubmitRequest:
       type: object
       additionalProperties: false
-      minProperties: 1
+      required: [bar_card_number, specialization_codes, credentials]
       properties:
         bar_card_number:
-          allOf:
-            - $ref: "#/components/schemas/BarCardNumber"
-          description: Chỉ nhận khi hồ sơ chưa có số thẻ
-        law_firm: { type: string, maxLength: 255, nullable: true }
-        years_experience: { type: integer, minimum: 0, maximum: 70, nullable: true }
-        bio: { type: string, maxLength: 2000, nullable: true }
-        specialization_codes: { $ref: "#/components/schemas/SpecializationCodes" }
-
-    LawyerApplicationCreateRequest:
-      type: object
-      additionalProperties: false
-      required: [type]
-      properties:
-        type: { $ref: "#/components/schemas/ApplicationType" }
-        bar_card_number:
-          anyOf:
-            - $ref: "#/components/schemas/BarCardNumber"
-            - $ref: "#/components/schemas/NullValue"
-        law_firm: { type: string, maxLength: 255, nullable: true, description: Chỉ với `new` }
-        years_experience: { type: integer, minimum: 0, maximum: 70, nullable: true, description: Chỉ với `new` }
-        bio: { type: string, maxLength: 2000, nullable: true, description: Chỉ với `new` }
-        specialization_codes:
-          type: array
-          nullable: true
-          uniqueItems: true
-          items: { $ref: "#/components/schemas/SpecializationCode" }
-          description: Chỉ với `new`; nháp được để rỗng, gửi duyệt cần ≥ 1
-        card_document_id:
           type: string
-          format: uuid
+          minLength: 1
+          maxLength: 50
+          pattern: '\S'
+          description: Số thẻ hành nghề luật sư (bỏ khoảng trắng hai đầu)
+          example: "12345/TP"
+        law_firm:
+          type: string
+          maxLength: 255
           nullable: true
-          description: "`card_id` từ Document Service `POST /documents/lawyer-card-ocr`"
-
-    LawyerApplicationUpdateRequest:
-      type: object
-      additionalProperties: false
-      minProperties: 1
-      description: Như `LawyerApplicationCreateRequest` nhưng không có `type` (không đổi loại đơn)
-      properties:
-        bar_card_number:
-          anyOf:
-            - $ref: "#/components/schemas/BarCardNumber"
-            - $ref: "#/components/schemas/NullValue"
-        law_firm: { type: string, maxLength: 255, nullable: true }
+          description: Chuỗi rỗng / chỉ khoảng trắng được coi là `null`
         years_experience: { type: integer, minimum: 0, maximum: 70, nullable: true }
-        bio: { type: string, maxLength: 2000, nullable: true }
+        bio:
+          type: string
+          maxLength: 2000
+          nullable: true
+          description: Chuỗi rỗng / chỉ khoảng trắng được coi là `null`
         specialization_codes:
           type: array
-          nullable: true
+          minItems: 1
           uniqueItems: true
           items: { $ref: "#/components/schemas/SpecializationCode" }
-        card_document_id: { type: string, format: uuid, nullable: true }
-
-    CreateLawyerAccountRequest:
-      type: object
-      additionalProperties: false
-      required: [email, password, full_name]
-      properties:
-        email: { type: string, format: email, maxLength: 255 }
-        password: { type: string, minLength: 8, maxLength: 128, description: Admin đặt; luật sư đổi lại sau }
-        full_name: { type: string, minLength: 1, maxLength: 255, pattern: '\S' }
+          description: Mã lĩnh vực, lấy từ `GET /lawyers/specializations`
+        credentials:
+          type: array
+          minItems: 1
+          maxItems: 10
+          description: |
+            Không trùng `document_id`; bắt buộc có ít nhất một `the_luat_su` và một `chung_chi_hanh_nghe`.
+          items: { $ref: "#/components/schemas/Credential" }
 
     RejectRequest:
       type: object
@@ -1868,7 +1245,13 @@ components:
           minLength: 1
           maxLength: 500
           pattern: '\S'
-          description: Lý do từ chối, người gửi đơn sẽ thấy câu này
+          description: Lý do từ chối, người gửi hồ sơ sẽ thấy câu này
+
+    OnlineStatusRequest:
+      type: object
+      required: [is_online]
+      properties:
+        is_online: { type: boolean }
 
     HideProfileRequest:
       type: object
@@ -1891,6 +1274,29 @@ components:
             items:
               type: array
               items: { $ref: "#/components/schemas/Specialization" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    LawyerProfileResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data: { $ref: "#/components/schemas/LawyerProfile" }
+        error: { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    LawyerProfileListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, pagination]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/LawyerProfile" }
+            pagination: { $ref: "#/components/schemas/Pagination" }
         error: { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 
@@ -1917,88 +1323,16 @@ components:
         error: { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 
-    LawyerProfileResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data: { $ref: "#/components/schemas/LawyerProfile" }
-        error: { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    LawyerAccountResponse:
+    OnlineStatusResponse:
       type: object
       required: [data, error, request_id]
       properties:
         data:
           type: object
-          required: [user, profile]
+          required: [is_online]
           properties:
-            user:
-              type: object
-              required: [id, email, full_name, role]
-              properties:
-                id: { type: string, format: uuid }
-                email: { type: string }
-                full_name: { type: string, nullable: true }
-                role: { type: string, enum: [lawyer] }
-            profile: { $ref: "#/components/schemas/LawyerProfile" }
-        error: { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    LawyerApplicationResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data: { $ref: "#/components/schemas/LawyerApplication" }
-        error: { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    LawyerApplicationListResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data:
-          type: object
-          required: [items, pagination]
-          properties:
-            items:
-              type: array
-              items: { $ref: "#/components/schemas/LawyerApplication" }
-            pagination: { $ref: "#/components/schemas/Pagination" }
-        error: { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    ApplicationSummaryResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data:
-          type: object
-          required: [total, by_status, by_type]
-          properties:
-            total: { type: integer, minimum: 0, description: Tổng số đơn không tính nháp }
-            by_status:
-              type: object
-              required: [pending, approved, rejected, withdrawn]
-              properties:
-                pending: { type: integer, minimum: 0 }
-                approved: { type: integer, minimum: 0 }
-                rejected: { type: integer, minimum: 0 }
-                withdrawn: { type: integer, minimum: 0 }
-            by_type:
-              type: object
-              required: [new, card_change]
-              properties:
-                new: { type: integer, minimum: 0 }
-                card_change: { type: integer, minimum: 0 }
-        error: { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    ApplicationReviewResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data: { $ref: "#/components/schemas/ApplicationReview" }
+            is_online: { type: boolean }
+            last_seen_at: { type: string, format: date-time, nullable: true }
         error: { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 

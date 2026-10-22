@@ -2,8 +2,6 @@
 
 T7: migration005 thêm document_notification_outbox + enqueue/immutable triggers, đã apply/verify đúng project09/10. Không backfill hoặc sửa file/profile/bucket. Browser không CRUD; service_role SELECT/UPDATE; dispatcher mặc định tắt. Setup scripts/setup_document_outbox.py --project-ref srrxrnohunfyyolbfsew (default chỉ đọc, --apply opt-in). [Bàn giao T7/T8](../../../docs/api/DOCUMENT_RELEASE.md). ERD hiện6 bảng, các mốc trước là lịch sử.
 
-Luật sư (15/10/2026): [006_lawyer_card_ocr.sql](006_lawyer_card_ocr.sql) thêm bảng `document_lawyer_card_ocr` (ảnh thẻ luật sư JPEG mã hóa lại trong `safe/<owner>/lawyer-card/`, JSON OCR, RLS/backend-only). Chạy một lần trong SQL Editor của đúng project Document sau 001-005; cuối file có câu kiểm tra chỉ đọc. ERD hiện 7 bảng.
-
 Database riêng của Document Service. Thiết kế tại [erd.dbml](erd.dbml), copy toàn bộ vào dbdiagram.io.
 
 - `user_files`: chủ/file/mục đích upload, MIME/hash, storage private, trạng thái kiểm tra an toàn và xóa mềm.

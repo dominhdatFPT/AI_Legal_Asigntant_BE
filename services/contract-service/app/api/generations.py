@@ -33,7 +33,8 @@ def enqueue(request,draft_id,user,key,kind,format,repo,refs,store_factory,render
     refs.ensure(user.id,bearer(request),request.state.request_id,context["draft"]["document_ids"])
     store_factory().ready()
     render.ready(format)
-    return success(request,repo.enqueue(draft_id,user.id,key,kind,format,context["revision"]))
+    job = repo.enqueue(draft_id,user.id,key,kind,format,context["revision"])
+    return success(request,job)
 
 
 @router.post("/drafts/{draft_id}/generations",status_code=202)

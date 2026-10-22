@@ -9,6 +9,7 @@ from app.api.drafts import router as drafts_router
 from app.api.identity_suggestions import router as identity_suggestions_router
 from app.api.generations import router as generations_router
 from app.api.personal_templates import router as personal_templates_router
+from app.api.reference_catalog import router as reference_catalog_router
 
 
 app = FastAPI(title="Contract Service", version="0.8.1")
@@ -68,3 +69,4 @@ app.include_router(drafts_router)
 app.include_router(identity_suggestions_router)
 app.include_router(generations_router)
 app.include_router(personal_templates_router)
+app.include_router(reference_catalog_router)

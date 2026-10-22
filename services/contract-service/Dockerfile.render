@@ -7,4 +7,5 @@ RUN pip install --no-cache-dir /libs/common_auth
 COPY services/contract-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/contract-service/app ./app
+COPY services/contract-service/templates/reference-catalog ./templates/reference-catalog
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

@@ -21,13 +21,10 @@ ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
 LAWYER_DB_UNAVAILABLE = "LAWYER_DB_UNAVAILABLE"
 LAWYER_NOT_FOUND = "LAWYER_NOT_FOUND"
 APPLICATION_NOT_FOUND = "APPLICATION_NOT_FOUND"
+CREDENTIAL_NOT_FOUND = "CREDENTIAL_NOT_FOUND"
 LAWYER_PROFILE_EXISTS = "LAWYER_PROFILE_EXISTS"
-OPEN_APPLICATION_EXISTS = "OPEN_APPLICATION_EXISTS"
-CARD_NOT_SET = "CARD_NOT_SET"
-CARD_CHANGE_REQUIRES_REVIEW = "CARD_CHANGE_REQUIRES_REVIEW"
 BAR_CARD_NUMBER_TAKEN = "BAR_CARD_NUMBER_TAKEN"
 APPLICATION_NOT_EDITABLE = "APPLICATION_NOT_EDITABLE"
-APPLICATION_NOT_DRAFT = "APPLICATION_NOT_DRAFT"
 APPLICATION_NOT_PENDING = "APPLICATION_NOT_PENDING"
 CITIZEN_PROFILE_REQUIRED = "CITIZEN_PROFILE_REQUIRED"
 REAPPLY_COOLDOWN = "REAPPLY_COOLDOWN"
@@ -41,14 +38,11 @@ MESSAGES = {
     ACCOUNT_LOCKED: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.",
     LAWYER_DB_UNAVAILABLE: "Hệ thống luật sư tạm thời không truy cập được dữ liệu, vui lòng thử lại sau.",
     LAWYER_NOT_FOUND: "Không tìm thấy hồ sơ luật sư.",
-    APPLICATION_NOT_FOUND: "Không tìm thấy đơn.",
-    LAWYER_PROFILE_EXISTS: "Bạn đã có hồ sơ luật sư.",
-    OPEN_APPLICATION_EXISTS: "Bạn đang có một đơn chưa xử lý xong, hãy sửa hoặc rút đơn đó trước.",
-    CARD_NOT_SET: "Hồ sơ chưa có số thẻ hành nghề, hãy điền trực tiếp ở hồ sơ luật sư.",
-    CARD_CHANGE_REQUIRES_REVIEW: "Đổi số thẻ hành nghề cần admin duyệt, vui lòng tạo đơn đổi thông tin thẻ.",
+    APPLICATION_NOT_FOUND: "Không tìm thấy hồ sơ xin làm luật sư.",
+    CREDENTIAL_NOT_FOUND: "Không tìm thấy giấy tờ trong hồ sơ này.",
+    LAWYER_PROFILE_EXISTS: "Bạn đã gửi hồ sơ luật sư trước đó.",
     BAR_CARD_NUMBER_TAKEN: "Số thẻ hành nghề này đã được đăng ký.",
-    APPLICATION_NOT_EDITABLE: "Đơn này đã được xử lý, không sửa được nữa.",
-    APPLICATION_NOT_DRAFT: "Chỉ gửi được đơn đang ở trạng thái nháp.",
+    APPLICATION_NOT_EDITABLE: "Chỉ gửi lại được hồ sơ đã bị từ chối.",
     APPLICATION_NOT_PENDING: "Đơn này đã được xử lý trước đó.",
     CITIZEN_PROFILE_REQUIRED: "Bạn cần khai hồ sơ cá nhân (CCCD) trước khi gửi đơn.",
     REAPPLY_COOLDOWN: "Đơn trước của bạn vừa bị từ chối, vui lòng chờ rồi gửi lại.",

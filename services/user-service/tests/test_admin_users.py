@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
-from app.clients import consultation_client, lawyer_client
+from app.clients import consultation_client
 from app.core import firebase
 from app.core.database import get_db
 from app.core.passwords import hash_password
@@ -42,15 +42,6 @@ def closed(monkeypatch):
     calls = []
     monkeypatch.setattr(admin_user_service.consultation_client, "close_lawyer_consultations",
                         lambda lawyer_id, reason: calls.append((lawyer_id, reason)))
-    return calls
-
-
-@pytest.fixture(autouse=True)
-def hidden(monkeypatch):
-    """Ghi lại các lần User Service gọi Lawyer Service ẩn hồ sơ (gọi HTTP thật test ở test_lawyer_integration.py)."""
-    calls = []
-    monkeypatch.setattr(admin_user_service.lawyer_client, "hide_lawyer_profile",
-                        lambda user_id, reason, request_id=None: calls.append((user_id, reason)))
     return calls
 
 
@@ -193,8 +184,7 @@ def test_summary_dem_cho_cac_tab(client, db, admin, citizen, lawyer):
 def test_chi_tiet_admin_xem_moi_nguoi_nguoi_khac_chi_xem_minh(client, admin, citizen, lawyer):
     res = client.get(f"{USERS}/{citizen.id}", headers=_h(admin))
     assert res.status_code == 200
-    assert res.json()["data"]["has_citizen_profile"] is False  # admin thấy thêm trường quản trị
-    assert "created_as_lawyer" not in res.json()["data"]
+    assert res.json()["data"]["created_as_lawyer"] is False  # admin thấy thêm trường quản trị
 
     assert client.get(f"{USERS}/{citizen.id}", headers=_h(citizen)).status_code == 200
     res = client.get(f"{USERS}/{lawyer.id}", headers=_h(citizen))
@@ -205,8 +195,10 @@ def test_chi_tiet_admin_xem_moi_nguoi_nguoi_khac_chi_xem_minh(client, admin, cit
 # ---------------------------------------------------------------- Tạo tài khoản
 
 
-@pytest.mark.parametrize("account_type,role", [("citizen", "citizen"), ("admin", "admin")])
-def test_admin_tao_tai_khoan_va_dang_nhap_bang_email(client, admin, account_type, role):
+@pytest.mark.parametrize("account_type,role,as_lawyer", [
+    ("citizen", "citizen", False), ("lawyer", "citizen", True), ("admin", "admin", False),
+])
+def test_admin_tao_tai_khoan_va_dang_nhap_bang_email(client, admin, account_type, role, as_lawyer):
     body = {"email": "LuatSu.C@Gmail.com", "password": "matkhau123", "full_name": "Lê Văn C",
             "account_type": account_type}
     res = client.post(USERS, json=body, headers=_h(admin))
@@ -214,6 +206,7 @@ def test_admin_tao_tai_khoan_va_dang_nhap_bang_email(client, admin, account_type
     data = res.json()["data"]
     assert data["email"] == "luatsu.c@gmail.com"
     assert data["role"] == role
+    assert data["created_as_lawyer"] is as_lawyer
     assert data["created_by"] == str(admin.id)
     assert "password" not in data and "password_hash" not in data
 
@@ -239,8 +232,6 @@ def test_tao_tai_khoan_trung_email(client, db, admin, citizen):
     {"email": "a@gmail.com", "password": "ngan"},
     {"email": "a@gmail.com", "password": "12345678", "role": "admin"},  # không nhận trường lạ
     {"email": "a@gmail.com", "password": "12345678", "account_type": "superadmin"},
-    # Tài khoản luật sư tạo qua Lawyer Service (POST /lawyers/accounts)
-    {"email": "a@gmail.com", "password": "12345678", "account_type": "lawyer"},
 ])
 def test_tao_tai_khoan_du_lieu_sai(client, admin, body):
     res = client.post(USERS, json=body, headers=_h(admin))
@@ -344,40 +335,16 @@ def test_mo_khoa(client, admin, citizen):
 def test_doi_vai_tro_thu_hoi_token(client, admin, citizen):
     tokens = _login(client, "nguyenvana").json()["data"]
     client.cookies.clear()
-    res = client.put(f"{USERS}/{citizen.id}/role", json={"role": "admin"}, headers=_h(admin))
-    assert res.status_code == 200
-    assert res.json()["data"]["role"] == "admin"
-    res = client.post(f"{AUTH}/refresh", json={"refresh_token": tokens["refresh_token"]})
-    assert (res.status_code, _code(res)) == (401, "ROLE_CHANGED_RELOGIN")
-    assert res.json()["error"]["message"] == "Tài khoản của bạn đã được cập nhật quyền, vui lòng đăng nhập lại"
-    assert _login(client, "nguyenvana").json()["data"]["user"]["role"] == "admin"
-
-
-def test_khong_doi_len_luat_su_bang_api_nay(client, admin, citizen, hidden):
     res = client.put(f"{USERS}/{citizen.id}/role", json={"role": "lawyer"}, headers=_h(admin))
-    assert (res.status_code, _code(res)) == (409, "LAWYER_ROLE_VIA_LAWYER_SERVICE")
-    assert hidden == []
-
-
-def test_ha_vai_tro_luat_su_thi_an_ho_so_va_ket_thuc_cuoc_tu_van(client, admin, lawyer, closed, hidden):
-    res = client.put(f"{USERS}/{lawyer.id}/role", json={"role": "citizen"}, headers=_h(admin))
     assert res.status_code == 200
-    assert hidden == [(lawyer.id, "role_changed")]
+    assert res.json()["data"]["role"] == "lawyer"
+    assert client.post(f"{AUTH}/refresh", json={"refresh_token": tokens["refresh_token"]}).status_code == 401
+    assert _login(client, "nguyenvana").json()["data"]["user"]["role"] == "lawyer"
+
+
+def test_ha_vai_tro_luat_su_thi_ket_thuc_cuoc_tu_van(client, admin, lawyer, closed):
+    client.put(f"{USERS}/{lawyer.id}/role", json={"role": "citizen"}, headers=_h(admin))
     assert closed == [(lawyer.id, "role_changed")]
-
-
-def test_lawyer_service_loi_thi_khong_ha_vai_tro(client, db, admin, lawyer, closed, monkeypatch):
-    def down(user_id, reason, request_id=None):
-        raise admin_user_service.ApiError(503, "LAWYER_UNAVAILABLE")
-    monkeypatch.setattr(admin_user_service.lawyer_client, "hide_lawyer_profile", down)
-    res = client.put(f"{USERS}/{lawyer.id}/role", json={"role": "citizen"}, headers=_h(admin))
-    assert (res.status_code, _code(res)) == (503, "LAWYER_UNAVAILABLE")
-    db.refresh(lawyer)
-    assert lawyer.role == UserRole.lawyer and closed == []
-    res = client.delete(f"{USERS}/{lawyer.id}", headers=_h(admin))
-    assert res.status_code == 503
-    db.refresh(lawyer)
-    assert lawyer.deleted_at is None
 
 
 def test_khong_tu_doi_vai_tro(client, admin):
@@ -424,12 +391,9 @@ def test_khong_tu_xoa_va_khoi_phuc_tai_khoan_chua_xoa(client, admin, citizen):
     assert (res.status_code, _code(res)) == (409, "USER_NOT_DELETED")
 
 
-def test_xoa_luat_su_thi_an_ho_so_va_ket_thuc_cuoc_tu_van(client, admin, lawyer, citizen, closed, hidden):
+def test_xoa_luat_su_thi_ket_thuc_cuoc_tu_van(client, admin, lawyer, closed):
     client.delete(f"{USERS}/{lawyer.id}", headers=_h(admin))
     assert closed == [(lawyer.id, "deleted")]
-    assert hidden == [(lawyer.id, "deleted")]
-    client.delete(f"{USERS}/{citizen.id}", headers=_h(admin))
-    assert hidden == [(lawyer.id, "deleted")]  # xóa citizen không gọi Lawyer Service
 
 
 def test_email_google_da_bi_xoa_khong_tu_dang_ky_lai(client, db, admin, monkeypatch):

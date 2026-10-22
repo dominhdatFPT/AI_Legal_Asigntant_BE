@@ -35,3 +35,9 @@ build/
 Thumbs.db
 *.log
 *.lnk
+
+# Local preparation/QA caches; runtime assets live in reference-catalog.
+/services/contract-service/templates/.local-c2/
+# Superseded low-resolution previews (the reader uses content-hashed PNGs).
+/services/contract-service/templates/reference-catalog/*-page-[0-9].png
+/services/contract-service/templates/reference-catalog/*-page-[0-9][0-9].png

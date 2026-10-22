@@ -1,10 +1,10 @@
+import jwt
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from common_auth import ACCESS_COOKIE, AuthError, CurrentUser, decode_access_token, extract_token
+from common_auth.fastapi_dep import AuthHTTPException
 
-from common_auth import CurrentUser
-from common_auth.fastapi_dep import get_current_user
-
-from app.core import cookies
+from app.core import cookies, rabbitmq, token_blacklist
 from app.core.database import get_db
 from app.core.responses import INVALID_REFRESH_TOKEN, ApiError, error, ok
 from app.schemas.auth import FirebaseLoginRequest, PasswordLoginRequest, RefreshTokenRequest, RegisterRequest
@@ -12,6 +12,15 @@ from app.schemas.user import UserOut
 from app.services import auth_service
 
 router = APIRouter(prefix="/api/v1/users/auth", tags=["Auth"])
+
+
+def get_logout_user(request: Request) -> CurrentUser:
+    """Như get_current_user nhưng chấp nhận token đã bị thu hồi: logout gọi lại lần hai vẫn trả 200."""
+    try:
+        token = extract_token(request.headers.get("Authorization"), request.cookies.get(ACCESS_COOKIE))
+        return decode_access_token(token, check_revoked=False)
+    except AuthError as e:
+        raise AuthHTTPException(e)
 
 
 @router.post("/firebase")
@@ -56,15 +65,48 @@ def refresh_token(request: Request, body: RefreshTokenRequest | None = None, db:
 
 
 @router.post("/logout")
-def logout(
+async def logout(
     request: Request,
     body: RefreshTokenRequest | None = None,
-    current: CurrentUser = Depends(get_current_user),
+    current: CurrentUser = Depends(get_logout_user),
     db: Session = Depends(get_db),
 ):
+    # 1. Thu hồi refresh token trong DB
     raw = cookies.refresh_token_from(request, body.refresh_token if body else None)
     if raw:
         auth_service.logout(db, raw, current.id)
+
+    # 2. Trích xuất claims của access token để blacklist và gửi sang RabbitMQ
+    jti = current.jti
+    exp = None
+    try:
+        raw_access = extract_token(request.headers.get("Authorization"), request.cookies.get(ACCESS_COOKIE))
+        claims = jwt.decode(raw_access, options={"verify_signature": False})
+        if not jti:
+            jti = claims.get("jti")
+        exp = claims.get("exp")
+    except Exception:
+        pass
+
+    # 3. Đưa jti vào local blacklist ngay lập tức
+    if jti:
+        token_blacklist.blacklist_token(jti, exp)
+
+    # 4. Bắn sự kiện user.logged_out lên RabbitMQ (non-blocking / asynchronous)
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("User-Agent")
+    request_id = request.headers.get("X-Request-ID")
+    await rabbitmq.publish_user_logged_out(
+        user_id=current.id,
+        role=current.role,
+        jti=jti,
+        exp=exp,
+        client_ip=client_ip,
+        user_agent=user_agent,
+        request_id=request_id,
+    )
+
+    # 5. Xóa sạch HttpOnly cookies trên trình duyệt
     response = ok(request, {"logged_out": True})
     cookies.clear_auth_cookies(response)
     return response

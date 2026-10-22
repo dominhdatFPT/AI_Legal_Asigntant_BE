@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Tự giảm tốc khi nạp văn bản để không vượt giới hạn token/phút của gói free (0 = tắt)
     embedding_tokens_per_minute: int = 25000
 
+    # Thêm thuật ngữ luật vào câu hỏi trước khi tìm ("sổ đỏ" -> "Giấy chứng nhận quyền sử dụng đất"),
+    # xem app/services/query_expansion.py. Tắt (false) để so sánh khi chạy scripts/eval_retrieval.py
+    query_expansion_enabled: bool = True
+    # Mở sẵn kết nối DB và gọi thử embedding khi service khởi động, để câu hỏi đầu tiên không bị chậm
+    warmup_on_startup: bool = True
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

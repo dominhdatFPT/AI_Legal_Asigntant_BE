@@ -3,6 +3,8 @@ import hashlib
 import time
 from uuid import uuid4
 
+from common_auth.events import publish_event_sync
+
 from app.core.errors import ContractError
 from app.repositories.generations import GenerationRepository
 from app.services.contract_renderer import ContractRenderer
@@ -44,19 +46,32 @@ class GenerationWorker:
             committed=self.repo.finish(job,result={"storage_key":key,"sha256":hashlib.sha256(data).hexdigest(),"size_bytes":len(data)})
             if not committed:
                 self.cleanup(job,key)
+            else:
+                self.notify(job,"contract.generated")
         except ContractError as exc:
             if uploaded:
                 self.cleanup(job,key)
             if exc.code.startswith("STORAGE_") or exc.code=="DATABASE_UNAVAILABLE":
                 # Existing processing lease expires; next attempt reclaims with fencing.
                 return True
-            self.repo.finish(job,error=exc.code if exc.code in {"TEXT_OVERFLOW","INVALID_INPUT","RENDER_TIMEOUT","INVALID_RENDER_OUTPUT"} else "RENDER_FAILED")
+            code=exc.code if exc.code in {"TEXT_OVERFLOW","INVALID_INPUT","RENDER_TIMEOUT","INVALID_RENDER_OUTPUT"} else "RENDER_FAILED"
+            if self.repo.finish(job,error=code):
+                self.notify(job,"contract.generation.failed",code)
         except Exception:
             if uploaded:
                 self.cleanup(job,key)
             # Do not store/log exception text which can contain contract values/secrets.
-            self.repo.finish(job,error="RENDER_FAILED")
+            if self.repo.finish(job,error="RENDER_FAILED"):
+                self.notify(job,"contract.generation.failed","RENDER_FAILED")
         return True
+
+    @staticmethod
+    def notify(job,event_type,error_code=None):
+        # Chỉ bản xuất final mới báo chuông (preview người dùng đang chờ trên màn hình).
+        # shortcut: phát sau khi DB đã commit, worker chết đúng lúc đó thì mất thông báo; cần chắc chắn thì phát từ contract_notification_outbox.
+        if job["kind"]=="final":
+            publish_event_sync(event_type,{"user_id":str(job["owner_user_id"]),"job_id":str(job["id"]),
+                "draft_id":str(job.get("draft_id")),"format":job["format"],"error_code":error_code})
 
     def cleanup(self,job,key):
         try:

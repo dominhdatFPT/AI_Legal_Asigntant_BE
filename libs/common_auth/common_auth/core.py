@@ -1,7 +1,9 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import jwt
+
+from . import revocation
 
 ISSUER = "legal-assistant-user-service"
 ALGORITHM = "RS256"
@@ -33,6 +35,7 @@ class AuthError(Exception):
 class CurrentUser:
     id: str
     role: str
+    jti: str | None = field(default=None, compare=False)
 
 
 def _load_public_key() -> str:
@@ -67,7 +70,7 @@ def extract_token(authorization: str | None, cookie_token: str | None) -> str:
     raise AuthError(UNAUTHORIZED)
 
 
-def decode_access_token(token: str) -> CurrentUser:
+def decode_access_token(token: str, check_revoked: bool = True) -> CurrentUser:
     try:
         payload = jwt.decode(
             token,
@@ -84,5 +87,12 @@ def decode_access_token(token: str) -> CurrentUser:
 
     if payload.get("type") != "access":
         raise AuthError(UNAUTHORIZED)
+    revocation.ensure_started()
+    if check_revoked and revocation.is_revoked(payload):
+        raise AuthError(UNAUTHORIZED)
 
-    return CurrentUser(id=str(payload["sub"]), role=str(payload["role"]))
+    return CurrentUser(
+        id=str(payload["sub"]),
+        role=str(payload["role"]),
+        jti=str(payload["jti"]) if "jti" in payload else None,
+    )

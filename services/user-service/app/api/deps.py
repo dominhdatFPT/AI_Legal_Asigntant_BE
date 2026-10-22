@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from common_auth import CurrentUser
 from common_auth.fastapi_dep import get_current_user
 
+from app.core import token_blacklist
 from app.core.database import get_db
 from app.core.responses import FORBIDDEN, UNAUTHORIZED, ApiError
 from app.models import User, UserRole
@@ -20,6 +21,8 @@ from app.services.auth_service import parse_user_id
 
 def get_active_user(current: CurrentUser = Depends(get_current_user), db: Session = Depends(get_db)) -> User:
     """User đang đăng nhập, còn tồn tại (chưa xóa mềm) và không bị khóa."""
+    if current.jti and token_blacklist.is_token_blacklisted(current.jti):
+        raise ApiError(401, UNAUTHORIZED)
     user_id = parse_user_id(current.id)
     user = users.get_by_id(db, user_id) if user_id else None
     if user is None:

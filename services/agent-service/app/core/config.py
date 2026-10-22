@@ -19,14 +19,19 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.8-flash"
-    gemini_timeout_seconds: float = 30.0
-    gemini_max_retries: int = 2
+    gemini_timeout_seconds: float = 15.0
+    gemini_max_retries: int = 1
 
     # Groq
     groq_api_key: str = ""
     groq_model: str = "qwen/qwen3.8-27b"
-    groq_timeout_seconds: float = 30.0
-    groq_max_retries: int = 2
+    groq_timeout_seconds: float = 15.0
+    groq_max_retries: int = 1
+
+    # Câu trả lời mong muốn ~150-200 chữ; giới hạn này là chốt chặn khi model vẫn muốn viết dài
+    llm_max_output_tokens: int = 800
+    # Số đoạn luật lấy từ rag-service đưa vào prompt
+    rag_top_k: int = 4
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

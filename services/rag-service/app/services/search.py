@@ -1,9 +1,16 @@
 """Tìm kiếm ngữ nghĩa: embedding câu hỏi → tìm chunk gần nhất trong pgvector."""
 
+import logging
+import time
+
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.repositories import document as document_repo
 from app.services.embedding import Embedder
+from app.services.query_expansion import expand
+
+logger = logging.getLogger(__name__)
 
 
 def search_chunks(
@@ -14,9 +21,18 @@ def search_chunks(
     doc_types: list[str] | None = None,
 ) -> list[dict]:
     """Trả về danh sách chunk đúng hợp đồng ChunkSearchResult trong openapi.yaml."""
+    started = time.perf_counter()
+    if get_settings().query_expansion_enabled:
+        query = expand(query)
     query_vec = embedder.embed_query(query)
+    embedded = time.perf_counter()
     rows = document_repo.semantic_search(
         db, query_vec, top_k, embedding_model=embedder.model_name, doc_types=doc_types
+    )
+    # Đo từng bước để biết chậm ở Gemini embedding hay ở Supabase
+    logger.info(
+        "rag timing embed=%.2fs db=%.2fs results=%d query=%r",
+        embedded - started, time.perf_counter() - embedded, len(rows), query[:200],
     )
     results = []
     for chunk, doc, distance in rows:
