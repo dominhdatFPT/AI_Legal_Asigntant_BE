@@ -41,7 +41,7 @@ def db_connection(write: bool = False):
     except DataError as exc:
         raise ProcedureInvalidData(type(exc).__name__) from exc
     except SQLAlchemyError as exc:
-        logger.warning("Lỗi truy vấn database thủ tục: %s", type(exc).__name__)
+        logger.warning("Lỗi truy vấn database thủ tục: %s - %s", type(exc).__name__, exc)
         raise ProcedureDbUnavailable(type(exc).__name__) from exc
 
 

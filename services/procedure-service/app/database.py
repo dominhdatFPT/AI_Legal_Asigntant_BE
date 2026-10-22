@@ -80,7 +80,14 @@ def get_engine() -> Engine | None:
                         pool_pre_ping=True,
                         pool_size=5,
                         max_overflow=10,
-                        connect_args={"connect_timeout": 5},
+                        pool_recycle=300,
+                        connect_args={
+                            "connect_timeout": 15,
+                            "keepalives": 1,
+                            "keepalives_idle": 30,
+                            "keepalives_interval": 10,
+                            "keepalives_count": 3,
+                        },
                     )
                     _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
                     logger.info("Khởi tạo SQLAlchemy Engine thành công với PROCEDURE_DATABASE_URL")

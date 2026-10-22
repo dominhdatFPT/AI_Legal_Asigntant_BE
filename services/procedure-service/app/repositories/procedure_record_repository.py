@@ -186,6 +186,87 @@ def get_procedure_record_by_id(domain: str, record_id: str, owner_id: Optional[s
     return res
 
 
+def lookup_procedure_record(code_or_id: str, owner_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Tra cứu chi tiết hồ sơ bằng mã hồ sơ (ví dụ: DD-001-811F7E21), ID prefix (811F7E21), hoặc full UUID.
+    owner_id=None (chỉ admin) thì không lọc theo người tạo.
+    """
+    if not code_or_id or not str(code_or_id).strip():
+        return None
+
+    raw = str(code_or_id).strip()
+    raw_upper = raw.upper()
+
+    # Kiểm tra UUID chuẩn trước tiên
+    full_uuid = safe_uuid_str(raw)
+
+    procedure_code_filter = None
+    id_part = raw
+    if not full_uuid and "-" in raw:
+        parts = raw.split("-")
+        if len(parts) >= 3 and (parts[0].upper().startswith("DD") or parts[0].upper().startswith("HKD") or parts[0].upper().startswith("DN")):
+            procedure_code_filter = f"{parts[0].upper()}-{parts[1].upper()}"
+            id_part = "-".join(parts[2:])
+
+    domains = ["land", "business"]
+    if procedure_code_filter:
+        domains = ["land"] if procedure_code_filter.startswith("DD") else ["business"]
+    elif raw_upper.startswith("DD"):
+        domains = ["land"]
+    elif raw_upper.startswith("HKD") or raw_upper.startswith("DN"):
+        domains = ["business"]
+
+    if not full_uuid:
+        full_uuid = safe_uuid_str(id_part)
+
+    owner_sql = " AND user_id = :owner_id" if owner_id is not None else ""
+    base_params: Dict[str, Any] = {"owner_id": str(owner_id)} if owner_id is not None else {}
+
+    with db_connection() as conn:
+        for dom in domains:
+            table = "land_procedure_records" if dom == "land" else "business_procedure_records"
+
+            # 1. Tra cứu theo UUID chính xác
+            if full_uuid:
+                p = dict(base_params, id=full_uuid)
+                row = conn.execute(
+                    text(f"SELECT * FROM public.{table} WHERE id = :id{owner_sql} LIMIT 1"),
+                    p,
+                ).mappings().fetchone()
+                if row:
+                    res = _serialize_row(dict(row))
+                    res["domain"] = dom
+                    res["target_table"] = table
+                    return res
+
+            # 2. Tra cứu theo short ID (tiền tố UUID) và/hoặc mã thủ tục
+            clean_id_prefix = id_part.replace("-", "").strip().lower()
+            where_clauses = ["1=1"]
+            p = dict(base_params)
+
+            if clean_id_prefix and len(clean_id_prefix) >= 4:
+                where_clauses.append("lower(cast(id as text)) LIKE :id_prefix")
+                p["id_prefix"] = f"{clean_id_prefix}%"
+
+            if procedure_code_filter:
+                where_clauses.append("upper(procedure_code) = :p_code")
+                p["p_code"] = procedure_code_filter
+
+            if len(where_clauses) > 1:
+                where_sql = " AND ".join(where_clauses)
+                row = conn.execute(
+                    text(f"SELECT * FROM public.{table} WHERE {where_sql}{owner_sql} ORDER BY created_at DESC LIMIT 1"),
+                    p,
+                ).mappings().fetchone()
+                if row:
+                    res = _serialize_row(dict(row))
+                    res["domain"] = dom
+                    res["target_table"] = table
+                    return res
+
+    return None
+
+
 
 def list_procedure_records(
     user_id: Optional[str] = None,
@@ -680,9 +761,23 @@ def list_records(owner_id: Optional[str], domain: Optional[str], status: Optiona
         where.append("status = :status")
         params["status"] = status
     if q and q.strip():
-        where.append("(lower(coalesce(applicant_name, '')) LIKE :q OR coalesce(applicant_id_number, '') LIKE :q "
-                     "OR lower(procedure_code) LIKE :q)")
-        params["q"] = f"%{q.strip().lower()}%"
+        q_clean = q.strip().lower()
+        where_or = [
+            "lower(coalesce(applicant_name, '')) LIKE :q",
+            "coalesce(applicant_id_number, '') LIKE :q",
+            "lower(procedure_code) LIKE :q",
+            "lower(cast(id as text)) LIKE :q",
+        ]
+        params["q"] = f"%{q_clean}%"
+        if "-" in q_clean:
+            parts = q_clean.split("-")
+            if len(parts) >= 3:
+                p_code = f"{parts[0]}-{parts[1]}".upper()
+                short_id = parts[2].lower()
+                where_or.append("(upper(procedure_code) = :p_code_exact AND lower(cast(id as text)) LIKE :short_id_like)")
+                params["p_code_exact"] = p_code
+                params["short_id_like"] = f"{short_id}%"
+        where.append(f"({' OR '.join(where_or)})")
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     with db_connection() as conn:
         total = conn.execute(text(f"SELECT count(*) FROM ({_LIST_SOURCE}) a {where_sql}"), params).scalar() or 0

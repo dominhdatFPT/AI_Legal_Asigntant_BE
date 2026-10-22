@@ -69,6 +69,42 @@ class ProcedureApplicationService:
         )
 
     @staticmethod
+    def lookup_application(code_or_id: str, owner_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Tra cứu chi tiết tờ đơn hồ sơ bằng mã hồ sơ (ví dụ DD-001-811F7E21), tiền tố ID, hoặc UUID"""
+        record = procedure_record_repository.lookup_procedure_record(code_or_id=code_or_id, owner_id=owner_id)
+        if not record:
+            return None
+
+        schema = None
+        try:
+            s = procedure_form_service.get_procedure_form_schema(record["procedure_code"])
+            schema = s.model_dump()
+        except Exception:
+            schema = None
+
+        proc_meta = None
+        try:
+            with db_connection() as conn:
+                from sqlalchemy import text
+                row = conn.execute(
+                    text("SELECT name, fee, receiving_agency_level, processing_days, description FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
+                    {"code": str(record["procedure_code"]).upper()},
+                ).mappings().fetchone()
+                if row:
+                    proc_meta = dict(row)
+        except Exception:
+            proc_meta = None
+
+        short_id = str(record["id"])[:8].upper()
+        app_code = f"{record['procedure_code']}-{short_id}"
+        return {
+            "application_code": app_code,
+            "record": record,
+            "procedure": proc_meta,
+            "schema": schema,
+        }
+
+    @staticmethod
     def list_applications(
         owner_id: Optional[str] = None,
         domain: Optional[str] = None,

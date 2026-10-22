@@ -317,62 +317,134 @@ def get_business_info_block(section: str = "business") -> List[FormField]:
 # 12 HÀM CHI TIẾT LĨNH VỰC ĐẤT ĐAI (LAND PROCEDURES)
 # ==============================================================================
 
-def get_fields_dd_001() -> List[FormField]:
-    """DD-001: Đăng ký biến động quyền sử dụng đất do chuyển nhượng"""
-    fields = get_applicant_block(prefix="applicant", section="applicant")
-    fields.extend(get_land_plot_block(section="property"))
-    fields.extend([
+def get_fields_mau_so_18(change_hint: Optional[str] = None) -> List[FormField]:
+    """
+    Biểu mẫu chuẩn quốc gia: Mẫu số 18 - Đơn đăng ký biến động đất đai, tài sản gắn liền với đất
+    (Ban hành kèm theo Nghị định số 151/2025/NĐ-CP của Chính phủ).
+    Áp dụng thống nhất cho các thủ tục đăng ký biến động quyền sử dụng đất.
+    """
+    default_change_hint = (
+        "Ghi rõ nội dung biến động (nhận chuyển nhượng, tặng cho, thừa kế, cấp đổi, cấp lại...).\n"
+        "- Thông tin thửa đất: Số thửa, tờ bản đồ số, địa chỉ nơi có đất, diện tích (m²).\n"
+        "- Thông tin Giấy chứng nhận: Số phát hành (seri), số vào sổ cấp Giấy chứng nhận.\n"
+        "- Hợp đồng / Văn bản giao dịch: Số hợp đồng, ngày lập, tổ chức hành nghề công chứng.\n"
+        "- Nhu cầu cấp Giấy chứng nhận: Ghi rõ 'Có nhu cầu cấp mới Giấy chứng nhận' hoặc 'Xác nhận thay đổi vào Giấy chứng nhận đã cấp'."
+    )
+    return [
         FormField(
-            name="transferee_name",
-            label="Họ tên bên nhận chuyển nhượng (Bên mua)",
+            name="receiving_agency",
+            label="Kính gửi (Cơ quan tiếp nhận giải quyết)",
             field_type=FieldType.text,
             required=True,
-            placeholder="TRẦN VĂN B",
-            section="transfer",
+            default_value="Chi nhánh Văn phòng Đăng ký Đất đai",
+            placeholder="Chi nhánh Văn phòng Đăng ký Đất đai nơi có đất / Bộ phận Một cửa",
+            section="receiving",
+            description="Đối với hộ gia đình, cá nhân: ghi Văn phòng đăng ký đất đai / Chi nhánh Văn phòng đăng ký đất đai nơi có đất.",
         ),
         FormField(
-            name="transferee_id_number",
-            label="Số CCCD bên nhận chuyển nhượng",
+            name="applicant_name",
+            label="Họ và tên cá nhân / Tên tổ chức (chữ in hoa)",
             field_type=FieldType.text,
             required=True,
-            section="transfer",
+            placeholder="NGUYỄN VĂN AN",
+            section="applicant",
+            description="Cá nhân: Ghi họ và tên bằng chữ in hoa có dấu; Trường hợp nhận chuyển quyền thì ghi thông tin của bên nhận chuyển quyền.",
         ),
         FormField(
-            name="transferee_address",
-            label="Địa chỉ thường trú bên nhận chuyển nhượng",
+            name="applicant_id_document",
+            label="Giấy tờ nhân thân / pháp nhân (Số CCCD, ngày cấp, nơi cấp)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="CCCD số 079090001234, cấp ngày 15/04/2021 tại Cục CSQLHC về TTXH",
+            section="applicant",
+            description="Cá nhân ghi số định danh cá nhân / CCCD / Hộ chiếu; Tổ chức ghi theo quyết định thành lập hoặc GCN ĐKKD.",
+        ),
+        FormField(
+            name="applicant_address",
+            label="Địa chỉ nơi đăng ký thường trú / Trụ sở chính",
             field_type=FieldType.textarea,
             required=True,
-            section="transfer",
+            placeholder="Số 123 đường Nguyễn Huệ, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+            section="applicant",
+            description="Cá nhân ghi địa chỉ nơi đăng ký thường trú; Tổ chức ghi địa chỉ trụ sở chính theo ĐKKD.",
         ),
         FormField(
-            name="transfer_contract_date",
-            label="Ngày công chứng Hợp đồng chuyển nhượng",
-            field_type=FieldType.date,
-            required=True,
-            section="transfer",
-        ),
-        FormField(
-            name="transfer_notary_office",
-            label="Văn phòng công chứng thực hiện",
+            name="applicant_tax_code",
+            label="Mã số thuế (nếu có)",
             field_type=FieldType.text,
             required=False,
-            placeholder="Văn phòng Công chứng Sài Gòn",
-            section="transfer",
+            placeholder="0312345678",
+            section="applicant",
         ),
         FormField(
-            name="issuance_option",
-            label="Hình thức cấp Giấy chứng nhận",
-            field_type=FieldType.select,
+            name="applicant_phone",
+            label="Điện thoại liên hệ",
+            field_type=FieldType.text,
             required=True,
-            default_value="renew",
-            options=[
-                FormFieldOption(value="renew", label="Cấp đổi Giấy chứng nhận mới"),
-                FormFieldOption(value="endorse", label="Xác nhận thay đổi vào trang 4 Giấy chứng nhận cũ"),
-            ],
-            section="request",
+            placeholder="0912345678",
+            section="applicant",
+            validation_regex="^[0-9]{10,11}$",
         ),
-    ])
-    return fields
+        FormField(
+            name="applicant_email",
+            label="Hộp thư điện tử (nếu có)",
+            field_type=FieldType.text,
+            required=False,
+            placeholder="example@gmail.com",
+            section="applicant",
+        ),
+        FormField(
+            name="change_content",
+            label="Nội dung biến động đề nghị đăng ký",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder=change_hint or default_change_hint,
+            section="change",
+            description="Nội dung biến động chi tiết: nhận chuyển quyền, thông tin thửa đất, số GCN, hợp đồng giao dịch, nhu cầu cấp đổi/cấp mới GCN.",
+        ),
+        FormField(
+            name="tax_exemption_info",
+            label="Thông tin đối tượng được miễn, giảm nghĩa vụ tài chính về đất đai (nếu có)",
+            field_type=FieldType.textarea,
+            required=False,
+            default_value="Không thuộc đối tượng miễn, giảm nghĩa vụ tài chính.",
+            placeholder="Ghi rõ trường hợp thuộc diện được miễn, giảm (ví dụ: chuyển nhượng/tặng cho giữa cha mẹ và con...), hoặc Không có.",
+            section="tax_exemption",
+            description="Kê khai diện miễn giảm theo quy định pháp luật và nộp kèm giấy tờ chứng minh.",
+        ),
+        FormField(
+            name="attached_documents",
+            label="Giấy tờ liên quan đến nội dung biến động nộp kèm theo đơn",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="1. Bản gốc Giấy chứng nhận quyền sử dụng đất đã cấp;\n2. Hợp đồng chuyển nhượng/tặng cho quyền sử dụng đất (bản chính công chứng);\n3. Bản sao Căn cước công dân của các bên;\n4. Tờ khai thuế thu nhập cá nhân và lệ phí trước bạ.",
+            placeholder="Liệt kê danh mục các giấy tờ nộp kèm theo Đơn này.",
+            section="attachment",
+            description="Ghi các loại giấy tờ nộp kèm: Bản gốc GCN, hợp đồng giao dịch, giấy tờ nhân thân, hồ sơ thuế...",
+        ),
+        FormField(
+            name="declarer_signature_name",
+            label="Họ và tên người viết đơn (Người làm đơn ký và ghi rõ họ tên)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="NGUYỄN VĂN AN",
+            section="declaration",
+            description="Người viết đơn ký, ghi rõ họ tên (chữ in hoa) và đóng dấu nếu là tổ chức.",
+        ),
+    ]
+
+
+def get_fields_dd_001() -> List[FormField]:
+    """DD-001: Đăng ký biến động quyền sử dụng đất do chuyển nhượng (Mẫu số 18 - Nghị định 151/2025/NĐ-CP)"""
+    hint = (
+        "Nhận chuyển nhượng quyền sử dụng đất theo Hợp đồng chuyển nhượng số ... lập ngày ... tại Văn phòng Công chứng ...\n"
+        "- Thửa đất số: ..., Tờ bản đồ số: ...\n"
+        "- Địa chỉ thửa đất: ...\n"
+        "- Diện tích: ... m²\n"
+        "- Giấy chứng nhận số phát hành: ..., Số vào sổ cấp GCN: ... do UBND/Sở TNMT cấp ngày ...\n"
+        "- Nhu cầu cấp Giấy chứng nhận: Có nhu cầu cấp mới Giấy chứng nhận quyền sử dụng đất (hoặc Xác nhận thay đổi vào Giấy chứng nhận đã cấp)."
+    )
+    return get_fields_mau_so_18(change_hint=hint)
 
 
 def get_fields_dd_002() -> List[FormField]:
@@ -520,57 +592,16 @@ def get_fields_dd_005() -> List[FormField]:
 
 
 def get_fields_dd_006() -> List[FormField]:
-    """DD-006: Đăng ký biến động do tặng cho, thừa kế quyền sử dụng đất, nhà ở"""
-    fields = get_applicant_block(prefix="applicant", section="applicant")
-    fields.extend(get_land_plot_block(section="property"))
-    fields.extend([
-        FormField(
-            name="transaction_type",
-            label="Loại giao dịch",
-            field_type=FieldType.select,
-            required=True,
-            default_value="inheritance",
-            options=[
-                FormFieldOption(value="inheritance", label="Thừa kế quyền sử dụng đất, nhà ở"),
-                FormFieldOption(value="gift", label="Tặng cho quyền sử dụng đất, nhà ở"),
-            ],
-            section="transaction",
-        ),
-        FormField(
-            name="donor_or_deceased_name",
-            label="Họ tên người tặng cho / người để lại di sản thừa kế",
-            field_type=FieldType.text,
-            required=True,
-            placeholder="NGUYỄN VĂN C",
-            section="transaction",
-        ),
-        FormField(
-            name="inheritance_relation",
-            label="Mối quan hệ nhân thân",
-            field_type=FieldType.select,
-            required=True,
-            default_value="child",
-            options=[
-                FormFieldOption(value="child", label="Cha mẹ ruột với con đẻ"),
-                FormFieldOption(value="spouse", label="Vợ với chồng"),
-                FormFieldOption(value="in_law", label="Cha mẹ chồng/vợ với con dâu/rể"),
-                FormFieldOption(value="grandchild", label="Ông bà nội/ngoại với cháu"),
-                FormFieldOption(value="sibling", label="Anh chị em ruột"),
-                FormFieldOption(value="other", label="Quan hệ khác"),
-            ],
-            section="transaction",
-            description="Dùng để xác định đối tượng được miễn thuế TNCN và lệ phí trước bạ theo quy định",
-        ),
-        FormField(
-            name="legal_doc_number",
-            label="Số Văn bản công chứng (Hợp đồng tặng cho hoặc Khai nhận di sản)",
-            field_type=FieldType.text,
-            required=True,
-            placeholder="Số công chứng: 1234/2026/HĐTCTS",
-            section="transaction",
-        ),
-    ])
-    return fields
+    """DD-006: Đăng ký biến động do tặng cho, thừa kế quyền sử dụng đất, nhà ở (Mẫu số 18 - Nghị định 151/2025/NĐ-CP)"""
+    hint = (
+        "Nhận tặng cho / Thừa kế quyền sử dụng đất theo Hợp đồng tặng cho / Văn bản khai nhận di sản thừa kế số ... lập ngày ... tại Văn phòng Công chứng ...\n"
+        "- Thửa đất số: ..., Tờ bản đồ số: ...\n"
+        "- Địa chỉ thửa đất: ...\n"
+        "- Diện tích: ... m²\n"
+        "- Giấy chứng nhận số phát hành: ..., Số vào sổ cấp GCN: ...\n"
+        "- Nhu cầu cấp Giấy chứng nhận: Có nhu cầu cấp mới Giấy chứng nhận quyền sử dụng đất."
+    )
+    return get_fields_mau_so_18(change_hint=hint)
 
 
 def get_fields_dd_007() -> List[FormField]:
@@ -1480,28 +1511,32 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
 
     # Nhóm các section theo field (Loại bỏ số thứ tự cứng - L5)
     section_map = {
-        "applicant": FormSection(key="applicant", title="Thông tin người làm đơn", order=1),
-        "authorizer": FormSection(key="authorizer", title="Thông tin người ủy quyền", order=1),
-        "authorized_person": FormSection(key="authorized_person", title="Thông tin người được ủy quyền", order=2),
-        "lessor": FormSection(key="lessor", title="Thông tin bên cho thuê", order=1),
-        "lessee": FormSection(key="lessee", title="Thông tin bên thuê", order=2),
-        "property": FormSection(key="property", title="Thông tin thửa đất / Bất động sản", order=2),
-        "business": FormSection(key="business", title="Thông tin tổ chức / Doanh nghiệp", order=2),
-        "governance": FormSection(key="governance", title="Cơ cấu quản lý & Người đại diện", order=3),
-        "transfer": FormSection(key="transfer", title="Thông tin chuyển nhượng", order=3),
-        "transaction": FormSection(key="transaction", title="Thông tin tặng cho / thừa kế", order=3),
-        "conversion": FormSection(key="conversion", title="Thông tin chuyển mục đích sử dụng", order=3),
-        "mortgage": FormSection(key="mortgage", title="Thông tin biện pháp bảo đảm / thế chấp", order=3),
-        "release": FormSection(key="release", title="Thông tin giải chấp / xóa đăng ký", order=3),
-        "suspension": FormSection(key="suspension", title="Thông tin tạm ngừng hoạt động", order=3),
-        "dissolution": FormSection(key="dissolution", title="Thông tin giải thể / chấm dứt hoạt động", order=3),
-        "tax": FormSection(key="tax", title="Thông tin đăng ký và kê khai thuế", order=3),
-        "change": FormSection(key="change", title="Nội dung đăng ký thay đổi", order=3),
-        "financial": FormSection(key="financial", title="Điều khoản thanh toán & Giá thuê", order=3),
-        "scope": FormSection(key="scope", title="Phạm vi và thời hạn ủy quyền", order=3),
-        "origin": FormSection(key="origin", title="Nguồn gốc đất đai & Cam kết", order=3),
-        "request": FormSection(key="request", title="Yêu cầu giải quyết thủ tục", order=4),
-        "general": FormSection(key="general", title="Thông tin chung", order=5),
+        "receiving": FormSection(key="receiving", title="Cơ quan tiếp nhận giải quyết", order=1),
+        "applicant": FormSection(key="applicant", title="I. Người sử dụng đất, chủ sở hữu tài sản gắn liền với đất", order=2),
+        "change": FormSection(key="change", title="II. Nội dung biến động", order=3),
+        "tax_exemption": FormSection(key="tax_exemption", title="III. Thông tin đối tượng được miễn, giảm nghĩa vụ tài chính về đất đai", order=4),
+        "attachment": FormSection(key="attachment", title="IV. Giấy tờ liên quan đến nội dung biến động nộp kèm theo đơn", order=5),
+        "declaration": FormSection(key="declaration", title="Cam đoan và Xác nhận của người làm đơn", order=6),
+        "authorizer": FormSection(key="authorizer", title="Thông tin người ủy quyền", order=7),
+        "authorized_person": FormSection(key="authorized_person", title="Thông tin người được ủy quyền", order=8),
+        "lessor": FormSection(key="lessor", title="Thông tin bên cho thuê", order=9),
+        "lessee": FormSection(key="lessee", title="Thông tin bên thuê", order=10),
+        "property": FormSection(key="property", title="Thông tin thửa đất / Bất động sản", order=11),
+        "business": FormSection(key="business", title="Thông tin tổ chức / Doanh nghiệp", order=12),
+        "governance": FormSection(key="governance", title="Cơ cấu quản lý & Người đại diện", order=13),
+        "transfer": FormSection(key="transfer", title="Thông tin chuyển nhượng", order=14),
+        "transaction": FormSection(key="transaction", title="Thông tin tặng cho / thừa kế", order=15),
+        "conversion": FormSection(key="conversion", title="Thông tin chuyển mục đích sử dụng", order=16),
+        "mortgage": FormSection(key="mortgage", title="Thông tin biện pháp bảo đảm / thế chấp", order=17),
+        "release": FormSection(key="release", title="Thông tin giải chấp / xóa đăng ký", order=18),
+        "suspension": FormSection(key="suspension", title="Thông tin tạm ngừng hoạt động", order=19),
+        "dissolution": FormSection(key="dissolution", title="Thông tin giải thể / chấm dứt hoạt động", order=20),
+        "tax": FormSection(key="tax", title="Thông tin đăng ký và kê khai thuế", order=21),
+        "financial": FormSection(key="financial", title="Điều khoản thanh toán & Giá thuê", order=22),
+        "scope": FormSection(key="scope", title="Phạm vi và thời hạn ủy quyền", order=23),
+        "origin": FormSection(key="origin", title="Nguồn gốc đất đai & Cam kết", order=24),
+        "request": FormSection(key="request", title="Yêu cầu giải quyết thủ tục", order=25),
+        "general": FormSection(key="general", title="Thông tin chung", order=26),
     }
 
     used_sections: Dict[str, FormSection] = {}
@@ -1510,16 +1545,20 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
         used_sections[sec.key] = sec
 
     raw_sorted = sorted(used_sections.values(), key=lambda s: s.order)
-    # Tự động đánh số thứ tự liên tục 1, 2, 3... (L5)
-    final_sections = [
-        FormSection(
-            key=s.key,
-            title=f"{idx + 1}. {s.title}",
-            description=s.description,
-            order=idx + 1,
+    final_sections = []
+    for idx, s in enumerate(raw_sorted):
+        if re.match(r"^(I|II|III|IV|V|VI|VII|VIII|IX|X|\d+)\.", s.title):
+            title = s.title
+        else:
+            title = f"{idx + 1}. {s.title}"
+        final_sections.append(
+            FormSection(
+                key=s.key,
+                title=title,
+                description=s.description,
+                order=idx + 1,
+            )
         )
-        for idx, s in enumerate(raw_sorted)
-    ]
 
     return ProcedureFormSchema(
         procedure_code=code_upper,

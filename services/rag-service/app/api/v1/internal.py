@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import require_internal_token
 from app.core.database import get_db
+from app.schemas.article import ArticleRequest
 from app.schemas.search import SearchRequest
+from app.services.article_lookup import ArticleLookupError, find_article
 from app.services.embedding import Embedder, EmbeddingError, get_embedder
 from app.services.search import search_chunks
 
@@ -60,3 +62,30 @@ def semantic_search(
             },
         )
     return {"data": {"chunks": chunks}, "error": None, "request_id": request_id}
+
+
+@router.post("/articles")
+def get_article(
+    body: ArticleRequest,
+    request: Request,
+    response: Response,
+    _: None = Depends(require_internal_token),
+    db: Session = Depends(get_db),
+):
+    """Chỉ agent-service gọi. Nguyên văn 1 Điều / 1 Khoản theo tên hoặc số hiệu văn bản, không dùng embedding."""
+    request_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4().hex[:8]}"
+    response.headers["X-Request-ID"] = request_id
+    try:
+        article = find_article(db, body.law, body.dieu, body.khoan)
+    except ArticleLookupError as e:
+        raise HTTPException(status_code=e.status, detail={"code": e.code, "message": e.message})
+    except SQLAlchemyError as e:
+        logger.error("Lỗi database khi tra cứu điều luật: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "RAG_DATABASE_UNAVAILABLE",
+                "message": "Không truy cập được kho văn bản, vui lòng thử lại sau.",
+            },
+        )
+    return {"data": article, "error": None, "request_id": request_id}

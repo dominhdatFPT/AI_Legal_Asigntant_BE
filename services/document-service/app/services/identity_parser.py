@@ -587,6 +587,8 @@ def residence_components(raw, value):
 
 
 def parse_fields(raw):
+    if raw.get("engine") == "vnpt-ekyc":
+        return dict(raw["fields"])
     result = _with_attempts(raw, _parse_single)
     if raw.get("side") == "back":
         # Owner identity is printed on the front; MRZ consistency is checked
@@ -597,6 +599,8 @@ def parse_fields(raw):
 
 
 def parse_additional_fields(raw):
+    if raw.get("engine") == "vnpt-ekyc":
+        return dict(raw["additional"])
     result = _with_attempts(raw, _parse_additional_single)
     # If both independently printed addresses name the same administrative
     # suffix, retain the stronger regional reading's tones in that suffix.

@@ -42,6 +42,7 @@ services:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       PROCEDURE_SERVICE_URL: ${PROCEDURE_SERVICE_URL:-http://procedure-service:8000}
       LOCATION_SERVICE_URL: ${LOCATION_SERVICE_URL:-http://location-service:8000}
+      DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8000}
       AGENT_DATABASE_URL: ${AGENT_DATABASE_URL:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -233,6 +234,11 @@ services:
       DOCUMENT_OCR_CPU_THREADS: ${DOCUMENT_OCR_CPU_THREADS:-2}
       DOCUMENT_VIETOCR_ENABLED: ${DOCUMENT_VIETOCR_ENABLED:-1}
       DOCUMENT_VIETOCR_MODEL_DIR: /opt/vietocr
+      # Đọc CCCD bằng VNPT eKYC trước, lỗi/thiếu thì dùng OCR local (mặc định tắt = chỉ OCR local).
+      EKYC_ENABLED: ${EKYC_ENABLED:-0}
+      EKYC_ACCESS_TOKEN: ${EKYC_ACCESS_TOKEN:-}
+      EKYC_TOKEN_ID: ${EKYC_TOKEN_ID:-}
+      EKYC_TOKEN: ${EKYC_TOKEN:-}
       USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/

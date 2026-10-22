@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     # Downstream services
     rag_service_url: str = "http://rag-service:8000"
     internal_token: str = ""
+    # Lấy chữ đã trích của tài liệu người dùng upload (gọi bằng token của chính người dùng)
+    document_service_url: str = "http://document-service:8000"
 
     # JWT
     jwt_public_key_path: str = "keys/jwt_public.pem"

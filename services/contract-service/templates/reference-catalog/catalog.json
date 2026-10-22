@@ -151,7 +151,7 @@
     },
     {
       "key": "coop-branch-registration",
-      "code": null,
+      "code": "HTX-001",
       "procedure_id": null,
       "name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã",
       "domain": "cooperative",
@@ -159,7 +159,7 @@
     },
     {
       "key": "vat-declaration",
-      "code": null,
+      "code": "DN-012",
       "procedure_id": null,
       "name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ",
       "domain": "business",
@@ -167,7 +167,7 @@
     },
     {
       "key": "household-certificate-reissue",
-      "code": null,
+      "code": "HKD-003",
       "procedure_id": null,
       "name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
       "domain": "business",
@@ -175,7 +175,7 @@
     },
     {
       "key": "social-insurance-authorization",
-      "code": null,
+      "code": "BHXH-001",
       "procedure_id": null,
       "name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội",
       "domain": "social_insurance",
@@ -183,7 +183,7 @@
     },
     {
       "key": "land-allocation-rental",
-      "code": null,
+      "code": "DD-013",
       "procedure_id": null,
       "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
       "domain": "land",
@@ -191,7 +191,7 @@
     },
     {
       "key": "land-survey",
-      "code": null,
+      "code": "DD-015",
       "procedure_id": null,
       "name": "Yêu cầu đo đạc đất",
       "domain": "land",
@@ -199,7 +199,7 @@
     },
     {
       "key": "agricultural-land-term-confirmation",
-      "code": null,
+      "code": "DD-016",
       "procedure_id": null,
       "name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp",
       "domain": "land",
@@ -207,7 +207,7 @@
     },
     {
       "key": "land-allocation-method-change",
-      "code": null,
+      "code": "DD-017",
       "procedure_id": null,
       "name": "Chuyển hình thức giao đất, cho thuê đất",
       "domain": "land",
@@ -215,7 +215,7 @@
     },
     {
       "key": "land-dispute-mediation",
-      "code": null,
+      "code": "DD-014",
       "procedure_id": null,
       "name": "Hòa giải tranh chấp đất đai",
       "domain": "land",
@@ -343,13 +343,13 @@
       "description": "Biểu mẫu dành cho hợp tác xã, gồm thông tin địa điểm và người đứng đầu.",
       "domain": "cooperative",
       "procedure": "coop-branch-registration",
-      "procedure_code": null,
+      "procedure_code": "HTX-001",
       "procedure_id": null,
       "procedure_name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã",
       "procedures": [
         {
           "key": "coop-branch-registration",
-          "code": null,
+          "code": "HTX-001",
           "procedure_id": null,
           "name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã",
           "domain": "cooperative",
@@ -538,13 +538,13 @@
       "description": "Tờ khai GTGT, các chỉ tiêu tính thuế và hướng dẫn kê khai trong bản nguồn.",
       "domain": "business",
       "procedure": "vat-declaration",
-      "procedure_code": null,
+      "procedure_code": "DN-012",
       "procedure_id": null,
       "procedure_name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ",
       "procedures": [
         {
           "key": "vat-declaration",
-          "code": null,
+          "code": "DN-012",
           "procedure_id": null,
           "name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ",
           "domain": "business",
@@ -899,13 +899,13 @@
       "description": "Đề nghị cấp lại giấy chứng nhận và kê khai lý do cấp lại.",
       "domain": "business",
       "procedure": "household-certificate-reissue",
-      "procedure_code": null,
+      "procedure_code": "HKD-003",
       "procedure_id": null,
       "procedure_name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
       "procedures": [
         {
           "key": "household-certificate-reissue",
-          "code": null,
+          "code": "HKD-003",
           "procedure_id": null,
           "name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
           "domain": "business",
@@ -943,13 +943,13 @@
       "description": "Giấy ủy quyền có mã số BHXH, loại chế độ được hưởng và phạm vi ủy quyền.",
       "domain": "social_insurance",
       "procedure": "social-insurance-authorization",
-      "procedure_code": null,
+      "procedure_code": "BHXH-001",
       "procedure_id": null,
       "procedure_name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội",
       "procedures": [
         {
           "key": "social-insurance-authorization",
-          "code": null,
+          "code": "BHXH-001",
           "procedure_id": null,
           "name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội",
           "domain": "social_insurance",
@@ -1081,13 +1081,13 @@
       "description": "Đơn đề nghị dùng cho giao đất, thuê đất, chuyển mục đích sử dụng đất và các trường hợp đất gắn với rừng theo chú thích của nguồn.",
       "domain": "land",
       "procedure": "land-allocation-rental",
-      "procedure_code": null,
+      "procedure_code": "DD-013",
       "procedure_id": null,
       "procedure_name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
       "procedures": [
         {
           "key": "land-allocation-rental",
-          "code": null,
+          "code": "DD-013",
           "procedure_id": null,
           "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
           "domain": "land",
@@ -1138,13 +1138,13 @@
       "description": "Đơn yêu cầu đo đạc mảnh đất, có phần thông tin người yêu cầu và nội dung đề nghị.",
       "domain": "land",
       "procedure": "land-survey",
-      "procedure_code": null,
+      "procedure_code": "DD-015",
       "procedure_id": null,
       "procedure_name": "Yêu cầu đo đạc đất",
       "procedures": [
         {
           "key": "land-survey",
-          "code": null,
+          "code": "DD-015",
           "procedure_id": null,
           "name": "Yêu cầu đo đạc đất",
           "domain": "land",
@@ -1229,13 +1229,13 @@
       "description": "Đề nghị xác nhận lại thời hạn sử dụng đất nông nghiệp, có phần xác nhận của cơ quan tiếp nhận.",
       "domain": "land",
       "procedure": "agricultural-land-term-confirmation",
-      "procedure_code": null,
+      "procedure_code": "DD-016",
       "procedure_id": null,
       "procedure_name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp",
       "procedures": [
         {
           "key": "agricultural-land-term-confirmation",
-          "code": null,
+          "code": "DD-016",
           "procedure_id": null,
           "name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp",
           "domain": "land",
@@ -1271,13 +1271,13 @@
       "description": "Bản ảnh đơn đề nghị chuyển hình thức giao đất hoặc cho thuê đất.",
       "domain": "land",
       "procedure": "land-allocation-method-change",
-      "procedure_code": null,
+      "procedure_code": "DD-017",
       "procedure_id": null,
       "procedure_name": "Chuyển hình thức giao đất, cho thuê đất",
       "procedures": [
         {
           "key": "land-allocation-method-change",
-          "code": null,
+          "code": "DD-017",
           "procedure_id": null,
           "name": "Chuyển hình thức giao đất, cho thuê đất",
           "domain": "land",
@@ -1315,13 +1315,13 @@
       "description": "Biểu mẫu số 01 có các chú thích cập nhật được in màu trong nguồn; giữ nguyên cả phần hướng dẫn.",
       "domain": "land",
       "procedure": "land-allocation-rental",
-      "procedure_code": null,
+      "procedure_code": "DD-013",
       "procedure_id": null,
       "procedure_name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
       "procedures": [
         {
           "key": "land-allocation-rental",
-          "code": null,
+          "code": "DD-013",
           "procedure_id": null,
           "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
           "domain": "land",
@@ -1372,13 +1372,13 @@
       "description": "Đơn trình bày nội dung tranh chấp, yêu cầu hòa giải và tài liệu gửi kèm.",
       "domain": "land",
       "procedure": "land-dispute-mediation",
-      "procedure_code": null,
+      "procedure_code": "DD-014",
       "procedure_id": null,
       "procedure_name": "Hòa giải tranh chấp đất đai",
       "procedures": [
         {
           "key": "land-dispute-mediation",
-          "code": null,
+          "code": "DD-014",
           "procedure_id": null,
           "name": "Hòa giải tranh chấp đất đai",
           "domain": "land",

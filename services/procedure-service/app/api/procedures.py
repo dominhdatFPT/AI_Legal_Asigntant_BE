@@ -298,13 +298,14 @@ def application_page(owner_id, domain, status, q, page, page_size, request_id):
 def list_my_applications(
     domain: ApplicationDomain | None = None,
     status: ApplicationStatus | None = None,
+    q: str | None = Query(default=None, max_length=100),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
     current_user: CurrentUser = Depends(get_current_user),
     x_request_id: str | None = Header(default=None),
 ):
     """Hồ sơ của người đang đăng nhập (chủ lấy từ JWT, không nhận user_id từ client)."""
-    return application_page(current_user.id, domain, status, None, page, page_size, make_request_id(x_request_id))
+    return application_page(current_user.id, domain, status, q, page, page_size, make_request_id(x_request_id))
 
 
 @router.get("/applications/summary")
@@ -364,6 +365,81 @@ def submit_application(
     return {"data": record, "error": None, "request_id": req_id}
 
 
+@router.get("/applications/lookup/{code_or_id}")
+def lookup_application(
+    code_or_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    x_request_id: str | None = Header(default=None),
+):
+    """
+    Tra cứu chi tiết tờ đơn hồ sơ bằng mã hồ sơ (ví dụ: DD-001-811F7E21),
+    tiền tố ID hoặc UUID đầy đủ.
+    Trả về toàn bộ dữ liệu form_data công dân đã kê khai và cấu trúc biểu mẫu chính thức.
+    """
+    req_id = make_request_id(x_request_id)
+    owner_id = None if current_user.role == "admin" else current_user.id
+    result = ProcedureApplicationService.lookup_application(code_or_id=code_or_id, owner_id=owner_id)
+    if not result:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "data": None,
+                "error": {
+                    "code": "APPLICATION_NOT_FOUND",
+                    "message": f"Không tìm thấy hồ sơ với mã '{code_or_id}'. Vui lòng kiểm tra lại mã tra cứu.",
+                },
+                "request_id": req_id,
+            },
+        )
+    return {
+        "data": result,
+        "error": None,
+        "request_id": req_id,
+    }
+
+
+@router.get("/applications/lookup/{code_or_id}/export-pdf")
+def export_application_pdf(
+    code_or_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    x_request_id: str | None = Header(default=None),
+):
+    """
+    Xuất tờ đơn hồ sơ đã kê khai hoàn chỉnh dưới dạng file PDF chuẩn A4 chính thức.
+    Sử dụng server-side rendering với font tiếng Việt, không chứa URL hay thành phần web.
+    """
+    req_id = make_request_id(x_request_id)
+    owner_id = None if current_user.role == "admin" else current_user.id
+    result = ProcedureApplicationService.lookup_application(code_or_id=code_or_id, owner_id=owner_id)
+    if not result:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "data": None,
+                "error": {
+                    "code": "APPLICATION_NOT_FOUND",
+                    "message": f"Không tìm thấy hồ sơ với mã '{code_or_id}'. Vui lòng kiểm tra lại mã tra cứu.",
+                },
+                "request_id": req_id,
+            },
+        )
+
+    from app.services.pdf_export_service import generate_application_dossier_pdf
+
+    pdf_bytes = generate_application_dossier_pdf(result)
+    app_code = result.get("application_code") or code_or_id
+    filename = f"To-don-{app_code}.pdf"
+    filename_encoded = quote(filename)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}",
+            "X-Request-ID": req_id,
+        },
+    )
+
+
 @router.get("/applications/{domain}/{record_id}")
 def get_application_record(
     domain: str,
@@ -389,6 +465,10 @@ def get_application_record(
 
     owner_id = None if current_user.role == "admin" else current_user.id
     record = ProcedureApplicationService.get_application_record(domain=domain_clean, record_id=record_id, owner_id=owner_id)
+    if not record:
+        lookup_res = ProcedureApplicationService.lookup_application(code_or_id=record_id, owner_id=owner_id)
+        if lookup_res and lookup_res.get("record"):
+            record = lookup_res["record"]
     if not record:
         return JSONResponse(
             status_code=404,

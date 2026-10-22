@@ -150,7 +150,7 @@
     },
     {
       "key": "coop-branch-registration",
-      "code": null,
+      "code": "HTX-001",
       "procedure_id": null,
       "name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã",
       "domain": "cooperative",
@@ -158,7 +158,7 @@
     },
     {
       "key": "vat-declaration",
-      "code": null,
+      "code": "DN-012",
       "procedure_id": null,
       "name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ",
       "domain": "business",
@@ -166,7 +166,7 @@
     },
     {
       "key": "household-certificate-reissue",
-      "code": null,
+      "code": "HKD-003",
       "procedure_id": null,
       "name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
       "domain": "business",
@@ -174,7 +174,7 @@
     },
     {
       "key": "social-insurance-authorization",
-      "code": null,
+      "code": "BHXH-001",
       "procedure_id": null,
       "name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội",
       "domain": "social_insurance",
@@ -182,7 +182,7 @@
     },
     {
       "key": "land-allocation-rental",
-      "code": null,
+      "code": "DD-013",
       "procedure_id": null,
       "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng",
       "domain": "land",
@@ -190,7 +190,7 @@
     },
     {
       "key": "land-survey",
-      "code": null,
+      "code": "DD-015",
       "procedure_id": null,
       "name": "Yêu cầu đo đạc đất",
       "domain": "land",
@@ -198,7 +198,7 @@
     },
     {
       "key": "agricultural-land-term-confirmation",
-      "code": null,
+      "code": "DD-016",
       "procedure_id": null,
       "name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp",
       "domain": "land",
@@ -206,7 +206,7 @@
     },
     {
       "key": "land-allocation-method-change",
-      "code": null,
+      "code": "DD-017",
       "procedure_id": null,
       "name": "Chuyển hình thức giao đất, cho thuê đất",
       "domain": "land",
@@ -214,7 +214,7 @@
     },
     {
       "key": "land-dispute-mediation",
-      "code": null,
+      "code": "DD-014",
       "procedure_id": null,
       "name": "Hòa giải tranh chấp đất đai",
       "domain": "land",

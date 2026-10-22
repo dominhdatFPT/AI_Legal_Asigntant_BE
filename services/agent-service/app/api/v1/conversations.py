@@ -9,7 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, raw_access_token
 from app.core.auth import TokenPayload
 from app.core.database import get_db
 from app.models import Conversation
@@ -22,7 +22,7 @@ from app.schemas.conversation import (
     Pagination,
 )
 from app.schemas.message import MessageOut, SendMessageRequest, SendMessageResponse
-from app.services import agent, llm_client, rag_client
+from app.services import agent, document_client, llm_client, rag_client
 
 logger = logging.getLogger(__name__)
 
@@ -130,25 +130,47 @@ def _load_for_chat(db: Session, conversation_id: uuid.UUID, user: TokenPayload):
     return conversation, history
 
 
+async def _load_documents(payload: SendMessageRequest, token: str | None, request_id: str) -> list[dict] | None:
+    """Chữ đã trích của các tài liệu đính kèm. Quyền chủ file do document-service kiểm tra bằng token người dùng."""
+    if not payload.document_ids:
+        return None
+    if not token:
+        raise _error(401, "UNAUTHORIZED", "Bạn cần đăng nhập để tiếp tục.")
+    try:
+        return await document_client.get_extractions(payload.document_ids, token, request_id)
+    except document_client.DocumentNotFound:
+        # Không phân biệt "không tồn tại" và "của người khác" để không lộ file của người khác
+        raise _error(404, "DOCUMENT_NOT_FOUND", "Không tìm thấy tài liệu.")
+    except document_client.DocumentNotReady as e:
+        raise _error(409, "DOCUMENT_NOT_READY", str(e))
+    except document_client.DocumentServiceError:
+        logger.exception("document-service lỗi, request_id=%s", request_id)
+        raise _error(503, "DOCUMENT_SERVICE_ERROR", "Không đọc được tài liệu lúc này, vui lòng thử lại sau.")
+
+
 @router.post("/{conversation_id}/messages")
 async def send_message(
     conversation_id: uuid.UUID,
     payload: SendMessageRequest,
     user: TokenPayload = Depends(get_current_user),
+    token: str | None = Depends(raw_access_token),
     db: Session = Depends(get_db),
     x_request_id: str | None = Header(default=None),
 ):
     """
-    1. Kiểm tra quyền, lấy lịch sử  2. RAG + Gemini  3. Lưu câu hỏi và câu trả lời (1 transaction).
-    RAG hoặc Gemini lỗi thì không lưu gì, người dùng gửi lại được.
+    1. Kiểm tra quyền, lấy lịch sử  2. Lấy chữ tài liệu đính kèm (nếu có)  3. RAG + LLM
+    4. Lưu câu hỏi và câu trả lời (1 transaction).
+    Tài liệu, RAG hoặc LLM lỗi thì không lưu gì, người dùng gửi lại được. Không lưu nội dung tài liệu, chỉ lưu document_ids.
     Truy vấn DB đồng bộ nên chạy trong threadpool để không chặn event loop khi chờ Gemini.
     """
     request_id = _request_id(x_request_id)
     conversation, history = await run_in_threadpool(_load_for_chat, db, conversation_id, user)
+    # Lấy tài liệu trước RAG/LLM: tài liệu lỗi thì khỏi tốn lượt gọi AI
+    documents = await _load_documents(payload, token, request_id)
     asked_at = datetime.now(timezone.utc)
 
     try:
-        result = await agent.process_message(payload.content, history, request_id=request_id)
+        result = await agent.process_message(payload.content, history, request_id=request_id, documents=documents)
     except rag_client.RAGError:
         logger.exception("RAG lỗi, request_id=%s", request_id)
         raise _error(503, "RAG_SERVICE_ERROR", "Không thể truy xuất dữ liệu pháp luật lúc này, vui lòng thử lại.")
@@ -156,9 +178,12 @@ async def send_message(
         logger.exception("Gemini lỗi, request_id=%s", request_id)
         raise _error(503, "AI_SERVICE_ERROR", "Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.")
 
+    metadata = result["metadata"]
+    if payload.document_ids:
+        metadata = {**metadata, "document_ids": [str(i) for i in payload.document_ids]}
     user_message, assistant_message = await run_in_threadpool(
         repo.add_message_pair, db, conversation,
-        payload.content, result["content"], result["metadata"], asked_at,
+        payload.content, result["content"], metadata, asked_at,
     )
     data = SendMessageResponse(
         user_message=MessageOut.model_validate(user_message),

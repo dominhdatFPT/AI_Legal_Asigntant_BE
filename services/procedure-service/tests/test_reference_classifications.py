@@ -12,18 +12,19 @@ class ReferenceClassificationTests(unittest.TestCase):
         for item in data['items']:
             self.assertIn(item['domain'], domains)
             self.assertTrue(item['name'])
-            if item['kind'] == 'document_classification':
-                self.assertIsNone(item['code'])
-                self.assertIsNone(item['procedure_id'])
-            else:
+            self.assertTrue(item['code'])
+            if item['kind'] != 'document_classification':
                 self.assertEqual(item['code'], item['key'])
                 self.assertTrue(item['procedure_id'])
 
     def test_mismatched_sources_have_distinct_classifications(self):
         by_key = {i['key']: i for i in document_classifications()['items']}
         self.assertEqual(by_key['social-insurance-authorization']['domain'], 'social_insurance')
+        self.assertEqual(by_key['social-insurance-authorization']['code'], 'BHXH-001')
         self.assertEqual(by_key['coop-branch-registration']['domain'], 'cooperative')
+        self.assertEqual(by_key['coop-branch-registration']['code'], 'HTX-001')
         self.assertIn('hộ kinh doanh', by_key['household-certificate-reissue']['name'])
+        self.assertEqual(by_key['household-certificate-reissue']['code'], 'HKD-003')
         self.assertNotIn('DN-001', by_key)
         self.assertNotIn('DN-010', by_key)
 

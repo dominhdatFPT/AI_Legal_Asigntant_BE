@@ -80,6 +80,48 @@ class TestRecordPersistence(unittest.TestCase):
         self.assertEqual(fetched["form_data"]["main_business_lines"], "Bán lẻ hàng tạp phẩm, nước giải khát")
         print(f"\n[PASS] Saved & Retrieved Business record ID: {record_id}")
 
+    def test_03_lookup_by_code_and_short_id(self):
+        form_data = valid_form(
+            "DD-001",
+            applicant_name="Bùi Võ Đức Trọng",
+            applicant_id_number="012345678901",
+            applicant_phone="0901234567",
+            plot_number="128",
+            map_sheet_number="14",
+            land_address="Số 10 Đường ABC, Phường 1, Quận 1, TP.HCM",
+            land_area=120.5,
+            land_use_purpose="Đất ở tại đô thị (ODT)",
+            land_use_origin="Nhận chuyển nhượng quyền sử dụng đất",
+        )
+        res = ProcedureService.submit_application(
+            procedure_code="DD-001",
+            user_id=OWNER,
+            status="submitted",
+            form_data=form_data,
+        )
+        record_id = res["id"]
+        short_id = record_id[:8].upper()
+        composite_code = f"DD-001-{short_id}"
+
+        # 1. Lookup bằng mã ghép chuẩn (DD-001-XXXXXXXX)
+        lookup1 = ProcedureService.lookup_application(composite_code, owner_id=OWNER)
+        self.assertIsNotNone(lookup1)
+        self.assertEqual(lookup1["application_code"], composite_code)
+        self.assertEqual(lookup1["record"]["applicant_name"], "Bùi Võ Đức Trọng")
+        self.assertEqual(lookup1["record"]["form_data"]["plot_number"], "128")
+        self.assertIsNotNone(lookup1["schema"])
+
+        # 2. Lookup bằng tiền tố 8 ký tự
+        lookup2 = ProcedureService.lookup_application(short_id, owner_id=OWNER)
+        self.assertIsNotNone(lookup2)
+        self.assertEqual(lookup2["record"]["id"], record_id)
+
+        # 3. Lookup bằng full UUID
+        lookup3 = ProcedureService.lookup_application(record_id, owner_id=OWNER)
+        self.assertIsNotNone(lookup3)
+        self.assertEqual(lookup3["record"]["id"], record_id)
+        print(f"\n[PASS] Lookup by composite code '{composite_code}' succeeded with full form_data!")
+
 
 if __name__ == "__main__":
     unittest.main()

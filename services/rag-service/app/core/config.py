@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Thêm thuật ngữ luật vào câu hỏi trước khi tìm ("sổ đỏ" -> "Giấy chứng nhận quyền sử dụng đất"),
     # xem app/services/query_expansion.py. Tắt (false) để so sánh khi chạy scripts/eval_retrieval.py
     query_expansion_enabled: bool = True
+    # Câu hỏi nhiều ý ("tách thửa rồi tặng cho con, thời hạn sử dụng đất thế nào") thì tìm thêm theo từng ý,
+    # xem app/services/query_split.py. Tắt (false) để so sánh khi chạy scripts/eval_retrieval.py --multi
+    query_split_enabled: bool = True
     # Mở sẵn kết nối DB và gọi thử embedding khi service khởi động, để câu hỏi đầu tiên không bị chậm
     warmup_on_startup: bool = True
 

@@ -9,6 +9,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from common_auth import ALGORITHM, ISSUER
 
 
+@pytest.fixture(autouse=True)
+def no_real_ekyc(monkeypatch):
+    # procedure-service nạp .env thật khi import; test không được gọi VNPT thật (tính phí). Test cần thì tự bật.
+    for name in ("EKYC_ENABLED", "EKYC_ACCESS_TOKEN", "EKYC_TOKEN_ID", "EKYC_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(scope="session")
 def service_key_pair():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

@@ -8,6 +8,7 @@ Cách chạy (ở thư mục gốc legal-assistant-ai, đã bật venv, .env có
     python services/rag-service/scripts/eval_retrieval.py              # cấu hình hiện tại
     python services/rag-service/scripts/eval_retrieval.py --compare    # so sánh tắt/bật đổi từ đời thường
     python services/rag-service/scripts/eval_retrieval.py --top-k 4 -v # in từng câu
+    python services/rag-service/scripts/eval_retrieval.py --multi      # câu nhiều ý: so sánh tắt/bật tách câu hỏi
 
 Chạy trong Docker (không cần venv), ở thư mục gốc:
     docker compose run --rm -v ./services/rag-service/scripts:/app/scripts rag-service python scripts/eval_retrieval.py --compare
@@ -31,6 +32,9 @@ except ImportError:
     pass
 
 QUESTIONS = Path(__file__).resolve().parent / "eval_questions.json"
+# Câu nhiều ý ghép từ các câu trong eval_questions.json (đáp án Điều lấy nguyên từ đó). Mỗi câu có "parts":
+# một ý được "phủ" khi trong top_k có đoạn đúng văn bản + đúng Điều của ý đó.
+MULTI_QUESTIONS = Path(__file__).resolve().parent / "eval_multi_questions.json"
 
 
 def is_hit(chunk: dict, item: dict) -> bool:
@@ -39,8 +43,10 @@ def is_hit(chunk: dict, item: dict) -> bool:
     return same_doc and (chunk.get("section_info") or {}).get("dieu") in item["dieu"]
 
 
-def run(questions: list[dict], top_k: int, expansion: bool, verbose: bool) -> dict:
+def run(questions: list[dict], top_k: int, expansion: bool, verbose: bool, split: bool | None = None) -> dict:
     os.environ["QUERY_EXPANSION_ENABLED"] = "true" if expansion else "false"
+    if split is not None:
+        os.environ["QUERY_SPLIT_ENABLED"] = "true" if split else "false"
     from app.core.config import get_settings
     from app.core.database import get_session
     from app.services.embedding import get_embedder
@@ -50,11 +56,21 @@ def run(questions: list[dict], top_k: int, expansion: bool, verbose: bool) -> di
     embedder = get_embedder()
     db = get_session()
     hits, rr, seconds = 0, 0.0, 0.0
+    parts_total = parts_covered = 0
     try:
         for i, item in enumerate(questions, 1):
             started = time.perf_counter()
             chunks = search_chunks(db, embedder, item["q"], top_k)
             seconds += time.perf_counter() - started
+            if "parts" in item:  # câu nhiều ý: "trúng" khi phủ đủ mọi ý
+                covered = sum(any(is_hit(c, part) for c in chunks) for part in item["parts"])
+                parts_total += len(item["parts"])
+                parts_covered += covered
+                hits += covered == len(item["parts"])
+                if verbose:
+                    found = ", ".join(f"Đ.{(c.get('section_info') or {}).get('dieu')}" for c in chunks)
+                    print(f"[{i:2}] phủ {covered}/{len(item['parts'])} ý | {item['q']}\n      tìm được: {found}")
+                continue
             rank = next((r for r, c in enumerate(chunks, 1) if is_hit(c, item)), None)
             hits += rank is not None
             rr += 1 / rank if rank else 0
@@ -68,7 +84,8 @@ def run(questions: list[dict], top_k: int, expansion: bool, verbose: bool) -> di
     finally:
         db.close()
     n = len(questions)
-    return {"hit": hits, "n": n, "mrr": rr / n, "avg_s": seconds / n}
+    return {"hit": hits, "n": n, "mrr": rr / n, "avg_s": seconds / n,
+            "parts_covered": parts_covered, "parts_total": parts_total}
 
 
 def main() -> int:
@@ -76,7 +93,21 @@ def main() -> int:
     p.add_argument("--top-k", type=int, default=4, help="giống RAG_TOP_K bên agent-service (mặc định 4)")
     p.add_argument("--compare", action="store_true", help="chạy 2 lần: tắt và bật đổi từ đời thường")
     p.add_argument("-v", "--verbose", action="store_true", help="in kết quả từng câu")
+    p.add_argument("--multi", action="store_true", help="câu nhiều ý: chạy 2 lần, tắt và bật tách câu hỏi")
     args = p.parse_args()
+
+    if args.multi:
+        from app.core.config import get_settings
+
+        questions = json.loads(MULTI_QUESTIONS.read_text(encoding="utf-8"))
+        expansion = get_settings().query_expansion_enabled
+        for split in (False, True):
+            label = "BẬT tách câu hỏi" if split else "TẮT tách câu hỏi"
+            print(f"\n=== {label}, top_k={args.top_k}, {len(questions)} câu nhiều ý ===")
+            r = run(questions, args.top_k, expansion, args.verbose, split=split)
+            print(f"đủ mọi ý: {r['hit']}/{r['n']} câu | phủ được {r['parts_covered']}/{r['parts_total']} ý "
+                  f"({r['parts_covered'] / r['parts_total']:.0%}) | trung bình {r['avg_s']:.2f}s/câu")
+        return 0
 
     questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
     modes = [False, True] if args.compare else [None]

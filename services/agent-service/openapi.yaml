@@ -211,6 +211,13 @@ paths:
         5. Trả về cả hai tin nhắn
 
         Nếu `title` của hội thoại đang `null`, service tự sinh từ nội dung câu hỏi đầu tiên.
+
+        **Đính kèm tài liệu (tùy chọn):** gửi `document_ids` (tối đa 3, không trùng) là các tài liệu đã upload
+        ở document-service và đã trích chữ xong. Service lấy chữ từ document-service bằng chính access token của
+        người dùng (document-service tự kiểm tra chủ file), đưa vào prompt cho AI phân tích và đối chiếu với luật.
+        Nội dung tài liệu **không được lưu**, chỉ lưu `document_ids` vào `metadata` của tin nhắn trả lời.
+        Lượt hỏi sau muốn dùng lại tài liệu thì gửi lại `document_ids`. Có tài liệu thì câu dạng "Điều 45 Luật Đất đai"
+        không còn trả nguyên văn mà đi qua AI. Tài liệu, RAG hoặc AI lỗi thì không lưu tin nhắn nào.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -222,8 +229,16 @@ paths:
         content:
           application/json:
             schema: { $ref: "#/components/schemas/SendMessageRequest" }
-            example:
-              content: Thủ tục sang tên đất cần những giấy tờ gì?
+            examples:
+              hoi_thuong:
+                summary: Câu hỏi thường
+                value:
+                  content: Thủ tục sang tên đất cần những giấy tờ gì?
+              kem_tai_lieu:
+                summary: Hỏi kèm tài liệu đã upload
+                value:
+                  content: Hợp đồng này có điểm nào chưa phù hợp với luật không?
+                  document_ids: [88888888-8888-4888-8888-888888888888]
       responses:
         "200":
           description: Phản hồi từ AI kèm tin nhắn của người dùng đã được lưu
@@ -253,10 +268,57 @@ paths:
                 request_id: req-123
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/ConversationForbidden" }
-        "404": { $ref: "#/components/responses/ConversationNotFound" }
+        "404":
+          description: Không có hội thoại, hoặc (khi gửi `document_ids`) không có tài liệu / tài liệu không phải của người dùng
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                hoi_thoai:
+                  summary: Không có hội thoại
+                  value:
+                    data: null
+                    error:
+                      code: CONVERSATION_NOT_FOUND
+                      message: Không tìm thấy hội thoại.
+                    request_id: req-123
+                tai_lieu:
+                  summary: Không có tài liệu (cũng là kết quả khi tài liệu của người khác, để không lộ file tồn tại)
+                  value:
+                    data: null
+                    error:
+                      code: DOCUMENT_NOT_FOUND
+                      message: Không tìm thấy tài liệu.
+                    request_id: req-123
+        "409":
+          description: Tài liệu chưa trích chữ xong, hoặc không đọc được / không đạt kiểm tra an toàn (`document_ids`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                dang_xu_ly:
+                  summary: Đang xử lý, thử lại sau vài giây
+                  value:
+                    data: null
+                    error:
+                      code: DOCUMENT_NOT_READY
+                      message: Tài liệu đang xử lý, vui lòng thử lại sau.
+                    request_id: req-123
+                khong_doc_duoc:
+                  summary: Thử lại cũng không được, cần tải tài liệu khác
+                  value:
+                    data: null
+                    error:
+                      code: DOCUMENT_NOT_READY
+                      message: Không đọc được nội dung tài liệu hoặc tài liệu không đạt kiểm tra an toàn, vui lòng tải tài liệu khác.
+                    request_id: req-123
         "422": { $ref: "#/components/responses/ValidationError" }
         "503":
-          description: RAG-service hoặc Gemini không phản hồi
+          description: RAG-service, Gemini hoặc document-service không phản hồi
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
@@ -279,6 +341,14 @@ paths:
                       code: AI_SERVICE_ERROR
                       message: Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.
                     request_id: req-124
+                tai_lieu_loi:
+                  summary: document-service lỗi (chỉ khi gửi document_ids)
+                  value:
+                    data: null
+                    error:
+                      code: DOCUMENT_SERVICE_ERROR
+                      message: Không đọc được tài liệu lúc này, vui lòng thử lại sau.
+                    request_id: req-125
         "500": { $ref: "#/components/responses/InternalError" }
 
 components:
@@ -534,6 +604,14 @@ components:
           minLength: 1
           maxLength: 2000
           description: Nội dung câu hỏi của người dùng
+        document_ids:
+          type: array
+          maxItems: 3
+          uniqueItems: true
+          items: { type: string, format: uuid }
+          description: |
+            Tài liệu đã upload (document-service) để AI đọc và đối chiếu với luật. Tối đa 3, không trùng.
+            Không gửi thì chạy như cũ. Chỉ chủ tài liệu dùng được; tài liệu phải trích chữ xong.
 
     # ---------- Kết quả từng API ----------
     ConversationResponse:

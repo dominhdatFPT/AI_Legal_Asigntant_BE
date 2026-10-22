@@ -14,6 +14,7 @@ from app.services.identity_images import MAX_IDENTITY_IMAGE, prepare_identity_pa
 from app.services.file_validation import MAX_MULTIPART
 from app.services.storage import Storage
 from app.services.local_ocr import LocalOcr
+from app.services.ekyc_ocr import build_provider
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ def get_identity_ocr():
         settings = Settings.from_env()
     except ConfigurationError as exc:
         raise DocumentError("CONFIGURATION_ERROR", str(exc)) from None
-    return IdentityOcr(Database(settings), Storage(settings), LocalOcr())
+    return IdentityOcr(Database(settings), Storage(settings), build_provider(LocalOcr()))
 
 
 @router.get("/identity-ocr/{session_id}")

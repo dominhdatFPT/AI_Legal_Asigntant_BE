@@ -67,3 +67,12 @@ def verify_id_token(token: str) -> FirebaseIdentity:
         picture=claims.get("picture"),
         provider=PROVIDERS.get(provider, provider),
     )
+
+def warmup_certs() -> None:
+    """Tải trước Google Public Keys vào cache để request đăng nhập đầu tiên không bị độ trễ mạng."""
+    try:
+        url = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+        _request(url, method="GET")
+        logger.info("Pre-warmed Firebase public keys cache successfully.")
+    except Exception as exc:
+        logger.warning("Không thể pre-warm Firebase public keys: %s", exc)

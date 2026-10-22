@@ -14,6 +14,7 @@ def settings_env(monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("RAG_SERVICE_URL", "http://rag-test:8000")
+    monkeypatch.setenv("DOCUMENT_SERVICE_URL", "http://document-test:8000")
     monkeypatch.setenv("INTERNAL_TOKEN", "test-internal-token")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")

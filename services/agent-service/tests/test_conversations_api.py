@@ -8,7 +8,7 @@ from app.api.deps import get_current_user
 from app.core.auth import TokenPayload
 from app.core.database import get_db
 from app.main import app
-from app.services import agent, llm_client, rag_client
+from app.services import agent, document_client, llm_client, rag_client
 
 USER_A = "11111111-1111-4111-8111-111111111111"
 USER_B = "22222222-2222-4222-8222-222222222222"
@@ -40,8 +40,11 @@ def client(db, current_user):
 def fake_agent(monkeypatch):
     calls = []
 
-    async def fake_process_message(user_content, history, request_id=None):
-        calls.append({"user_content": user_content, "history": history, "request_id": request_id})
+    async def fake_process_message(user_content, history, request_id=None, documents=None):
+        call = {"user_content": user_content, "history": history, "request_id": request_id}
+        if documents is not None:
+            call["documents"] = documents
+        calls.append(call)
         return AI_RESULT
 
     monkeypatch.setattr(agent, "process_message", fake_process_message)
@@ -160,6 +163,183 @@ def test_send_message_service_error_returns_503_and_saves_nothing(client, monkey
     assert r.status_code == 503
     assert r.json()["error"]["code"] == code
     assert client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"] == []
+
+
+# ── Tài liệu đính kèm (document_ids) ──────────────────────────────────────────
+
+DOC_A = "88888888-8888-4888-8888-888888888888"
+DOC_B = "99999999-9999-4999-8999-999999999999"
+USER_AUTH = {"Authorization": "Bearer user-token"}
+
+
+@pytest.fixture
+def fake_documents(monkeypatch):
+    """document-service giả: ghi lại token + id được hỏi, trả chữ của tài liệu."""
+    calls = []
+
+    async def fake_get_extractions(document_ids, token, request_id=None, transport=None):
+        calls.append({"ids": document_ids, "token": token, "request_id": request_id})
+        return [{"document_id": str(i), "source_kind": "docx", "text": f"Nội dung {i}"} for i in document_ids]
+
+    monkeypatch.setattr(document_client, "get_extractions", fake_get_extractions)
+    return calls
+
+
+@pytest.fixture
+def real_agent_prompts(monkeypatch, chunk):
+    """Chạy agent.process_message thật, chỉ giả RAG và LLM; trả về các system prompt đã gửi LLM."""
+    prompts = []
+
+    async def fake_search(query, top_k=5, request_id=None, transport=None):
+        return [chunk]
+
+    async def fake_generate(system_prompt, history, user_content):
+        prompts.append(system_prompt)
+        return "Hợp đồng có điểm chưa phù hợp...", 300, "gemini-test"
+
+    monkeypatch.setattr(rag_client, "search", fake_search)
+    monkeypatch.setattr(llm_client, "generate", fake_generate)
+    return prompts
+
+
+def test_send_message_with_documents_puts_text_in_llm_prompt_and_saves_only_ids(
+    client, fake_documents, real_agent_prompts,
+):
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers={**USER_AUTH, "X-Request-ID": "req-5"},
+                    json={"content": "Hợp đồng này có hợp lệ không?", "document_ids": [DOC_A, DOC_B]})
+
+    assert r.status_code == 200
+    # token của người dùng được chuyển tiếp nguyên vẹn, id giữ thứ tự
+    assert fake_documents == [{"ids": [uuid.UUID(DOC_A), uuid.UUID(DOC_B)], "token": "user-token", "request_id": "req-5"}]
+    assert f"Nội dung {DOC_A}" in real_agent_prompts[0] and f"Nội dung {DOC_B}" in real_agent_prompts[0]
+    assert r.json()["data"]["assistant_message"]["metadata"]["document_ids"] == [DOC_A, DOC_B]
+    assert r.json()["data"]["user_message"]["metadata"] is None
+
+    saved = client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"]
+    assert not any("Nội dung" in m["content"] for m in saved)  # nội dung tài liệu không được lưu
+    assert "Nội dung" not in str(saved[1]["metadata"])
+
+
+def test_send_message_with_cookie_token_forwards_it(client, fake_documents, fake_agent):
+    conversation_id = create(client)
+    client.cookies.set("access_token", "cookie-token")
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == 200
+    assert fake_documents[0]["token"] == "cookie-token"
+
+
+def test_send_message_with_documents_but_no_token_returns_401(client, fake_documents, fake_agent):
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == 401
+    assert fake_documents == [] and fake_agent == []
+
+
+def test_send_message_without_document_ids_behaves_as_before(client, fake_agent, fake_documents):
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Hỏi"})
+
+    assert r.status_code == 200
+    assert fake_documents == []  # không gọi document-service
+    assert "documents" not in fake_agent[0]
+    assert r.json()["data"]["assistant_message"]["metadata"] == AI_RESULT["metadata"]
+
+
+def test_send_message_with_empty_document_ids_behaves_as_before(client, fake_agent, fake_documents):
+    conversation_id = create(client)
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Hỏi", "document_ids": []})
+    assert r.status_code == 200
+    assert fake_documents == []
+    assert "document_ids" not in r.json()["data"]["assistant_message"]["metadata"]
+
+
+@pytest.mark.parametrize("error,status,code", [
+    (document_client.DocumentNotFound("x"), 404, "DOCUMENT_NOT_FOUND"),
+    (document_client.DocumentNotReady("Tài liệu đang xử lý, vui lòng thử lại sau."), 409, "DOCUMENT_NOT_READY"),
+    (document_client.DocumentServiceError("down"), 503, "DOCUMENT_SERVICE_ERROR"),
+])
+def test_document_error_returns_code_and_saves_nothing(client, monkeypatch, fake_agent, error, status, code):
+    async def broken(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(document_client, "get_extractions", broken)
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == status
+    assert r.json()["error"]["code"] == code
+    assert fake_agent == []  # không gọi AI
+    assert client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"] == []
+
+
+def test_not_ready_message_is_shown_to_user(client, monkeypatch, fake_agent):
+    async def not_ready(*args, **kwargs):
+        raise document_client.DocumentNotReady(document_client.NOT_READY_MESSAGE)
+
+    monkeypatch.setattr(document_client, "get_extractions", not_ready)
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert "đang xử lý" in r.json()["error"]["message"]
+
+
+def test_rag_error_with_documents_still_saves_nothing(client, monkeypatch, fake_documents):
+    async def broken(*args, **kwargs):
+        raise rag_client.RAGError("down")
+
+    monkeypatch.setattr(agent, "process_message", broken)
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == 503 and r.json()["error"]["code"] == "RAG_SERVICE_ERROR"
+    assert client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"] == []
+
+
+def test_documents_are_not_fetched_for_someone_elses_conversation(client, current_user, fake_documents, fake_agent):
+    conversation_id = create(client)
+    current_user["sub"] = USER_B
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == 403
+    assert fake_documents == []
+
+
+@pytest.mark.parametrize("document_ids", [
+    [DOC_A, DOC_B, str(uuid.uuid4()), str(uuid.uuid4())],  # quá 3 tài liệu
+    [DOC_A, DOC_A],                                        # trùng
+    ["khong-phai-uuid"],                                   # id sai
+])
+def test_invalid_document_ids_return_422(client, fake_documents, fake_agent, document_ids):
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "Hỏi", "document_ids": document_ids})
+
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert fake_documents == [] and fake_agent == []
+
+
+def test_three_documents_are_accepted(client, fake_documents, fake_agent):
+    conversation_id = create(client)
+    ids = [str(uuid.uuid4()) for _ in range(3)]
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH, json={"content": "Hỏi", "document_ids": ids})
+    assert r.status_code == 200
 
 
 @pytest.mark.parametrize("content", ["", "   ", "x" * 2001])

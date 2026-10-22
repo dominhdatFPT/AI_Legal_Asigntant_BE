@@ -229,3 +229,25 @@ def test_submit_and_get_applications(auth):
     assert res_bad_domain.status_code == 400
     assert res_bad_domain.json()["error"]["code"] == "INVALID_DOMAIN"
 
+    # Test lookup by composite code (e.g. DD-001-XXXXXXXX)
+    short_land_id = land_id[:8].upper()
+    comp_code = f"DD-001-{short_land_id}"
+    res_lookup = client.get(f"/api/v1/procedures/applications/lookup/{comp_code}", headers=headers)
+    assert res_lookup.status_code == 200
+    lookup_data = res_lookup.json()["data"]
+    assert lookup_data["application_code"] == comp_code
+    assert lookup_data["record"]["id"] == land_id
+    assert lookup_data["record"]["applicant_name"] == "Lê Văn C"
+    assert lookup_data["record"]["form_data"]["applicant_name"] == "Lê Văn C"
+    assert "schema" in lookup_data
+    assert "sections" in lookup_data["schema"]
+
+    # Test lookup by short id
+    res_lookup_short = client.get(f"/api/v1/procedures/applications/lookup/{short_land_id}", headers=headers)
+    assert res_lookup_short.status_code == 200
+    assert res_lookup_short.json()["data"]["record"]["id"] == land_id
+
+    # Test lookup not found
+    res_lookup_nf = client.get("/api/v1/procedures/applications/lookup/NON-EXISTENT-9999", headers=headers)
+    assert res_lookup_nf.status_code == 404
+

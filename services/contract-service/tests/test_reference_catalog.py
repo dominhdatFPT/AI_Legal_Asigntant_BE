@@ -48,10 +48,11 @@ class ReferenceCatalogTests(unittest.TestCase):
         by_source = {i['source_id']: i for i in snapshot()['items']}
         insurance = by_source['1DaLZxSM3DKJGfOgzSlaNrakDOpuum6LB']
         self.assertEqual(insurance['domain'], 'social_insurance')
-        self.assertIsNone(insurance['procedure_code'])
+        self.assertEqual(insurance['procedure_code'], 'BHXH-001')
         self.assertNotIn('DN-001', [p['code'] for p in insurance['procedures']])
         coop = by_source['1rMA2pUDJOscOMJrfh-SRoWs9MvwZDLS1']
         self.assertEqual(coop['domain'], 'cooperative')
+        self.assertEqual(coop['procedure_code'], 'HTX-001')
         self.assertNotIn('DN-010', [p['code'] for p in coop['procedures']])
         self.assertIn('một thành viên', by_source['1Y1LzRK0D3JLMTAj1rFlUJOscM6oGX3tF']['name'])
         self.assertIn('chuyển hình thức', by_source['1G5hN83wwi4yrdjG9D3-zEEAdnlPZNFd0']['name'])
