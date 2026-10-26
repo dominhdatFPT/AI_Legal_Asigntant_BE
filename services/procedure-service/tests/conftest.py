@@ -13,7 +13,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-# Schema rút gọn của database/001 + 003, đủ cột cho các query của service.
+# Schema rút gọn của database/001 + 003 + 007, đủ cột cho các query của service.
 TEST_SCHEMA = """
 CREATE TABLE public.procedure_domains (code TEXT PRIMARY KEY, name TEXT, description TEXT, icon TEXT,
     order_index INTEGER DEFAULT 0, is_active BOOLEAN DEFAULT 1);
@@ -36,6 +36,22 @@ CREATE TABLE public.business_procedure_records (id TEXT PRIMARY KEY, user_id TEX
     business_type TEXT, business_name_vn TEXT, business_code TEXT, headquarters_address TEXT, charter_capital INTEGER,
     form_data TEXT DEFAULT '{}', extra_data TEXT DEFAULT '{}',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE public.dynamic_form_templates (
+    id TEXT PRIMARY KEY,
+    template_group_id TEXT,
+    version INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'draft',
+    name TEXT,
+    code TEXT,
+    domain TEXT,
+    procedure_id TEXT,
+    content TEXT DEFAULT '{}',
+    created_by TEXT,
+    updated_by TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP
+);
 """
 
 PROCEDURES = [
@@ -99,7 +115,7 @@ def key_pair():
 
 @pytest.fixture
 def token(monkeypatch, key_pair):
-    """token(user_id, role="citizen", **claims) → access token ký bằng key test (chỉ trong RAM)."""
+    """token(user_id, role="citizen", **claims) -> access token ký bằng key test (chỉ trong RAM)."""
     from datetime import datetime, timedelta, timezone
 
     import jwt
@@ -120,5 +136,5 @@ def token(monkeypatch, key_pair):
 
 @pytest.fixture
 def auth(token):
-    """auth(user_id, role) → headers Authorization."""
+    """auth(user_id, role) -> headers Authorization."""
     return lambda user_id="11111111-1111-4111-8111-111111111111", role="citizen": {"Authorization": f"Bearer {token(user_id, role)}"}

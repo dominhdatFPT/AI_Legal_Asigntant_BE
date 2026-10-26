@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from app.schemas.form_schema import (
@@ -66,7 +66,7 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=True,
             placeholder="001095012345",
             section=section,
-            validation_regex="^[0-9]{9,12}$",
+            validation_regex="^[0-9]{12}$",
         ),
         FormField(
             name=f"{prefix}_id_issue_date",
@@ -90,7 +90,7 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=True,
             placeholder="0912345678",
             section=section,
-            validation_regex="^[0-9]{10,11}$",
+            validation_regex="^0[35789][0-9]{8}$",
         ),
         FormField(
             name=f"{prefix}_email",
@@ -99,6 +99,7 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=False,
             placeholder="example@gmail.com",
             section=section,
+            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name=f"{prefix}_permanent_address",
@@ -268,6 +269,7 @@ def get_business_info_block(section: str = "business") -> List[FormField]:
             required=True,
             placeholder="02838123456",
             section=section,
+            validation_regex="^0[0-9]{9,10}$",
         ),
         FormField(
             name="headquarters_email",
@@ -276,6 +278,7 @@ def get_business_info_block(section: str = "business") -> List[FormField]:
             required=False,
             placeholder="contact@company.vn",
             section=section,
+            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name="charter_capital",
@@ -383,7 +386,7 @@ def get_fields_mau_so_18(change_hint: Optional[str] = None) -> List[FormField]:
             required=True,
             placeholder="0912345678",
             section="applicant",
-            validation_regex="^[0-9]{10,11}$",
+            validation_regex="^0[35789][0-9]{8}$",
         ),
         FormField(
             name="applicant_email",
@@ -392,6 +395,7 @@ def get_fields_mau_so_18(change_hint: Optional[str] = None) -> List[FormField]:
             required=False,
             placeholder="example@gmail.com",
             section="applicant",
+            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name="change_content",
@@ -862,6 +866,7 @@ def get_fields_hkd_001() -> List[FormField]:
             required=True,
             placeholder="0912345678",
             section="business",
+            validation_regex="^0[0-9]{9,10}$",
         ),
         FormField(
             name="charter_capital",
@@ -1592,7 +1597,11 @@ def _format_error(field: FormField, value) -> Optional[str]:
             return "Phải là số."
     elif kind == FieldType.date:
         try:
-            date.fromisoformat(value)
+            d = date.fromisoformat(value)
+            if any(kw in field.name for kw in ("_dob", "date_of_birth", "_issue_date")):
+                vn_today = datetime.now(timezone(timedelta(hours=7))).date()
+                if d > vn_today:
+                    return "Ngày không được ở tương lai."
         except (TypeError, ValueError):
             return "Ngày phải theo dạng YYYY-MM-DD."
     elif kind == FieldType.checkbox:

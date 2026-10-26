@@ -34,6 +34,8 @@ tags:
     description: Hồ sơ người dùng đã nộp/lưu nháp (cần đăng nhập)
   - name: Form templates
     description: Kho mẫu đơn tham khảo (công khai, xem hoặc tải file mẫu)
+  - name: Dynamic form templates
+    description: Mẫu đơn dùng chung dựng bằng bộ thẻ (admin dựng, công dân điền và in PDF trên trình duyệt)
 
 paths:
   /procedures/health:
@@ -265,6 +267,196 @@ paths:
             image/png: { schema: { type: string, format: binary } }
         "404":
           description: Không có mẫu với id này (`TEMPLATE_NOT_FOUND`)
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates:
+    get:
+      tags: [Dynamic form templates]
+      operationId: listAdminDynamicFormTemplates
+      summary: (Admin) Danh sách mẫu đơn dùng chung, mọi version và trạng thái
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: domain, in: query, schema: { $ref: "#/components/schemas/DynamicFormDomain" } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DynamicFormStatus" } }
+        - { name: include_deleted, in: query, schema: { type: boolean, default: false } }
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+    post:
+      tags: [Dynamic form templates]
+      operationId: createDynamicFormTemplate
+      summary: (Admin) Tạo mẫu mới (version 1, draft)
+      description: Nháp chỉ kiểm tra mềm (cho phép mục/thẻ rỗng, trường tự do chưa có tiêu đề).
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/DynamicFormContent" } }
+      responses:
+        "201": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates/{template_id}:
+    parameters:
+      - $ref: "#/components/parameters/DynamicTemplateId"
+    get:
+      tags: [Dynamic form templates]
+      operationId: getAdminDynamicFormTemplate
+      summary: (Admin) Chi tiết một version (kể cả nháp, đã xóa)
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+    put:
+      tags: [Dynamic form templates]
+      operationId: updateDynamicFormTemplate
+      summary: (Admin) Sửa bản nháp
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: "#/components/schemas/DynamicFormContent" } }
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "409": { $ref: "#/components/responses/DynamicFormTemplateConflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+    delete:
+      tags: [Dynamic form templates]
+      operationId: deleteDynamicFormTemplate
+      summary: (Admin) Xóa mềm (đặt deleted_at)
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      responses:
+        "204": { description: Đã xóa mềm }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates/{template_id}/publish:
+    post:
+      tags: [Dynamic form templates]
+      operationId: publishDynamicFormTemplate
+      summary: (Admin) Xuất bản bản nháp hoặc bản đang ẩn
+      description: |
+        Kiểm tra đầy đủ trước khi xuất bản (có mục, mục có tên và thẻ, trường tự do có tiêu đề, select có options);
+        lỗi trả 422 kèm `details[{field, message}]`. Bản published/hidden khác cùng nhóm chuyển `archived`.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DynamicTemplateId"
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "409": { $ref: "#/components/responses/DynamicFormTemplateConflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates/{template_id}/hide:
+    post:
+      tags: [Dynamic form templates]
+      operationId: hideDynamicFormTemplate
+      summary: (Admin) Ẩn mẫu đang xuất bản khỏi công dân
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DynamicTemplateId"
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "409": { $ref: "#/components/responses/DynamicFormTemplateConflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates/{template_id}/new-version:
+    post:
+      tags: [Dynamic form templates]
+      operationId: newVersionDynamicFormTemplate
+      summary: (Admin) Tạo bản nháp mới cùng nhóm (chép content)
+      description: Nhóm đã có bản nháp chưa xóa thì trả lại bản đó với 200, không tạo thêm.
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DynamicTemplateId"
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "201": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/admin/form-templates/{template_id}/restore:
+    post:
+      tags: [Dynamic form templates]
+      operationId: restoreDynamicFormTemplate
+      summary: (Admin) Khôi phục bản đã xóa mềm, giữ nguyên status
+      x-status: implemented
+      security: [{ BearerAuth: [] }, { CookieAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DynamicTemplateId"
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "409": { $ref: "#/components/responses/DynamicFormTemplateConflict" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/form-templates:
+    get:
+      tags: [Dynamic form templates]
+      operationId: listPublishedDynamicFormTemplates
+      summary: Danh sách mẫu đơn dùng chung đang xuất bản (công khai)
+      description: Chỉ bản `published` chưa xóa, mỗi nhóm một bản mới nhất.
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - { name: domain, in: query, schema: { $ref: "#/components/schemas/DynamicFormDomain" } }
+        - { name: procedure_id, in: query, schema: { type: string, example: DD-001 } }
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateList" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503": { $ref: "#/components/responses/DbUnavailable" }
+
+  /procedures/form-templates/{template_id}:
+    get:
+      tags: [Dynamic form templates]
+      operationId: getPublishedDynamicFormTemplate
+      summary: Chi tiết mẫu đơn đang xuất bản (công khai)
+      x-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/DynamicTemplateId"
+      responses:
+        "200": { $ref: "#/components/responses/DynamicFormTemplateOne" }
+        "404": { $ref: "#/components/responses/DynamicFormTemplateNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
         "503": { $ref: "#/components/responses/DbUnavailable" }
 
   /procedures/{procedure_id}:
@@ -683,6 +875,12 @@ components:
       in: query
       description: Số hồ sơ mỗi trang.
       schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+    DynamicTemplateId:
+      name: template_id
+      in: path
+      required: true
+      description: id một version của mẫu đơn dùng chung. Không phải UUID → 422.
+      schema: { type: string, format: uuid }
 
   headers:
     RequestId:
@@ -750,6 +948,51 @@ components:
               code: PROCEDURE_DB_UNAVAILABLE
               message: Không kết nối được cơ sở dữ liệu thủ tục, vui lòng thử lại sau.
             request_id: req-123
+    DynamicFormTemplateOne:
+      description: Một version mẫu đơn dùng chung
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error, request_id]
+            properties:
+              data: { $ref: "#/components/schemas/DynamicFormTemplate" }
+              error: { $ref: "#/components/schemas/NoError" }
+              request_id: { $ref: "#/components/schemas/RequestIdValue" }
+    DynamicFormTemplateList:
+      description: Danh sách mẫu đơn dùng chung (không phân trang, số mẫu ít)
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, error, request_id]
+            properties:
+              data:
+                type: object
+                required: [items, total]
+                properties:
+                  total: { type: integer, minimum: 0 }
+                  items: { type: array, items: { $ref: "#/components/schemas/DynamicFormTemplate" } }
+              error: { $ref: "#/components/schemas/NoError" }
+              request_id: { $ref: "#/components/schemas/RequestIdValue" }
+    DynamicFormTemplateNotFound:
+      description: Không có mẫu (hoặc đã xóa / chưa xuất bản với API công khai)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error: { code: TEMPLATE_NOT_FOUND, message: Không tìm thấy mẫu đơn. }
+            request_id: req-123
+    DynamicFormTemplateConflict:
+      description: Sai trạng thái (`TEMPLATE_NOT_DRAFT` khi sửa bản không phải nháp, `INVALID_STATUS` cho publish/hide/restore)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error: { code: TEMPLATE_NOT_DRAFT, message: Chỉ sửa được bản nháp. Hãy tạo phiên bản mới. }
+            request_id: req-123
 
   schemas:
     # ---------- Kiểu dùng chung ----------
@@ -771,6 +1014,71 @@ components:
         page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
         total: { type: integer, minimum: 0, example: 1 }
         total_pages: { type: integer, minimum: 0, example: 1 }
+
+    # ---------- Mẫu đơn dùng chung (dynamic_form_templates, database/007) ----------
+    DynamicFormDomain:
+      type: string
+      enum: [dat_dai, ho_kinh_doanh, doanh_nghiep]
+    DynamicFormStatus:
+      type: string
+      enum: [draft, published, hidden, archived]
+    DynamicFormField:
+      type: object
+      required: [key, type]
+      properties:
+        key: { type: string, pattern: "^[a-z][a-z0-9_]*$", example: full_name }
+        label: { type: string, maxLength: 255, example: Họ và tên }
+        type: { type: string, enum: [text, textarea, number, date, past_date, dob, issue_date, cccd, phone, email, select] }
+        required: { type: boolean, default: true }
+        autofill: { type: string, nullable: true, pattern: "^profile\\.[a-z_]+$", example: profile.full_name }
+        options: { type: array, nullable: true, items: { type: string } }
+    DynamicFormBlock:
+      type: object
+      required: [instance_id, block_key, order]
+      properties:
+        instance_id: { type: string, pattern: "^[a-z_]+_[0-9]+$", example: personal_info_1 }
+        block_key:
+          type: string
+          enum: [personal_info, dob, cccd, address, phone, email, tax_code, organization, business_lines, land_parcel, receiving_agency, free_field]
+        order: { type: integer, minimum: 1 }
+        fields: { type: array, items: { $ref: "#/components/schemas/DynamicFormField" } }
+    DynamicFormSection:
+      type: object
+      required: [id, order]
+      properties:
+        id: { type: string, pattern: "^sec_[0-9]+$", example: sec_1 }
+        title: { type: string, maxLength: 255, example: I. Bên ủy quyền }
+        order: { type: integer, minimum: 1 }
+        blocks: { type: array, items: { $ref: "#/components/schemas/DynamicFormBlock" } }
+    DynamicFormContent:
+      type: object
+      description: JSON mẫu do trang admin dựng (FE `form-blocks.js`). Tối đa 256 KB.
+      required: [name, domain]
+      properties:
+        schema_version: { type: integer, enum: [1], default: 1 }
+        name: { type: string, minLength: 1, maxLength: 255, example: Hợp đồng ủy quyền }
+        code: { type: string, nullable: true, maxLength: 50, example: HD-UQ }
+        domain: { $ref: "#/components/schemas/DynamicFormDomain" }
+        procedure_id: { type: string, nullable: true, example: DD-001 }
+        sections: { type: array, items: { $ref: "#/components/schemas/DynamicFormSection" } }
+    DynamicFormTemplate:
+      type: object
+      required: [id, template_group_id, version, status, name, domain, content, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        template_group_id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
+        status: { $ref: "#/components/schemas/DynamicFormStatus" }
+        name: { type: string }
+        code: { type: string, nullable: true }
+        domain: { $ref: "#/components/schemas/DynamicFormDomain" }
+        procedure_id: { type: string, nullable: true }
+        content: { $ref: "#/components/schemas/DynamicFormContent" }
+        created_by: { type: string, format: uuid, nullable: true }
+        updated_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time, nullable: true }
 
     ErrorBody:
       type: object

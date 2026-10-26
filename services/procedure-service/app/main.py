@@ -5,12 +5,26 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.database import get_engine
 from app.api.procedures import router as procedures_router
 from app.api.templates import router as templates_router
-from app.repositories.procedure_repository import FormDataInvalid, ProcedureDbUnavailable, ProcedureInvalidData
+from app.api.dynamic_form_templates import (
+    admin_router as dft_admin_router,
+    citizen_router as dft_citizen_router,
+)
+from app.core.exceptions import (
+    TemplateNotFoundError,
+    TemplateNotDraftError,
+    TemplateInvalidStatusError,
+)
+from app.repositories.procedure_repository import (
+    FormDataInvalid,
+    ProcedureDbUnavailable,
+    ProcedureInvalidData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +154,7 @@ async def invalid_data_handler(request: Request, exc: ProcedureInvalidData):
 
 @app.exception_handler(ProcedureDbUnavailable)
 async def db_unavailable_handler(request: Request, exc: ProcedureDbUnavailable):
+    logger.warning("Database thủ tục lỗi: %s - %s", type(exc).__name__, exc)
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
     return JSONResponse(
         status_code=503,
@@ -148,6 +163,58 @@ async def db_unavailable_handler(request: Request, exc: ProcedureDbUnavailable):
             "error": {
                 "code": "PROCEDURE_DB_UNAVAILABLE",
                 "message": "Không kết nối được cơ sở dữ liệu thủ tục, vui lòng thử lại sau.",
+            },
+            "request_id": req_id,
+        },
+    )
+
+
+# Repository mẫu đơn dùng chung không tự bắt lỗi DB (mất kết nối, chưa chạy 007...) → cùng 503 như trên.
+app.add_exception_handler(SQLAlchemyError, db_unavailable_handler)
+
+
+@app.exception_handler(TemplateNotFoundError)
+async def template_not_found_handler(request: Request, exc: TemplateNotFoundError):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    return JSONResponse(
+        status_code=404,
+        content={
+            "data": None,
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+            },
+            "request_id": req_id,
+        },
+    )
+
+
+@app.exception_handler(TemplateNotDraftError)
+async def template_not_draft_handler(request: Request, exc: TemplateNotDraftError):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    return JSONResponse(
+        status_code=409,
+        content={
+            "data": None,
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+            },
+            "request_id": req_id,
+        },
+    )
+
+
+@app.exception_handler(TemplateInvalidStatusError)
+async def template_invalid_status_handler(request: Request, exc: TemplateInvalidStatusError):
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    return JSONResponse(
+        status_code=409,
+        content={
+            "data": None,
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
             },
             "request_id": req_id,
         },
@@ -171,7 +238,18 @@ async def internal_error_handler(request: Request, exc: Exception):
     )
 
 
-# Kho mẫu đơn phải đăng ký trước procedures_router, nếu không "/templates" bị route "/{procedure_id}" bắt mất.
+# === MẪU ĐƠN DÙNG CHUNG (Dynamic Form Templates) ===
+# Mount TRƯỚC templates_router và procedures_router.
+# Lý do: procedures_router có route "/{procedure_id}" (catch-all) ở cuối;
+# nếu mount sau, request GET /form-templates bị nhầm thành procedure_id="form-templates" -> 404.
+app.include_router(dft_admin_router, prefix="/api/v1/procedures", tags=["Dynamic Form Templates - Admin"])
+app.include_router(dft_citizen_router, prefix="/api/v1/procedures", tags=["Dynamic Form Templates - Citizen"])
+# Alias không có /v1 (Nginx rewrite /api/procedures/ -> /api/v1/procedures/)
+app.include_router(dft_admin_router, prefix="/api/procedures", tags=["DFT Admin Alias"], include_in_schema=False)
+app.include_router(dft_citizen_router, prefix="/api/procedures", tags=["DFT Citizen Alias"], include_in_schema=False)
+
+# Kho mẫu đơn tham khảo file PDF/DOCX (templates_router)
 app.include_router(templates_router, prefix="/api/v1/procedures", tags=["Form templates"])
+# Thủ tục hành chính (procedures_router)
 app.include_router(procedures_router, prefix="/api/v1/procedures", tags=["Procedures"])
 app.include_router(procedures_router, prefix="/api/procedures", tags=["Procedures-Alias"], include_in_schema=False)

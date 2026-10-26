@@ -1,7 +1,14 @@
 from app.services.procedure_form_service import get_procedure_form_schema
 
 # Giá trị khớp các validation_regex đang có trong schema.
-REGEX_SAMPLES = {"^[0-9]{10,11}$": "0901234567", "^[0-9]{9,12}$": "012345678901"}
+REGEX_SAMPLES = {
+    "^[0-9]{10,11}$": "0901234567",
+    "^[0-9]{9,12}$": "012345678901",
+    "^0[35789][0-9]{8}$": "0901234567",
+    "^[0-9]{12}$": "012345678901",
+    "^0[0-9]{9,10}$": "02838123456",
+    r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$": "test@example.com",
+}
 
 
 def valid_form(code: str, **overrides) -> dict:

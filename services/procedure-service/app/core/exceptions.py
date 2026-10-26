@@ -35,3 +35,21 @@ class ApplicationPermissionError(ProcedureServiceException):
     """Người dùng không có quyền truy cập hoặc chỉnh sửa hồ sơ này."""
     def __init__(self, message: str = "Bạn không có quyền thao tác trên hồ sơ này.", code: str = "FORBIDDEN"):
         super().__init__(message, code)
+
+
+class TemplateNotFoundError(ProcedureServiceException):
+    """Mẫu đơn không tồn tại hoặc đã bị xóa."""
+    def __init__(self, message: str = "Không tìm thấy mẫu đơn.", code: str = "TEMPLATE_NOT_FOUND"):
+        super().__init__(message, code)
+
+
+class TemplateNotDraftError(ProcedureServiceException):
+    """Chỉ sửa được bản nháp."""
+    def __init__(self, message: str = "Chỉ sửa được bản nháp. Hãy tạo phiên bản mới.", code: str = "TEMPLATE_NOT_DRAFT"):
+        super().__init__(message, code)
+
+
+class TemplateInvalidStatusError(ProcedureServiceException):
+    """Thao tác không hợp lệ cho trạng thái hiện tại."""
+    def __init__(self, message: str = "Thao tác không phù hợp với trạng thái hiện tại của mẫu đơn.", code: str = "INVALID_STATUS"):
+        super().__init__(message, code)
