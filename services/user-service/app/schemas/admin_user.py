@@ -3,7 +3,6 @@
 import enum
 import uuid
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -65,7 +64,8 @@ class CreateUserRequest(BaseModel):
 class InternalChangeRoleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    role: Literal["lawyer"]
+    # Giá trị khác "lawyer" do route trả 403 (không phải 422) để Lawyer Service không đặt được vai trò khác.
+    role: str
 
 
 class ChangeRoleRequest(BaseModel):

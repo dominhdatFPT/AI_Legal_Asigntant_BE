@@ -302,3 +302,144 @@ def test_openrouter_header_chi_gui_khi_co_gia_tri(monkeypatch, site, app_name, e
         assert str(client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"
     finally:
         llm_client._get_openrouter_client.cache_clear()
+
+
+# ── Chế độ rà soát: giới hạn token, timeout và số lần thử lại ghi đè được từng lượt gọi ──
+
+REVIEW = {"max_output_tokens": 2000, "timeout_seconds": 40.0, "max_retries": 0}
+
+
+@pytest.fixture
+def timeouts(monkeypatch):
+    """Ghi lại timeout truyền vào asyncio.wait_for của llm_client."""
+    seen = []
+    real = asyncio.wait_for
+
+    async def spy(awaitable, timeout):
+        seen.append(timeout)
+        return await real(awaitable, timeout)
+
+    monkeypatch.setattr(llm_client.asyncio, "wait_for", spy)
+    return seen
+
+
+def test_gemini_review_options_apply(gemini, timeouts):
+    fake = gemini([_Resp("OK")])
+    assert asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))[0] == "OK"
+    assert fake.calls[0]["config"].max_output_tokens == 2000
+    assert timeouts == [40.0]
+
+
+def test_gemini_review_does_not_retry_same_provider(gemini):
+    fake = gemini([_api_error(503), _Resp("OK")])
+    with pytest.raises(llm_client.LLMError):
+        asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))
+    assert len(fake.calls) == 1 and gemini.sleeps == []
+
+
+def test_gemini_normal_mode_keeps_default_limits_and_retry(gemini, timeouts):
+    fake = gemini([_api_error(503), _Resp("OK")])
+    assert _run()[0] == "OK"
+    assert len(fake.calls) == 2 and gemini.sleeps == [2]
+    assert fake.calls[0]["config"].max_output_tokens == 800
+    assert timeouts == [15.0, 15.0]
+
+
+class _GroqMessage:
+    content = "Trả lời từ Groq"
+
+
+class _GroqResp:
+    choices = [type("C", (), {"message": _GroqMessage()})()]
+    usage = type("U", (), {"total_tokens": 77})()
+
+
+class FakeGroq:
+    def __init__(self, outcomes):
+        self.outcomes, self.calls = list(outcomes), []
+        self.chat = type("Chat", (), {"completions": self})()
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def _groq_error(status):
+    import httpx
+    import groq
+
+    request = httpx.Request("POST", "https://groq.test")
+    return groq.APIStatusError("lỗi giả", response=httpx.Response(status, request=request), body=None)
+
+
+@pytest.fixture
+def groq_only(monkeypatch):
+    from app.core.config import get_settings
+
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_MODEL", "groq-test")
+    get_settings.cache_clear()
+    monkeypatch.setattr(llm_client, "_sleep", fake_sleep)
+
+    def install(outcomes):
+        fake = FakeGroq(outcomes)
+        monkeypatch.setattr(llm_client, "_get_groq_client", lambda: fake)
+        return fake
+
+    install.sleeps = sleeps
+    return install
+
+
+def test_groq_review_options_apply_and_no_retry(groq_only, timeouts):
+    fake = groq_only([_groq_error(503), _GroqResp()])
+    with pytest.raises(llm_client.LLMError):
+        asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))
+    assert len(fake.calls) == 1 and groq_only.sleeps == []
+    assert fake.calls[0]["max_tokens"] == 2000 and timeouts == [40.0]
+
+
+def test_groq_normal_mode_keeps_default_limits_and_retry(groq_only, timeouts):
+    fake = groq_only([_groq_error(503), _GroqResp()])
+    assert _run()[0] == "Trả lời từ Groq"
+    assert len(fake.calls) == 2 and groq_only.sleeps == [2]
+    assert fake.calls[0]["max_tokens"] == 800 and timeouts == [15.0, 15.0]
+
+
+def test_review_falls_back_to_next_provider_with_review_options(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "groq,gemini")
+    get_settings.cache_clear()
+    calls = []
+
+    async def groq_fails(system_prompt, history, user_content, **options):
+        calls.append(("groq", options))
+        raise llm_client.LLMError("groq hỏng")
+
+    async def gemini_ok(system_prompt, history, user_content, **options):
+        calls.append(("gemini", options))
+        return "OK", 5
+
+    monkeypatch.setattr(llm_client, "_generate_groq", groq_fails)
+    monkeypatch.setattr(llm_client, "_generate_gemini", gemini_ok)
+
+    answer, _, model = asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))
+
+    assert (answer, model) == ("OK", "gemini-test")
+    assert calls == [("groq", REVIEW), ("gemini", REVIEW)]
+
+
+def test_openrouter_review_options_apply_and_no_retry(openrouter, timeouts):
+    fake = openrouter([_or_error(503), _or_resp()])
+    with pytest.raises(llm_client.LLMError):
+        asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))
+    assert len(fake.calls) == 1 and openrouter.sleeps == []
+    assert fake.calls[0]["max_tokens"] == 2000 + 1024 and timeouts == [40.0]

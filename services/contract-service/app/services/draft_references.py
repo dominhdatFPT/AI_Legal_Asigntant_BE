@@ -1,5 +1,6 @@
 """Read-only cross-service admission checks. No direct DB access or JWT persistence."""
 import json
+import logging
 import os
 import time
 from uuid import UUID
@@ -9,6 +10,23 @@ import httpx
 from app.core.config import service_base
 from app.core.errors import ContractError
 from app.services.user_gate import unique_object
+
+logger = logging.getLogger(__name__)
+
+# Circuit breaker cho procedure-service: lỗi liên tiếp thì ngừng gọi một lúc, trả đúng lỗi unavailable("procedure") như khi nó lỗi.
+# shortcut: đếm theo từng process, không khoá; đủ cho 1 worker, khi chạy nhiều replica thì cân nhắc thư viện.
+_FAIL_LIMIT = 3
+_OPEN_SECONDS = 30
+_fails = 0
+_open_until = 0.0
+
+
+def _record_failure():
+    global _fails, _open_until
+    _fails += 1
+    if _fails >= _FAIL_LIMIT:
+        _open_until = time.monotonic() + _OPEN_SECONDS
+        _fails = 0
 
 
 def unavailable(service):
@@ -25,11 +43,20 @@ class DraftReferences:
         return cls(os.getenv("DOCUMENT_SERVICE_URL", ""), os.getenv("PROCEDURE_SERVICE_URL", ""))
 
     def fetch(self, client, base, path, service, headers, deadline):
+        global _fails
+        if service == "procedure" and time.monotonic() < _open_until:
+            logger.warning("procedure-service tạm ngắt do lỗi liên tiếp, bỏ qua %s", path)
+            raise unavailable(service)
         try:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise unavailable(service)
             with client.stream("GET", base + path, headers=headers, timeout=min(5, remaining)) as response:
+                if service == "procedure":
+                    if response.status_code >= 500:
+                        _record_failure()
+                    else:
+                        _fails = 0
                 raw = bytearray()
                 for chunk in response.iter_bytes(chunk_size=16384):
                     raw.extend(chunk)
@@ -47,7 +74,9 @@ class DraftReferences:
                 if response.status_code != 200 or error is not None or not isinstance(body.get("data"), dict):
                     raise unavailable(service)
                 return body["data"]
-        except (httpx.HTTPError, ValueError, TypeError, RecursionError):
+        except (httpx.HTTPError, ValueError, TypeError, RecursionError) as exc:
+            if service == "procedure" and isinstance(exc, httpx.TransportError):
+                _record_failure()
             raise unavailable(service) from None
 
     def ensure(self, owner, token, request_id, documents, procedure=None):

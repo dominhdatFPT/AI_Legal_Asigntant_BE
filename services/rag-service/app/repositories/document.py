@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from app.models import DocumentChunk, LegalDocument
 
@@ -71,6 +71,8 @@ def semantic_search(
         )
         .order_by(distance)
         .limit(top_k)
+        # Không kéo toàn văn luật và vector về theo từng dòng (search.py không dùng), trước đây làm db=15s
+        .options(defer(LegalDocument.content), defer(DocumentChunk.embedding))
     )
     if doc_types:
         stmt = stmt.where(LegalDocument.doc_type.in_(doc_types))

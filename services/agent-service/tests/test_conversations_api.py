@@ -193,7 +193,7 @@ def real_agent_prompts(monkeypatch, chunk):
     async def fake_search(query, top_k=5, request_id=None, transport=None):
         return [chunk]
 
-    async def fake_generate(system_prompt, history, user_content):
+    async def fake_generate(system_prompt, history, user_content, **options):
         prompts.append(system_prompt)
         return "Hợp đồng có điểm chưa phù hợp...", 300, "gemini-test"
 
@@ -220,6 +220,41 @@ def test_send_message_with_documents_puts_text_in_llm_prompt_and_saves_only_ids(
     saved = client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"]
     assert not any("Nội dung" in m["content"] for m in saved)  # nội dung tài liệu không được lưu
     assert "Nội dung" not in str(saved[1]["metadata"])
+
+
+def test_review_mode_is_saved_in_assistant_metadata(client, monkeypatch, real_agent_prompts):
+    async def contract(document_ids, token, request_id=None, transport=None):
+        return [{"document_id": str(document_ids[0]), "source_kind": "docx",
+                 "text": "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT"}]
+
+    monkeypatch.setattr(document_client, "get_extractions", contract)
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "kiểm tra giúp tôi", "document_ids": [DOC_A]})
+
+    metadata = r.json()["data"]["assistant_message"]["metadata"]
+    assert metadata["mode"] == "contract_review" and metadata["contract_type"] == "chuyen_nhuong_dat"
+    assert metadata["document_ids"] == [DOC_A]
+    assert "KHÔNG hỏi lại người dùng" in real_agent_prompts[0]
+
+
+def test_review_with_every_rag_query_failing_returns_503_and_saves_nothing(client, monkeypatch, fake_documents):
+    async def broken(*args, **kwargs):
+        raise rag_client.RAGError("down")
+
+    async def never(*args, **kwargs):
+        raise AssertionError("không được gọi AI khi RAG lỗi")
+
+    monkeypatch.setattr(rag_client, "search", broken)
+    monkeypatch.setattr(llm_client, "generate", never)
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", headers=USER_AUTH,
+                    json={"content": "kiểm tra giúp tôi", "document_ids": [DOC_A]})
+
+    assert r.status_code == 503 and r.json()["error"]["code"] == "RAG_SERVICE_ERROR"
+    assert client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"] == []
 
 
 def test_send_message_with_cookie_token_forwards_it(client, fake_documents, fake_agent):

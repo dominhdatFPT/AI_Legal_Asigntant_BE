@@ -66,13 +66,14 @@ def _parse(service: str, response: httpx.Response) -> Any:
 
 
 def call(service: str, method: str, path: str, *, json: dict | None = None, bearer: str | None = None,
-         raw: bool = False) -> Any:
+         raw: bool = False, token_env: str = "INTERNAL_TOKEN") -> Any:
     """`bearer`: gọi API công khai bằng access token của người dùng thay cho X-Internal-Token.
-    `raw`: 2xx trả nguyên httpx.Response (file nhị phân), lỗi vẫn xử lý như JSON."""
+    `raw`: 2xx trả nguyên httpx.Response (file nhị phân), lỗi vẫn xử lý như JSON.
+    `token_env`: tên biến môi trường chứa giá trị gửi trong X-Internal-Token (route đổi vai trò dùng LAWYER_SERVICE_TOKEN)."""
     base = os.getenv(f"{service}_SERVICE_URL", "").rstrip("/")
-    token = os.getenv("INTERNAL_TOKEN", "")
+    token = os.getenv(token_env, "")
     if not base or not (token or bearer):
-        logger.error("Thiếu %s_SERVICE_URL hoặc INTERNAL_TOKEN", service)
+        logger.error("Thiếu %s_SERVICE_URL hoặc %s", service, token_env)
         raise unavailable(service)
 
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {"X-Internal-Token": token}

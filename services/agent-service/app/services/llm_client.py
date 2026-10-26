@@ -75,6 +75,9 @@ async def _generate_gemini(
     system_prompt: str,
     history: list[dict],
     user_content: str,
+    max_output_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[str, int | None]:
     settings = get_settings()
     contents = [
@@ -88,11 +91,11 @@ async def _generate_gemini(
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         temperature=0.2,
-        max_output_tokens=settings.llm_max_output_tokens,
+        max_output_tokens=max_output_tokens or settings.llm_max_output_tokens,
         thinking_config=_gemini_thinking_config(settings.gemini_model),
     )
 
-    max_retries = max(0, settings.gemini_max_retries)
+    max_retries = max(0, settings.gemini_max_retries if max_retries is None else max_retries)
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -100,7 +103,7 @@ async def _generate_gemini(
                 _get_gemini_client().aio.models.generate_content(
                     model=settings.gemini_model, contents=contents, config=config
                 ),
-                timeout=settings.gemini_timeout_seconds,
+                timeout=timeout_seconds or settings.gemini_timeout_seconds,
             )
             break
         except genai_errors.APIError as e:
@@ -131,6 +134,9 @@ async def _generate_groq(
     system_prompt: str,
     history: list[dict],
     user_content: str,
+    max_output_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[str, int | None]:
     settings = get_settings()
     messages = [{"role": "system", "content": system_prompt}]
@@ -138,7 +144,7 @@ async def _generate_groq(
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_content})
 
-    max_retries = max(0, settings.groq_max_retries)
+    max_retries = max(0, settings.groq_max_retries if max_retries is None else max_retries)
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -147,10 +153,10 @@ async def _generate_groq(
                     model=settings.groq_model,
                     messages=messages,
                     temperature=0.2,
-                    max_tokens=settings.llm_max_output_tokens,
+                    max_tokens=max_output_tokens or settings.llm_max_output_tokens,
                     **_groq_reasoning_args(settings.groq_model),
                 ),
-                timeout=settings.groq_timeout_seconds,
+                timeout=timeout_seconds or settings.groq_timeout_seconds,
             )
             break
         except groq_sdk.APIStatusError as e:
@@ -182,6 +188,9 @@ async def _generate_openrouter(
     system_prompt: str,
     history: list[dict],
     user_content: str,
+    max_output_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[str, int | None]:
     settings = get_settings()
     if not settings.openrouter_api_key or not settings.openrouter_model:
@@ -193,7 +202,7 @@ async def _generate_openrouter(
     reasoning = max(0, settings.openrouter_reasoning_max_tokens)
     reasoning_args = {"extra_body": {"reasoning": {"max_tokens": reasoning}}} if reasoning else {}
 
-    max_retries = max(0, settings.openrouter_max_retries)
+    max_retries = max(0, settings.openrouter_max_retries if max_retries is None else max_retries)
     last_error: Exception | None = None
     for attempt in range(max_retries + 1):
         try:
@@ -202,10 +211,10 @@ async def _generate_openrouter(
                     model=settings.openrouter_model,
                     messages=messages,
                     temperature=0.2,
-                    max_tokens=settings.llm_max_output_tokens + reasoning,
+                    max_tokens=(max_output_tokens or settings.llm_max_output_tokens) + reasoning,
                     **reasoning_args,
                 ),
-                timeout=settings.openrouter_timeout_seconds,
+                timeout=timeout_seconds or settings.openrouter_timeout_seconds,
             )
             break
         except openai.APIStatusError as e:
@@ -242,27 +251,32 @@ async def generate(
     system_prompt: str,
     history: list[dict],
     user_content: str,
+    max_output_tokens: int | None = None,
+    timeout_seconds: float | None = None,
+    max_retries: int | None = None,
 ) -> tuple[str, int | None, str]:
     """
     Trả về (answer, tokens, model_name).
     llm_provider có thể là một provider ("groq") hoặc danh sách ưu tiên ("openrouter,gemini").
     Nếu provider đầu thất bại, tự động thử provider tiếp theo.
+    Ba tham số tùy chọn ghi đè cấu hình mặc định (chỉ chế độ rà soát dùng); không truyền thì giữ hành vi cũ.
     """
+    options = {"max_output_tokens": max_output_tokens, "timeout_seconds": timeout_seconds, "max_retries": max_retries}
     s = get_settings()
     providers = [p.strip() for p in s.llm_provider.split(",") if p.strip()]
 
     last_error: LLMError | None = None
     for provider in providers:
         try:
-            if provider == "openrouter":
-                answer, tokens = await _generate_openrouter(system_prompt, history, user_content)
-                return answer, tokens, s.openrouter_model
-            elif provider == "groq":
-                answer, tokens = await _generate_groq(system_prompt, history, user_content)
+            if provider == "groq":
+                answer, tokens = await _generate_groq(system_prompt, history, user_content, **options)
                 return answer, tokens, s.groq_model
             elif provider == "gemini":
-                answer, tokens = await _generate_gemini(system_prompt, history, user_content)
+                answer, tokens = await _generate_gemini(system_prompt, history, user_content, **options)
                 return answer, tokens, s.gemini_model
+            elif provider == "openrouter":
+                answer, tokens = await _generate_openrouter(system_prompt, history, user_content, **options)
+                return answer, tokens, s.openrouter_model
             else:
                 raise LLMError(f"Provider không hợp lệ: {provider}")
         except LLMError as e:

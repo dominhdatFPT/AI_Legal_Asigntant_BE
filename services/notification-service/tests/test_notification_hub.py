@@ -37,3 +37,12 @@ def test_loi_db_duoc_nem_ra_de_vao_dlq(monkeypatch):
     monkeypatch.setattr(notification_store, "save_notification", broken)
     with pytest.raises(RuntimeError):
         asyncio.run(handle_event("user.blocked", {"event_id": "e2", "payload": {"user_id": "u1", "reason": "spam"}}))
+
+
+def test_nhieu_thread_cung_luu_mot_event_luc_khoi_dong():
+    from concurrent.futures import ThreadPoolExecutor
+
+    event = {"event_id": "evt-race", "event_type": "user.blocked", "payload": {"user_id": "u7", "reason": "x"}}
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda _: asyncio.run(handle_event("user.blocked", event)), range(8)))
+    assert len(notification_store.get_user_notifications("u7")) == 1

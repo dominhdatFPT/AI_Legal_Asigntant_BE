@@ -102,6 +102,12 @@ def test_publish_sync_va_publisher_tu_phuc_hoi(monkeypatch):
         assert await publisher.publish("test.x", {})
         await publisher._connection.close()  # broker cắt kết nối
         assert await publisher.publish("test.x", {})  # tự mở kết nối mới
+
+        async def dead(*args, **kwargs):
+            raise ConnectionError("kết nối chết ngầm")
+
+        publisher._exchange.publish = dead  # lỗi thoáng qua trên kết nối đang mở
+        assert await publisher.publish("test.x", {})  # thử lại ngay, không bị nghỉ 10 giây
         await publisher.close()
 
     asyncio.run(scenario())

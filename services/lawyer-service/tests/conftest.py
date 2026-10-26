@@ -22,6 +22,7 @@ if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
 INTERNAL_TOKEN = "test-internal-token"
+LAWYER_SERVICE_TOKEN = "test-lawyer-service-token"
 
 
 @pytest.fixture(scope="session")
@@ -41,6 +42,7 @@ def env(monkeypatch, key_pair):
     monkeypatch.setenv("USER_SERVICE_URL", "http://user-service:8000")
     monkeypatch.setenv("DOCUMENT_SERVICE_URL", "http://document-service:8000")
     monkeypatch.setenv("INTERNAL_TOKEN", INTERNAL_TOKEN)
+    monkeypatch.setenv("LAWYER_SERVICE_TOKEN", LAWYER_SERVICE_TOKEN)
     monkeypatch.setenv("LAWYER_REAPPLY_COOLDOWN_HOURS", "24")
 
 
@@ -114,7 +116,9 @@ class Upstream:
             if owner is None or str(owner) != caller:
                 return self._err(404, "DOCUMENT_NOT_FOUND")
             return self._ok({"document_id": m[1], "owner_user_id": caller, "file_status": "available"})
-        assert request.headers["X-Internal-Token"] == INTERNAL_TOKEN
+        # Route đổi vai trò dùng khóa riêng LAWYER_SERVICE_TOKEN, các route nội bộ khác vẫn dùng INTERNAL_TOKEN.
+        expected = LAWYER_SERVICE_TOKEN if path.endswith("/role") else INTERNAL_TOKEN
+        assert request.headers["X-Internal-Token"] == expected
         if m := re.fullmatch(r"/internal/v1/documents/([^/]+)/content", path):
             document_id = uuid.UUID(m[1])
             if str(self.documents.get(document_id)) != request.url.params.get("owner_user_id"):

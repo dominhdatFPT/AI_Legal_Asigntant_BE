@@ -3,7 +3,7 @@ openapi: 3.0.3
 info:
   title: Agent Service API
   version: 0.1.0
-  description: API hội thoại AI pháp lý — nhận câu hỏi, gọi RAG-service, gọi Gemini và trả lời người dùng.
+  description: API hội thoại AI pháp lý — nhận câu hỏi, gọi RAG-service, gọi LLM (Groq, lỗi thì Gemini) và trả lời người dùng.
   x-owner: "Dũng"
 
 servers:
@@ -157,7 +157,7 @@ paths:
                       content: "Theo Điều 188 Luật Đất đai 2024, hồ sơ chuyển nhượng gồm..."
                       metadata:
                         rag_chunk_ids: [a1b2c3d4-e5f6-7890-abcd-ef1234567890]
-                        model: gpt-4o-mini
+                        model: qwen/qwen3.8-27b
                         tokens_used: 512
                       created_at: "2026-10-07T08:01:03Z"
                 error: null
@@ -206,7 +206,7 @@ paths:
         Luồng xử lý nội bộ:
         1. Lưu tin nhắn của người dùng vào bảng `messages`
         2. Gọi RAG-service lấy top-5 chunks pháp luật liên quan
-        3. Gọi Gemini với lịch sử hội thoại + chunks + tin nhắn mới
+        3. Gọi LLM (Groq, lỗi thì Gemini) với lịch sử hội thoại + chunks + tin nhắn mới
         4. Lưu phản hồi của AI vào bảng `messages`
         5. Trả về cả hai tin nhắn
 
@@ -261,7 +261,7 @@ paths:
                     content: "Theo Khoản 1 Điều 188 Luật Đất đai 2024 (Luật số 31/2024/QH15), hồ sơ chuyển nhượng quyền sử dụng đất gồm: (1) Hợp đồng chuyển nhượng..."
                     metadata:
                       rag_chunk_ids: [a1b2c3d4-e5f6-7890-abcd-ef1234567890]
-                      model: gpt-4o-mini
+                      model: qwen/qwen3.8-27b
                       tokens_used: 512
                     created_at: "2026-10-07T08:01:03Z"
                 error: null
@@ -318,7 +318,7 @@ paths:
                     request_id: req-123
         "422": { $ref: "#/components/responses/ValidationError" }
         "503":
-          description: RAG-service, Gemini hoặc document-service không phản hồi
+          description: RAG-service, LLM hoặc document-service không phản hồi
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
@@ -334,7 +334,7 @@ paths:
                       message: Không thể truy xuất dữ liệu pháp luật lúc này, vui lòng thử lại.
                     request_id: req-123
                 gemini_loi:
-                  summary: Gemini lỗi
+                  summary: LLM lỗi
                   value:
                     data: null
                     error:
@@ -551,12 +551,39 @@ components:
           items: { type: string, format: uuid }
         model:
           type: string
-          description: Model Gemini đã dùng
-          example: gpt-4o-mini
+          nullable: true
+          description: Model LLM đã dùng (Groq hoặc Gemini, theo `LLM_PROVIDER`); `null` khi không gọi AI (câu vô nghĩa, tra cứu nguyên văn)
+          example: qwen/qwen3.8-27b
         tokens_used:
           type: integer
-          description: Tổng số token tiêu thụ trong lần gọi Gemini này
+          nullable: true
+          description: Tổng số token tiêu thụ trong lần gọi LLM này; `null` khi không gọi AI
           example: 512
+        type:
+          type: string
+          enum: [article_lookup]
+          description: Chỉ có khi câu trả lời là nguyên văn Điều/Khoản lấy từ kho, không qua AI
+        mode:
+          type: string
+          enum: [contract_review]
+          description: Chỉ có khi lượt hỏi đính kèm tài liệu (chế độ rà soát)
+        contract_type:
+          type: string
+          description: Loại hợp đồng agent nhận diện được từ nội dung tài liệu; đi kèm `mode`
+          enum:
+            - chuyen_nhuong_dat
+            - tang_cho_dat
+            - thue_dat_nha
+            - the_chap
+            - mua_ban_nha
+            - mua_ban_hang_hoa
+            - dich_vu
+            - gop_von_doanh_nghiep
+            - khac
+        document_ids:
+          type: array
+          description: Tài liệu đính kèm của lượt hỏi này (nội dung tài liệu không được lưu)
+          items: { type: string, format: uuid }
 
     Message:
       type: object

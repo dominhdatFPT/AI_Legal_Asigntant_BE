@@ -44,10 +44,6 @@ async def run(url, include_profile=False):
         def put_quarantine(self,key,content,media_type): self.objects[key]=content
     storage=MemoryStorage(); service=IdentityOcr(database,storage,LocalOcr(OcrSettings.from_env()))
     app.dependency_overrides[get_identity_ocr]=lambda:service
-    from app.core.security import get_user_status
-    class SyntheticActiveUser:
-        def ensure_document_write(self, user_id, request_id): pass
-    app.dependency_overrides[get_user_status] = SyntheticActiveUser
     if include_profile:
         from app.api.identity_profile import get_identity_profile
         from app.repositories.identity_profile import IdentityProfile

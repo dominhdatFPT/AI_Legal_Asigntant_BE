@@ -58,6 +58,7 @@ services:
       OPENROUTER_REASONING_MAX_TOKENS: ${OPENROUTER_REASONING_MAX_TOKENS:-1024}
       # Trong mạng Docker gọi rag-service theo tên service (không dùng localhost)
       RAG_SERVICE_URL: http://rag-service:8000
+      RAG_TIMEOUT_SECONDS: ${RAG_TIMEOUT_SECONDS:-30}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
@@ -81,6 +82,7 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
       FIREBASE_CLOCK_SKEW_SECONDS: ${FIREBASE_CLOCK_SKEW_SECONDS:-10}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      LAWYER_SERVICE_TOKEN: ${LAWYER_SERVICE_TOKEN:-}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
       AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
@@ -107,6 +109,7 @@ services:
       USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
       DOCUMENT_SERVICE_URL: ${DOCUMENT_SERVICE_URL:-http://document-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      LAWYER_SERVICE_TOKEN: ${LAWYER_SERVICE_TOKEN:-}
       LAWYER_REAPPLY_COOLDOWN_HOURS: ${LAWYER_REAPPLY_COOLDOWN_HOURS:-24}
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
@@ -246,7 +249,6 @@ services:
       EKYC_ACCESS_TOKEN: ${EKYC_ACCESS_TOKEN:-}
       EKYC_TOKEN_ID: ${EKYC_TOKEN_ID:-}
       EKYC_TOKEN: ${EKYC_TOKEN:-}
-      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:

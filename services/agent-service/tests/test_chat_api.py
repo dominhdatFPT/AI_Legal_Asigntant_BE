@@ -77,6 +77,32 @@ def test_procedure_service_sap_thi_tra_none(main_module, monkeypatch):
     assert asyncio.run(main_module.find_procedure("hộ kinh doanh", "req-x")) is None
 
 
+def test_goi_procedure_search_kem_request_id_va_khong_gui_token(main_module, monkeypatch):
+    """POST /api/v1/procedures/search là API công khai (procedure-service không xác thực): chỉ gửi X-Request-ID,
+    không được rò token nội bộ hay Authorization sang đó."""
+    import asyncio
+    import httpx
+
+    seen = []
+
+    def handler(request: httpx.Request):
+        seen.append(request)
+        return httpx.Response(200, json={"data": {"items": [PROCEDURE]}, "error": None, "request_id": "r"})
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(main_module.httpx, "AsyncClient",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    monkeypatch.setattr(main_module, "procedure_service_url", "http://procedure-test:8000")
+
+    result = asyncio.run(main_module.find_procedure("đăng ký hộ kinh doanh", "req-proc-1"))
+
+    assert result == PROCEDURE
+    request = seen[0]
+    assert request.method == "POST" and str(request.url) == "http://procedure-test:8000/api/v1/procedures/search"
+    assert request.headers["X-Request-ID"] == "req-proc-1"
+    assert "Authorization" not in request.headers and "X-Internal-Token" not in request.headers
+
+
 @pytest.mark.parametrize("value", ["", "   ", "x" * 2001])
 def test_message_khong_hop_le(client, value):
     r = client.post("/api/v1/agent/chat", json={"message": value})

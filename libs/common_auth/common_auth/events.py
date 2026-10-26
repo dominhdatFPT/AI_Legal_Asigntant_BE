@@ -1,8 +1,8 @@
 """Domain event trên RabbitMQ (`legal.events.topic`), dùng chung cho mọi service.
 
 - Chỉ đọc kết nối từ RABBITMQ_URL, không có tài khoản/mật khẩu mặc định.
-- Publisher không bao giờ ném lỗi ra API; sau một lần lỗi thì nghỉ RETRY_AFTER giây
-  để request không phải chờ timeout khi broker đang sập.
+- Publisher không bao giờ ném lỗi ra API. Kết nối cũ hỏng thì thử lại ngay một lần với kết nối mới;
+  chỉ khi không kết nối được broker mới nghỉ RETRY_AFTER giây để request không phải chờ timeout.
 - Consumer: handler lỗi -> message bị reject sang `q.dead_letter`, không bị ack âm thầm.
 """
 
@@ -83,21 +83,26 @@ class EventPublisher:
         import aio_pika
 
         event = make_event(routing_key, payload)
-        try:
-            exchange = await asyncio.wait_for(self._get_exchange(url), timeout=3)
-            message = aio_pika.Message(
-                body=json.dumps(event, default=str).encode("utf-8"),
-                content_type="application/json",
-                delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
-                message_id=event["event_id"],
-            )
-            await asyncio.wait_for(exchange.publish(message, routing_key=routing_key), timeout=3)
-            return True
-        except Exception as exc:
-            logger.warning("Không phát được event %s lên %s: %s", routing_key, masked(url), exc)
-            self._retry_at = time.monotonic() + RETRY_AFTER
-            await self.close()
-            return False
+        body = json.dumps(event, default=str).encode("utf-8")
+        # Đang có kết nối mà publish lỗi (kết nối chết ngầm, mạng chập) thì thử lại 1 lần với kết nối mới.
+        attempts = 2 if self._connection is not None else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                exchange = await asyncio.wait_for(self._get_exchange(url), timeout=3)
+                message = aio_pika.Message(
+                    body=body,
+                    content_type="application/json",
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                    message_id=event["event_id"],
+                )
+                await asyncio.wait_for(exchange.publish(message, routing_key=routing_key), timeout=3)
+                return True
+            except Exception as exc:
+                await self.close()
+                if attempt == attempts:
+                    logger.warning("Không phát được event %s lên %s: %s", routing_key, masked(url), exc)
+                    self._retry_at = time.monotonic() + RETRY_AFTER
+        return False
 
     async def close(self) -> None:
         connection = self._connection

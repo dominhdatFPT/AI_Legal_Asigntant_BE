@@ -3,7 +3,6 @@ from uuid import UUID
 from common_auth import CurrentUser
 from common_auth.fastapi_dep import get_current_user
 from fastapi import Depends, Request
-from starlette.concurrency import run_in_threadpool
 
 from app.core.config import ConfigurationError, Settings
 from app.core.errors import DocumentError
@@ -27,12 +26,6 @@ def document_user(request: Request, user: CurrentUser = Depends(get_current_user
     return CurrentUser(id=owner_id, role=user.role)
 
 
-def get_user_status():
-    from app.services.user_status import UserStatus
-    return UserStatus.from_env()
-
-
-async def document_writer(request: Request, user: CurrentUser = Depends(document_user), status=Depends(get_user_status)):
+async def document_writer(request: Request, user: CurrentUser = Depends(document_user)):
     # Always use the verified JWT subject, never a form/body/header user ID.
-    await run_in_threadpool(status.ensure_document_write, user.id, request.state.request_id)
     return user

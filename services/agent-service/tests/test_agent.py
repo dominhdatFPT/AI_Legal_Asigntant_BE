@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from app.services import agent, llm_client, rag_client
+from app.services import agent, contract_review, llm_client, query_filter, rag_client
 
 
 @pytest.fixture
@@ -12,11 +12,12 @@ def fake_services(monkeypatch, chunk):
 
     async def fake_search(query, top_k=5, request_id=None, transport=None):
         calls["search"] = {"query": query, "top_k": top_k, "request_id": request_id}
+        calls.setdefault("searches", []).append(calls["search"])
         return calls.get("chunks", [chunk])
 
-    async def fake_generate(system_prompt, history, user_content):
+    async def fake_generate(system_prompt, history, user_content, **options):
         calls["generate"] = {
-            "system_prompt": system_prompt, "history": history, "user_content": user_content,
+            "system_prompt": system_prompt, "history": history, "user_content": user_content, "options": options,
         }
         return "Theo Khoản 1 Điều 188 Luật Đất đai 2024...", 512, "gemini-test"
 
@@ -82,7 +83,7 @@ def test_prompt_without_documents_has_no_document_block(fake_services):
     assert "Tài liệu người dùng cung cấp" not in fake_services["generate"]["system_prompt"]
 
 
-def test_process_message_puts_documents_in_prompt_and_keeps_rag(fake_services, chunk):
+def test_process_message_puts_documents_in_prompt_and_searches_by_document(fake_services, chunk):
     asyncio.run(agent.process_message(
         "Hợp đồng này có hợp lệ không?", [], documents=[doc(), doc("Nội dung scan", "pdf_scan")],
     ))
@@ -91,9 +92,10 @@ def test_process_message_puts_documents_in_prompt_and_keeps_rag(fake_services, c
     assert "Tài liệu người dùng cung cấp" in prompt
     assert "<<<TÀI LIỆU 1 (Word DOCX)>>>\nĐiều 3. Bên A bán đất cho bên B giá 1 tỷ.\n<<<HẾT TÀI LIỆU 1>>>" in prompt
     assert "<<<TÀI LIỆU 2 (PDF scan (OCR))>>>" in prompt
-    assert "Khoản 1 Điều 188, Luật Đất đai 2024" in prompt  # RAG vẫn tìm theo câu hỏi như cũ
-    assert fake_services["search"]["query"] == "Hợp đồng này có hợp lệ không?"
-    assert "Chỉ dùng thông tin trong các trích đoạn" in prompt  # quy tắc cũ còn nguyên
+    assert "Khoản 1 Điều 188, Luật Đất đai 2024" in prompt
+    # câu hỏi chung chung nên không dùng để tìm luật; tài liệu không rõ loại thì tìm theo phần mở đầu của nó
+    assert fake_services["search"]["query"] == "Điều 3. Bên A bán đất cho bên B giá 1 tỷ."
+    assert "Căn cứ pháp luật CHỈ lấy từ các trích đoạn" in prompt
 
 
 def test_prompt_tells_model_documents_are_data_not_instructions(fake_services):

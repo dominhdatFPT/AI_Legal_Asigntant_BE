@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # Downstream services
     rag_service_url: str = "http://rag-service:8000"
     internal_token: str = ""
+    rag_timeout_seconds: float = 30.0
     # Lấy chữ đã trích của tài liệu người dùng upload (gọi bằng token của chính người dùng)
     document_service_url: str = "http://document-service:8000"
 
@@ -44,6 +45,10 @@ class Settings(BaseSettings):
 
     # Câu trả lời mong muốn ~150-200 chữ; giới hạn này là chốt chặn khi model vẫn muốn viết dài
     llm_max_output_tokens: int = 800
+    # Chế độ rà soát tài liệu đính kèm: câu trả lời dài hơn (~500 chữ) nên cần thêm token và thời gian chờ.
+    # Không thử lại cùng provider (xem llm_client.generate), chỉ chuyển sang provider kế tiếp.
+    llm_review_max_output_tokens: int = 2000
+    llm_review_timeout_seconds: float = 40.0
     # Số đoạn luật lấy từ rag-service đưa vào prompt
     rag_top_k: int = 4
 

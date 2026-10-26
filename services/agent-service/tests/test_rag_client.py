@@ -78,3 +78,95 @@ def test_search_timeout_raises_rag_error():
 
     with pytest.raises(rag_client.RAGError):
         run_search(handler)
+
+
+# ── Circuit breaker ────────────────────────────────────────────────────────
+
+
+class CountingRag:
+    """Handler giả đếm số request thực sự gửi đi; `plan` là danh sách kết quả theo thứ tự (lỗi hoặc Response)."""
+
+    def __init__(self, plan):
+        self.plan, self.calls = list(plan), 0
+
+    def __call__(self, request: httpx.Request):
+        self.calls += 1
+        outcome = self.plan.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+def ok():
+    return httpx.Response(200, json={"data": {"chunks": []}})
+
+
+def down(kind):
+    return {
+        "5xx": lambda: httpx.Response(503, json={"error": {"code": "UNAVAILABLE"}}),
+        "timeout": lambda: httpx.ReadTimeout("quá chậm"),
+        "connect": lambda: httpx.ConnectError("không kết nối được"),
+    }[kind]()
+
+
+@pytest.mark.parametrize("kind", ["5xx", "timeout", "connect"])
+def test_breaker_opens_after_three_failures_and_skips_http(kind):
+    rag = CountingRag([down(kind) for _ in range(3)] + [ok()])
+    for _ in range(3):
+        with pytest.raises(rag_client.RAGError):
+            run_search(rag)
+    assert rag.calls == 3
+
+    with pytest.raises(rag_client.RAGError, match="tạm ngắt"):
+        run_search(rag)
+    assert rag.calls == 3  # lần thứ 4 không gửi HTTP
+
+
+def test_breaker_also_guards_get_article():
+    rag = CountingRag([down("5xx") for _ in range(3)])
+    for _ in range(3):
+        with pytest.raises(rag_client.RAGError):
+            asyncio.run(rag_client.get_article("Luật Đất đai", "45", transport=httpx.MockTransport(rag)))
+    with pytest.raises(rag_client.RAGError, match="tạm ngắt"):
+        run_search(rag)
+    assert rag.calls == 3
+
+
+def test_breaker_closes_again_after_open_seconds(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(rag_client.time, "monotonic", lambda: now[0])
+    rag = CountingRag([down("5xx") for _ in range(3)] + [ok(), ok()])
+    for _ in range(3):
+        with pytest.raises(rag_client.RAGError):
+            run_search(rag)
+
+    now[0] += rag_client._OPEN_SECONDS - 1
+    with pytest.raises(rag_client.RAGError, match="tạm ngắt"):
+        run_search(rag)
+    assert rag.calls == 3
+
+    now[0] += 2  # đã qua 30 giây
+    assert run_search(rag) == []
+    assert rag.calls == 4
+
+
+def test_success_in_between_resets_failure_counter():
+    rag = CountingRag([down("5xx"), down("timeout"), ok(), down("5xx"), down("connect"), ok()])
+    for _ in range(2):
+        with pytest.raises(rag_client.RAGError):
+            run_search(rag)
+    assert run_search(rag) == []  # thành công: bộ đếm về 0
+    for _ in range(2):
+        with pytest.raises(rag_client.RAGError):
+            run_search(rag)
+    # Mới 2 lỗi liên tiếp sau lần thành công, breaker chưa mở nên lần thứ 6 vẫn gửi HTTP
+    assert run_search(rag) == []
+    assert rag.calls == 6
+
+
+def test_client_errors_do_not_count_as_failures():
+    rag = CountingRag([httpx.Response(401, json={"error": {"code": "UNAUTHORIZED"}}) for _ in range(5)])
+    for _ in range(5):
+        with pytest.raises(rag_client.RAGError, match="401"):
+            run_search(rag)
+    assert rag.calls == 5

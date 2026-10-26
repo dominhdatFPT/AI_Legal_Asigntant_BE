@@ -29,13 +29,6 @@ def foundation():
         from app.core.security import document_user
         from app.repositories.database import Database
         from app.services.storage import Storage, MIME_TYPES
-        from app.core.security import get_user_status
-        class SyntheticActiveUser:
-            def ensure_document_write(self, user_id, request_id):
-                pass
-        # Existing tests isolate Document behavior. Dedicated User gate tests
-        # replace this adapter with a real client + synthetic HTTP transport.
-        app.dependency_overrides[get_user_status] = SyntheticActiveUser
         yield app, Settings, ConfigurationError, DocumentError, document_user, Database, Storage, MIME_TYPES
     finally:
         sys.path.remove(str(SERVICE))

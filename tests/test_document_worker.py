@@ -202,6 +202,43 @@ def test_unsafe_docx_rejected(runtime,extra):
     assert processing.status(owner,document)["file_status"]=="rejected" and not storage.writes
 
 
+W='xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+DOCX_ROW={"filename":"test.docx","media_type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","purpose":"supporting_document","document_type":"other"}
+
+
+def footer(*runs):
+    return ("word/footer1.xml",f'<w:ftr {W}><w:p>{"".join(runs)}</w:p></w:ftr>')
+
+
+def field_runs(instruction):
+    return ('<w:r><w:fldChar w:fldCharType="begin"/></w:r>'
+            f'<w:r><w:instrText xml:space="preserve"> {instruction} </w:instrText></w:r>'
+            '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>')
+
+
+@pytest.mark.parametrize("instruction",["PAGE",r"PAGE \* MERGEFORMAT","NUMPAGES",r'DATE \@ "dd/MM/yyyy"'])
+def test_docx_page_number_fields_allowed(foundation,instruction):
+    from app.services.document_engine import sanitize
+    content=docx(extra=footer(field_runs(instruction)))
+    assert sanitize(content,DOCX_ROW)==content
+
+
+@pytest.mark.parametrize("instruction",[r'INCLUDETEXT "C:\secret.docx"',r"DDEAUTO c:\windows\system32\cmd.exe",'HYPERLINK "https://unsafe.invalid"',"MACROBUTTON Run x"])
+def test_docx_dangerous_fields_rejected(foundation,instruction):
+    from app.services.document_engine import sanitize
+    with pytest.raises(foundation[3]) as exc:sanitize(docx(extra=footer(field_runs(instruction))),DOCX_ROW)
+    assert exc.value.code=="UNSAFE_FILE"
+
+
+def test_docx_dangerous_simple_field_and_unclosed_field_rejected(foundation):
+    from app.services.document_engine import sanitize
+    simple=f'<w:fldSimple {W} w:instr="INCLUDETEXT x"><w:r><w:t>1</w:t></w:r></w:fldSimple>'
+    unclosed='<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r>'
+    for part in (("word/footer1.xml",f'<w:ftr {W}><w:p>{simple}</w:p></w:ftr>'),footer(unclosed)):
+        with pytest.raises(foundation[3]) as exc:sanitize(docx(extra=part),DOCX_ROW)
+        assert exc.value.code=="UNSAFE_FILE"
+
+
 def test_pdf_javascript_rejected(runtime):
     worker,_,processing,storage,_,_,upload=runtime
     writer=PdfWriter();writer.add_blank_page(width=300,height=400);writer.add_js("app.alert('synthetic')")

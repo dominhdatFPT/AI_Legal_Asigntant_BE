@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import uuid
@@ -31,11 +32,18 @@ HEX_8_PATTERN = re.compile(r"^[0-9a-fA-F]{8}$")
 _lookup_cache: dict[str, tuple[float, any]] = {}
 LOOKUP_CACHE_TTL = 60.0
 
-# Reusable HTTP Session với Connection Pool chống socket exhaustion (M5)
-_session = requests.Session()
-_adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
-_session.mount("http://", _adapter)
-_session.mount("https://", _adapter)
+# HTTP Session riêng cho từng thread (requests.Session không an toàn khi dùng chung giữa các thread), có Connection Pool chống socket exhaustion (M5)
+_local = threading.local()
+
+
+def _session():
+    s = getattr(_local, "session", None)
+    if s is None:
+        s = _local.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
+        s.mount("http://", adapter)
+        s.mount("https://", adapter)
+    return s
 
 
 def safe_uuid_str(val) -> Optional[str]:
@@ -109,7 +117,7 @@ def get_procedure_id_by_code(conn_or_code, maybe_code: Optional[str] = None) -> 
         try:
             supabase_url, _ = get_supabase_config()
             if supabase_url:
-                r = _session.get(f"{supabase_url}/rest/v1/procedures?code=eq.{code}&select=id&limit=1", headers=_supabase_headers(), timeout=3)
+                r = _session().get(f"{supabase_url}/rest/v1/procedures?code=eq.{code}&select=id&limit=1", headers=_supabase_headers(), timeout=3)
                 if r.status_code == 200 and r.json():
                     return str(r.json()[0]["id"])
         except Exception:
@@ -206,7 +214,7 @@ def save_procedure_record(
             pg_values["updated_at"] = now_dt.isoformat()
             pg_values["form_data"] = form_data
             pg_values["extra_data"] = extra_data
-            r = _session.post(
+            r = _session().post(
                 f"{supabase_url}/rest/v1/{table}",
                 headers=_supabase_headers(),
                 json=pg_values,
@@ -263,7 +271,7 @@ def get_procedure_record_by_id(domain: str, record_id: str, owner_id: Optional[s
             p = {"id": f"eq.{rec_uuid}", "limit": 1}
             if owner_id is not None:
                 p["user_id"] = f"eq.{owner_id}"
-            r = _session.get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
+            r = _session().get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
             if r.status_code == 200:
                 rows = r.json()
                 if rows:
@@ -396,7 +404,7 @@ def lookup_procedure_record(code_or_id: str, owner_id: Optional[str] = None) -> 
                         p["procedure_code"] = f"eq.{procedure_code_filter}"
                     p["order"] = "created_at.desc"
 
-                r = _session.get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
+                r = _session().get(f"{supabase_url}/rest/v1/{table}", headers=_supabase_headers(), params=p, timeout=5)
                 if r.status_code == 200:
                     rows = r.json()
                     if rows and len(rows) > 0:
@@ -505,7 +513,7 @@ def list_procedure_records(
                 if search:
                     p["applicant_name"] = f"ilike.*{search.strip()}*"
 
-                r = _session.get(f"{supabase_url}/rest/v1/{tbl}", headers=_supabase_headers(), params=p, timeout=8)
+                r = _session().get(f"{supabase_url}/rest/v1/{tbl}", headers=_supabase_headers(), params=p, timeout=8)
                 if r.status_code == 200:
                     for item in r.json():
                         row = _serialize_row(item)
@@ -699,7 +707,7 @@ def update_procedure_record(
             try: patch_payload["charter_capital"] = int(float(str(merged_form["charter_capital"]).replace(",", "").strip()))
             except (ValueError, TypeError): pass
 
-    r = _session.patch(
+    r = _session().patch(
         f"{supabase_url}/rest/v1/{table}",
         headers=_supabase_headers(),
         params={"id": f"eq.{record_id}"},
@@ -761,7 +769,7 @@ def delete_procedure_record(domain: str, record_id: str, user_id: Optional[str] 
     if not supabase_url:
         raise RuntimeError("Không có kết nối CSDL hoặc cấu hình SUPABASE_URL.")
 
-    r = _session.delete(
+    r = _session().delete(
         f"{supabase_url}/rest/v1/{table}",
         headers=_supabase_headers(),
         params={"id": f"eq.{record_id}"},
@@ -815,7 +823,7 @@ def submit_procedure_record(domain: str, record_id: str, user_id: Optional[str] 
     if not supabase_url:
         raise RuntimeError("Không có kết nối CSDL hoặc cấu hình SUPABASE_URL.")
 
-    r = _session.patch(
+    r = _session().patch(
         f"{supabase_url}/rest/v1/{table}",
         headers=_supabase_headers(),
         params={"id": f"eq.{record_id}"},
@@ -960,7 +968,7 @@ def list_records(owner_id: Optional[str], domain: Optional[str], status: Optiona
         if supabase_url:
             proc_map = {}
             try:
-                pr = _session.get(f"{supabase_url}/rest/v1/procedures?select=code,name,fee,receiving_agency_level,processing_days", headers=_supabase_headers(), timeout=5)
+                pr = _session().get(f"{supabase_url}/rest/v1/procedures?select=code,name,fee,receiving_agency_level,processing_days", headers=_supabase_headers(), timeout=5)
                 if pr.status_code == 200:
                     for p in pr.json():
                         proc_map[p.get("code", "").upper()] = p
@@ -981,7 +989,7 @@ def list_records(owner_id: Optional[str], domain: Optional[str], status: Optiona
                 if status:
                     p_query["status"] = f"eq.{status}"
 
-                r = _session.get(f"{supabase_url}/rest/v1/{tbl}", headers=_supabase_headers(), params=p_query, timeout=5)
+                r = _session().get(f"{supabase_url}/rest/v1/{tbl}", headers=_supabase_headers(), params=p_query, timeout=5)
                 if r.status_code == 200:
                     for row in r.json():
                         p_meta = proc_map.get(str(row.get("procedure_code", "")).upper(), {})
@@ -1041,7 +1049,7 @@ def count_records() -> dict:
         supabase_url, _ = get_supabase_config()
         if supabase_url:
             for d_name, tbl in [("land", "land_procedure_records"), ("business", "business_procedure_records")]:
-                r = _session.get(f"{supabase_url}/rest/v1/{tbl}?select=status", headers=_supabase_headers(), timeout=5)
+                r = _session().get(f"{supabase_url}/rest/v1/{tbl}?select=status", headers=_supabase_headers(), timeout=5)
                 if r.status_code == 200:
                     for row in r.json():
                         st = row.get("status")

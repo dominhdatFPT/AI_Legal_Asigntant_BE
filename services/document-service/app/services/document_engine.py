@@ -18,10 +18,43 @@ from app.services.file_validation import DOCX, MAX_FILE, inspect_file
 
 NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 MAX_TEXT = 1_000_000
+# Trường Word chỉ hiển thị số trang/ngày/mục lục nội bộ: DOCX nào cũng có (số trang ở footer). Trường khác
+# (INCLUDETEXT, DDE, LINK, HYPERLINK, MACROBUTTON...) có thể kéo dữ liệu ngoài hoặc chạy lệnh nên vẫn bị từ chối.
+SAFE_FIELDS = {"PAGE", "NUMPAGES", "SECTIONPAGES", "SECTION", "DATE", "TIME", "CREATEDATE", "SAVEDATE",
+               "PRINTDATE", "PAGEREF", "TOC"}
 
 
 def fail(code="UNSAFE_FILE"):
     raise DocumentError(code, "File không đạt kiểm tra xử lý.", 422)
+
+
+def safe_field(instruction):
+    words = (instruction or "").split()
+    return bool(words) and words[0].upper() in SAFE_FIELDS
+
+
+def unsafe_word_xml(root):
+    fields = []  # chữ lệnh của từng trường đang mở (trường có thể lồng nhau)
+    for node in root.iter():
+        if node.tag in {NS+"object", NS+"altChunk"}:
+            return True
+        if node.tag == NS+"fldSimple":
+            if not safe_field(node.attrib.get(NS+"instr")):
+                return True
+        elif node.tag == NS+"fldChar":
+            kind = node.attrib.get(NS+"fldCharType")
+            if kind == "begin":
+                fields.append("")
+            elif kind == "end":
+                if not fields or not safe_field(fields.pop()):
+                    return True
+            elif kind != "separate":
+                return True
+        elif node.tag == NS+"instrText":
+            if not fields:
+                return True
+            fields[-1] += node.text or ""
+    return bool(fields)
 
 
 def sanitize(content, row):
@@ -50,7 +83,7 @@ def sanitize(content, row):
                     root = ET.fromstring(archive.read(entry))
                     if name.endswith(".rels") and any(node.attrib.get("TargetMode", "").lower() == "external" for node in root.iter()):
                         fail()
-                    if any(node.tag in {NS+"object", NS+"altChunk", NS+"fldChar", NS+"instrText"} for node in root.iter()):
+                    if unsafe_word_xml(root):
                         fail()
         return content
     reader = PdfReader(io.BytesIO(content), strict=True)

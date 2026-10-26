@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, String, Text, create_engine, desc
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 logger = logging.getLogger("NotificationStore")
@@ -68,19 +70,24 @@ def _get_db_url() -> str:
 
 _engine = None
 _SessionFactory = None
+_init_lock = threading.Lock()
 
 
 def get_engine():
     global _engine, _SessionFactory
     if _engine is None:
-        db_url = _get_db_url()
-        connect_args = {}
-        if db_url.startswith("sqlite"):
-            connect_args = {"check_same_thread": False}
-        _engine = create_engine(db_url, pool_pre_ping=True, connect_args=connect_args)
-        Base.metadata.create_all(_engine)
-        _SessionFactory = sessionmaker(bind=_engine, expire_on_commit=False)
-        logger.info("NotificationStore initialized with DB URL: %s", db_url.split("@")[-1])
+        # Consumer gọi song song từ nhiều thread: chỉ khởi tạo một lần, gán _engine sau cùng.
+        with _init_lock:
+            if _engine is None:
+                db_url = _get_db_url()
+                connect_args = {}
+                if db_url.startswith("sqlite"):
+                    connect_args = {"check_same_thread": False}
+                engine = create_engine(db_url, pool_pre_ping=True, connect_args=connect_args)
+                Base.metadata.create_all(engine)
+                _SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
+                _engine = engine
+                logger.info("NotificationStore initialized with DB URL: %s", db_url.split("@")[-1])
     return _engine
 
 
@@ -116,7 +123,13 @@ def save_notification(notif: Dict[str, Any]) -> None:
         )
         if session.get(NotificationRecord, record.id) is None:
             session.add(record)
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                # Hai bản sao cùng event lưu song song: bản kia đã lưu thì bỏ qua, lỗi khác thì ném ra.
+                if session.get(NotificationRecord, record.id) is None:
+                    raise
 
 
 def get_user_notifications(user_id: str, limit: int = 50) -> List[Dict[str, Any]]:

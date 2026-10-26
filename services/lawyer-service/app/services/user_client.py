@@ -44,7 +44,8 @@ def get_citizen_profile(user_id: uuid.UUID) -> dict | None:
 def promote_to_lawyer(user_id: uuid.UUID) -> dict:
     """Đổi vai trò sang lawyer khi duyệt đơn (gọi lại an toàn). 404/409 → người gửi không còn hợp lệ."""
     try:
-        data = call(SERVICE, "PUT", f"/internal/v1/users/{user_id}/role", json={"role": "lawyer"})
+        data = call(SERVICE, "PUT", f"/internal/v1/users/{user_id}/role", json={"role": "lawyer"},
+                    token_env="LAWYER_SERVICE_TOKEN")
     except UpstreamError as e:
         if e.status in (404, 409):
             raise ApiError(409, APPLICANT_UNAVAILABLE) from None

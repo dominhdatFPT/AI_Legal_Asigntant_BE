@@ -85,3 +85,48 @@ def test_truyen_request_id_va_internal_token(monkeypatch, calls):
     finally:
         current_request_id.reset(token)
     assert seen["x-request-id"] == "req-abc" and seen["x-internal-token"] == "test-internal-token"
+
+
+def test_doi_vai_tro_gui_lawyer_service_token_khong_gui_internal_token(monkeypatch):
+    from app.services import user_client
+
+    monkeypatch.setenv("INTERNAL_TOKEN", "internal-secret")
+    monkeypatch.setenv("LAWYER_SERVICE_TOKEN", "lawyer-secret")
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"data": {"id": "u", "role": "lawyer"}, "error": None})
+
+    _use(monkeypatch, handler)
+    assert user_client.promote_to_lawyer("11111111-1111-4111-8111-111111111111")["role"] == "lawyer"
+    assert seen[0].method == "PUT" and seen[0].url.path.endswith("/role")
+    assert seen[0].headers["X-Internal-Token"] == "lawyer-secret"
+    assert "internal-secret" not in str(seen[0].headers)
+
+
+def test_doi_vai_tro_thieu_lawyer_service_token_khong_goi_mang(monkeypatch):
+    from app.services import user_client
+
+    monkeypatch.setenv("INTERNAL_TOKEN", "internal-secret")  # có INTERNAL_TOKEN cũng không được dùng thay
+    monkeypatch.delenv("LAWYER_SERVICE_TOKEN", raising=False)
+    sent = []
+    _use(monkeypatch, lambda request: sent.append(request) or httpx.Response(200))
+    with pytest.raises(ApiError) as caught:
+        user_client.promote_to_lawyer("11111111-1111-4111-8111-111111111111")
+    assert caught.value.status == 503 and caught.value.code == "USER_UNAVAILABLE" and sent == []
+
+
+def test_route_khac_van_dung_internal_token(monkeypatch):
+    monkeypatch.setenv("INTERNAL_TOKEN", "internal-secret")
+    monkeypatch.setenv("LAWYER_SERVICE_TOKEN", "lawyer-secret")
+    seen = []
+
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={"data": {}, "error": None})
+
+    _use(monkeypatch, handler)
+    http_client.call("USER", "GET", "/internal/v1/users/x/status")
+    assert seen[0].headers["X-Internal-Token"] == "internal-secret"
+

@@ -96,10 +96,6 @@ async def api_smoke(url,scanner_port):
         now=datetime.now(timezone.utc)
         return jwt.encode({"sub":subject,"role":"citizen","type":"access","iss":ISSUER,"iat":now,"exp":now+timedelta(minutes=10)},private,algorithm=ALGORITHM)
     app.dependency_overrides[get_files]=lambda:files
-    from app.core.security import get_user_status
-    class SyntheticActiveUser:
-        def ensure_document_write(self, user_id, request_id): pass
-    app.dependency_overrides[get_user_status] = SyntheticActiveUser
     app.dependency_overrides[get_processing]=lambda:processing
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test") as client:

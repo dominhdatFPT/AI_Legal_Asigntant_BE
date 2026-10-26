@@ -24,6 +24,16 @@ def settings_env(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def reset_rag_breaker():
+    """Circuit breaker của rag_client giữ trạng thái ở cấp module: mỗi test bắt đầu với breaker đóng."""
+    from app.services import rag_client
+
+    rag_client._fails, rag_client._open_until = 0, 0.0
+    yield
+    rag_client._fails, rag_client._open_until = 0, 0.0
+
+
 @pytest.fixture
 def chunk():
     """Một chunk mẫu đúng hợp đồng rag-service (services/rag-service/openapi.yaml)."""

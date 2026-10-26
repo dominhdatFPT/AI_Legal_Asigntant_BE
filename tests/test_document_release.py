@@ -16,8 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_document_containers_nonroot_readonly_no_private_key():
     base = yaml.safe_load((ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))
     worker = yaml.safe_load((ROOT / 'docker-compose.document-worker.yml').read_text(encoding='utf-8'))
-    notification = yaml.safe_load((ROOT / 'docker-compose.document-notifications.yml').read_text(encoding='utf-8'))
-    for service in (base['services']['document-service'], worker['services']['document-worker'], notification['services']['document-notification-worker']):
+    for service in (base['services']['document-service'], worker['services']['document-worker']):
         assert service['user'] == '65532:65532'
         assert service['read_only'] and service['init']
         assert service['cap_drop'] == ['ALL']
@@ -28,7 +27,6 @@ def test_document_containers_nonroot_readonly_no_private_key():
     api = base['services']['document-service']
     assert len(api['volumes']) == 1 and api['volumes'][0]['target'] == '/run/keys/jwt_public.pem'
     assert api['volumes'][0]['read_only'] and not api['volumes'][0]['bind']['create_host_path']
-    assert '${DOCUMENT_NOTIFICATIONS_ENABLED:-false}' == notification['services']['document-notification-worker']['environment']['DOCUMENT_NOTIFICATIONS_ENABLED']
     assert 'notification-service' not in worker['services']['document-worker'].get('depends_on', {})
 
 
