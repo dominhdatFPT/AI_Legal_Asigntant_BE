@@ -1,0 +1,169 @@
+{
+  "entries": [
+    {
+      "id": "danang-business-registration",
+      "province": "Đà Nẵng",
+      "name": "Phòng Doanh nghiệp và Đăng ký kinh doanh – Sở Tài chính TP Đà Nẵng",
+      "queries": [
+        "Văn phòng đăng ký kinh doanh",
+        "Phòng đăng ký kinh doanh",
+        "Phòng Doanh nghiệp và Đăng ký kinh doanh"
+      ],
+      "address": "Tầng 6, Tòa nhà Trung tâm Hành chính, 24 Trần Phú, phường Hải Châu, Đà Nẵng",
+      "latitude": 16.0774173,
+      "longitude": 108.2227249,
+      "map_destination_name": "Trung tâm Hành chính Thành phố Đà Nẵng",
+      "google_place_id": "ChIJTZV8WToYQjER8dD77Ei90ic",
+      "map_location_note": "Cơ quan ở tầng 6; bản đồ dẫn đến tòa nhà Trung tâm Hành chính, số 24 Trần Phú.",
+      "source_url": "https://danang.gov.vn/vi/web/dng/w/tu-15-9-2025-toan-bo-thu-tuc-dang-ky-doanh-nghiep-tai-da-nang-duoc-thuc-hien-truc-tuyen",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/search/?api=1&query=Trung+t%C3%A2m+H%C3%A0nh+ch%C3%ADnh+Th%C3%A0nh+ph%E1%BB%91+%C4%90%C3%A0+N%E1%BA%B5ng%2C+24+Tr%E1%BA%A7n+Ph%C3%BA%2C+%C4%90%C3%A0+N%E1%BA%B5ng&query_place_id=ChIJTZV8WToYQjER8dD77Ei90ic",
+      "contact_phone": "02363821755",
+      "contact_label": "Điện thoại hỗ trợ đăng ký doanh nghiệp",
+      "contact_source_url": "https://danang.gov.vn/vi/web/dng/w/tu-15-9-2025-toan-bo-thu-tuc-dang-ky-doanh-nghiep-tai-da-nang-duoc-thuc-hien-truc-tuyen",
+      "website_url": "https://taichinh.danang.gov.vn/",
+      "service_note": "Theo thông báo của thành phố, từ 15/9/2025 hồ sơ đăng ký doanh nghiệp được nộp trực tuyến. Đây là địa chỉ liên hệ hỗ trợ.",
+      "online_service_url": "https://dangkyquamang.dkkd.gov.vn/"
+    },
+    {
+      "id": "hcm-public-service-center-headquarters",
+      "province": "Hồ Chí Minh",
+      "name": "Trung tâm Phục vụ hành chính công Thành phố Hồ Chí Minh – Trụ sở 1",
+      "category_label": "Trung tâm phục vụ hành chính công",
+      "queries": [
+        "Trung tâm phục vụ hành chính công",
+        "Trung tâm hành chính công"
+      ],
+      "address": "43 đường Nguyễn Văn Bá, phường Thủ Đức, Thành phố Hồ Chí Minh",
+      "latitude": 10.8483622,
+      "longitude": 106.7724669,
+      "source_url": "https://sotuphap.hochiminhcity.gov.vn/en/hoat-dong-chuyen-mon/-/asset_publisher/emZ19pfF3Yyq/content/thong-bao-danh-sach-11-ca-nhan-duoc-bo-nhiem-thua-hanh-vien?enableXemTheoNgay=true&p_p_auth=C8nTJwXh&redirect=https%3A%2F%2Fsotuphap.hochiminhcity.gov.vn%2Fen%2Fhoat-dong-chuyen-mon%3Fp_p_id%3D101_INSTANCE_XXFg4g179jrs%26p_p_lifecycle%3D0%26p_p_state%3Dnormal%26p_p_mode%3Dview%26p_p_col_id%3Dcolumn-1%26p_p_col_pos%3D3%26p_p_col_count%3D6",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/place/?q=place_id:ChIJP41aEgAndTERudkpZpNnzCk",
+      "service_note": "Thành phố thông báo tập trung tiếp nhận và trả kết quả hồ sơ cấp thành phố tại trụ sở này từ ngày 27/12/2025.",
+      "google_place_id": "ChIJP41aEgAndTERudkpZpNnzCk",
+      "map_destination_name": "Trung tâm phục vụ hành chính công Thành phố Hồ Chí Minh",
+      "opening_hours": {
+        "text": "Thứ Hai–Thứ Sáu: 07:30–11:30, 13:00–17:00 · Thứ Bảy, Chủ Nhật: đóng cửa",
+        "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJP41aEgAndTERudkpZpNnzCk",
+        "source_type": "google_maps_reviewed",
+        "checked_at": "2026-10-25"
+      }
+    },
+    {
+      "id": "hcm-public-service-tan-dinh",
+      "province": "Hồ Chí Minh",
+      "name": "Trung tâm Phục vụ hành chính công phường Tân Định",
+      "category_label": "Trung tâm phục vụ hành chính công cấp phường",
+      "queries": [
+        "Trung tâm phục vụ hành chính công",
+        "Trung tâm hành chính công",
+        "Trung tâm phục vụ hành chính công Quận 1",
+        "Trung tâm hành chính công Quận 1"
+      ],
+      "address": "58B Nguyễn Đình Chiểu, phường Tân Định, Hồ Chí Minh",
+      "latitude": 10.7889685,
+      "longitude": 106.6998689,
+      "source_url": "https://phuongtandinh.gov.vn/trung-tam-hanh-chinh-cong/",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/place/?q=place_id:ChIJleq0RgAvdTEROH0vQ2DsnYg",
+      "geocoded_address": "58B Nguyễn Đình Chiểu, Tân Định, Hồ Chí Minh",
+      "website_url": "https://phuongtandinh.gov.vn/",
+      "contact_phone": "02839102126",
+      "contact_source_url": "https://phuongtandinh.gov.vn/trung-tam-hanh-chinh-cong/",
+      "map_destination_name": "UBND Phường Tân Định",
+      "google_place_id": "ChIJleq0RgAvdTEROH0vQ2DsnYg",
+      "opening_hours": {
+        "text": "Thứ Hai–Thứ Sáu: 07:30–11:30, 13:00–17:00 · Thứ Bảy, Chủ Nhật: đóng cửa",
+        "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJleq0RgAvdTEROH0vQ2DsnYg",
+        "source_type": "google_maps_reviewed",
+        "checked_at": "2026-10-25"
+      }
+    },
+    {
+      "id": "hcm-public-service-sai-gon",
+      "province": "Hồ Chí Minh",
+      "name": "Trung tâm Phục vụ hành chính công phường Sài Gòn",
+      "category_label": "Trung tâm phục vụ hành chính công cấp phường",
+      "queries": [
+        "Trung tâm phục vụ hành chính công",
+        "Trung tâm hành chính công",
+        "Trung tâm phục vụ hành chính công Quận 1",
+        "Trung tâm hành chính công Quận 1"
+      ],
+      "address": "45-47 Lê Duẩn, phường Sài Gòn, Hồ Chí Minh",
+      "latitude": 10.7805959,
+      "longitude": 106.699416,
+      "source_url": "https://sotuphap.hochiminhcity.gov.vn/en/thong-bao/-/asset_publisher/emZ19pfF3Yyq/content/id/3481855/uy-ban-nhan-dan-thanh-pho-ho-chi-minh-thong-bao-cong-khai-dia-diem-so-dien-thoai-duong-day-nong-cua-bo-phan-mot-cua-cap-tinh-cap-xa-sau-sap-xep-bo-may",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/place/?q=place_id:ChIJGXTM0TcvdTERyEB4_0y58uA",
+      "geocoded_address": "45-47 Lê Duẩn, Sài Gòn, Hồ Chí Minh",
+      "map_destination_name": "UBND phường Sài Gòn",
+      "google_place_id": "ChIJGXTM0TcvdTERyEB4_0y58uA",
+      "opening_hours": {
+        "text": "Thứ Hai–Thứ Sáu: 07:30–11:30, 13:00–17:00 · Thứ Bảy: 07:30–11:30 · Chủ Nhật: đóng cửa",
+        "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJGXTM0TcvdTERyEB4_0y58uA",
+        "source_type": "google_maps_reviewed",
+        "checked_at": "2026-10-25"
+      },
+      "website_url": "https://phuongsaigon.gov.vn/",
+      "contact_phone": "02838234223",
+      "contact_source_url": "https://sotuphap.hochiminhcity.gov.vn/en/thong-bao/-/asset_publisher/emZ19pfF3Yyq/content/id/3481855/uy-ban-nhan-dan-thanh-pho-ho-chi-minh-thong-bao-cong-khai-dia-diem-so-dien-thoai-duong-day-nong-cua-bo-phan-mot-cua-cap-tinh-cap-xa-sau-sap-xep-bo-may"
+    },
+    {
+      "id": "hcm-public-service-ben-thanh",
+      "province": "Hồ Chí Minh",
+      "name": "Trung tâm Phục vụ hành chính công phường Bến Thành",
+      "category_label": "Trung tâm phục vụ hành chính công cấp phường",
+      "queries": [
+        "Trung tâm phục vụ hành chính công",
+        "Trung tâm hành chính công",
+        "Trung tâm phục vụ hành chính công Quận 1",
+        "Trung tâm hành chính công Quận 1"
+      ],
+      "address": "92 Nguyễn Trãi, phường Bến Thành, Hồ Chí Minh",
+      "latitude": 10.7701847,
+      "longitude": 106.691297,
+      "source_url": "https://phuongbenthanh.gov.vn/gioi-thieu-chung/",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/place/?q=place_id:ChIJp79jqT0vdTER_Bxv4VTO6lY",
+      "geocoded_address": "92, Đường Nguyễn Trãi, Bến Thành, Hồ Chí Minh",
+      "website_url": "https://phuongbenthanh.gov.vn/",
+      "map_destination_name": "UBND Phường Bến Thành",
+      "google_place_id": "ChIJp79jqT0vdTER_Bxv4VTO6lY",
+      "opening_hours": {
+        "text": "Thứ Hai–Thứ Sáu: 07:30–11:30, 13:00–17:00 · Thứ Bảy: 07:30–11:30 · Chủ Nhật: đóng cửa",
+        "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJp79jqT0vdTER_Bxv4VTO6lY",
+        "source_type": "google_maps_reviewed",
+        "checked_at": "2026-10-25"
+      }
+    },
+    {
+      "id": "hcm-public-service-cau-ong-lanh",
+      "province": "Hồ Chí Minh",
+      "name": "Trung tâm Phục vụ hành chính công phường Cầu Ông Lãnh",
+      "category_label": "Trung tâm phục vụ hành chính công cấp phường",
+      "queries": [
+        "Trung tâm phục vụ hành chính công",
+        "Trung tâm hành chính công",
+        "Trung tâm phục vụ hành chính công Quận 1",
+        "Trung tâm hành chính công Quận 1"
+      ],
+      "address": "105 Trần Đình Xu, phường Cầu Ông Lãnh, Hồ Chí Minh",
+      "latitude": 10.7623713,
+      "longitude": 106.688279,
+      "source_url": "https://sotuphap.hochiminhcity.gov.vn/en/thong-bao/-/asset_publisher/emZ19pfF3Yyq/content/id/3481855/uy-ban-nhan-dan-thanh-pho-ho-chi-minh-thong-bao-cong-khai-dia-diem-so-dien-thoai-duong-day-nong-cua-bo-phan-mot-cua-cap-tinh-cap-xa-sau-sap-xep-bo-may",
+      "source_checked_at": "2026-10-25",
+      "coordinate_source_url": "https://www.google.com/maps/place/?q=place_id:ChIJkZYvTgAvdTERU3AvZceE6l8",
+      "geocoded_address": "105 Trần Đình Xu, Cầu Ông Lãnh, Hồ Chí Minh",
+      "map_destination_name": "UBND Phường Cầu Ông Lãnh",
+      "google_place_id": "ChIJkZYvTgAvdTERU3AvZceE6l8",
+      "opening_hours": {
+        "text": "Thứ Hai–Thứ Sáu: 07:30–17:00 · Thứ Bảy, Chủ Nhật: đóng cửa",
+        "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJkZYvTgAvdTERU3AvZceE6l8",
+        "source_type": "google_maps_reviewed",
+        "checked_at": "2026-10-25"
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+[
+  {"q": "asdfgh qwerty zxcvb", "expect_branch": "meaningless"},
+  {"q": "kjhkjh sdfsdf wertwert", "expect_branch": "meaningless"},
+
+  {"q": "Điều 45 Luật Đất đai 2024", "expect_branch": "rag", "expect_doc": "31/2024/QH15", "expect_dieu": ["45"]},
+  {"q": "cho tôi xem khoản 1 điều 220 luật đất đai 2024", "expect_branch": "rag", "expect_doc": "31/2024/QH15", "expect_dieu": ["220"]},
+  {"q": "Theo Điều 45 Luật Đất đai thì tôi có được tặng cho đất không?", "expect_branch": "rag"},
+
+  {
+    "q": "kiểm tra giúp tôi",
+    "expect_branch": "contract_review",
+    "expect_contract_type": "chuyen_nhuong_dat",
+    "expect_doc": "31/2024/QH15",
+    "expect_dieu": ["45"],
+    "documents": [{"text": "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT\nBên A chuyển nhượng cho bên B thửa đất số 12, tờ bản đồ số 5, giá 1.000.000.000 đồng. Hai bên thanh toán làm hai đợt."}]
+  },
+  {
+    "q": "hợp đồng này có rủi ro gì không",
+    "expect_branch": "contract_review",
+    "expect_contract_type": "tang_cho_dat",
+    "documents": [{"text": "HỢP ĐỒNG TẶNG CHO QUYỀN SỬ DỤNG ĐẤT\nBên A tặng cho bên B thửa đất số 7. Bên B không phải đăng ký biến động."}]
+  },
+  {
+    "q": "xem giúp tôi",
+    "expect_branch": "contract_review",
+    "expect_contract_type": "thue_dat_nha",
+    "documents": [{"text": "HỢP ĐỒNG THUÊ NHÀ\nBên A cho bên B thuê căn nhà số 3 trong 12 tháng, tiền thuê 10.000.000 đồng/tháng."}]
+  },
+  {
+    "q": "kiểm tra giúp tôi",
+    "expect_branch": "contract_review",
+    "expect_contract_type": "khac",
+    "documents": [{"text": "BIÊN BẢN HỌP GIA ĐÌNH\nCả nhà thống nhất đi du lịch vào mùa hè."}]
+  }
+]

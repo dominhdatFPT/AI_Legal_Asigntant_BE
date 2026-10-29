@@ -56,7 +56,7 @@ class LocalOcr:
     @property
     def request_namespace(self):
         enabled = self.settings.vietocr_enabled if self.settings else os.getenv("DOCUMENT_VIETOCR_ENABLED","0") == "1"
-        return "tesseract5-vietocr-seq2seq-parser24-pair2-" + ("on" if enabled else "off")
+        return "tesseract5-vietocr-seq2seq-parser25-pair2-" + ("on" if enabled else "off")
 
     def read_image(self, image, *, deadline, on_response):
         if self.settings is None:
@@ -110,7 +110,7 @@ class LocalOcr:
                 return {"side": image.side, "psm": psm, "ocr_size": size, "lines": tsv_lines(output, size)}
             try:
                 primary = recognize(encoded.getvalue(), ocr_size, 3)
-                raw = {"engine": "tesseract-local", "engine_version": "5", "parser_version": "24",
+                raw = {"engine": "tesseract-local", "engine_version": "5", "parser_version": "25",
                        "languages": "vie+eng", "mrz_model": "doubango-mrz-best" if mrz_model.is_file() else "eng",
                        "side": image.side, "source_size": source_size, "ocr_size": ocr_size,
                        "card_crop": card_crop, "lines": primary["lines"], "attempts": []}
@@ -156,29 +156,10 @@ class LocalOcr:
                             numeric=recognize(buffer.getvalue(),{"width":ink.width,"height":ink.height},6,mrz=True,alphabet="0123456789/.-")
                             numeric.update(source="numeric_field",field="date_of_birth")
                             raw["attempts"].append(numeric)
-                if image.side == "back" and not mrz_candidates(raw) and deadline - time.monotonic() > 1:
-                    # Read three detected rows from this one image with a raw
-                    # line recognizer. Different alphabets reflect TD1 fields,
-                    # but no recognized characters/digits are manually repaired.
-                    rows = [line for line in raw["lines"] if "<" in line["text"]
-                            and 25 <= len(re.sub(r"\s+", "", line["text"])) <= 40
-                            and line["polygon"][0][1] > pixels.height * .45]
-                    if len(rows) == 3:
-                        attempt = {"side": "back", "source": "mrz_rows_psm13", "lines": []}
-                        alphabets = ("0123456789IDVNM<", "0123456789MFVN<", "ABCDEFGHIJKLMNOPQRSTUVWXYZ<")
-                        for row, alphabet in zip(rows, alphabets):
-                            if deadline - time.monotonic() <= 1:
-                                break
-                            x, y = row["polygon"][0]; right, bottom = row["polygon"][2]
-                            region = pixels.convert("L").crop((max(0,x-6), max(0,y-6), min(pixels.width,right+6), min(pixels.height,bottom+6)))
-                            region = ImageOps.autocontrast(region)
-                            scale = min(2, 2400 / region.width)
-                            region = region.resize((round(region.width*scale), round(region.height*scale)), Image.Resampling.LANCZOS)
-                            buffer = io.BytesIO(); region.save(buffer,format="PNG")
-                            recognized = recognize(buffer.getvalue(), {"width":region.width,"height":region.height}, 13, mrz=True, alphabet=alphabet)
-                            attempt["lines"].extend(recognized["lines"])
-                        if len(attempt["lines"]) == 3:
-                            raw["attempts"].append(attempt)
+                if image.side == "back" and not mrz_candidates(raw):
+                    from app.services.identity_mrz_regions import read_bands
+                    raw["attempts"].extend(read_bands(pixels, raw, recognize, deadline=deadline,
+                                                    dedicated_model=mrz_model.is_file()))
                 if image.side == "back" and not mrz_candidates(raw) and deadline - time.monotonic() > 1:
                     # Read all three MRZ rows in one pass; never stitch different
                     # OCR attempts or repair digits to make a checksum succeed.
@@ -191,10 +172,6 @@ class LocalOcr:
                     detected = recognize(buffer.getvalue(), {"width": region.width, "height": region.height}, 6, mrz=True)
                     detected.update(source="mrz_band", source_crop=list(source_crop))
                     raw["attempts"].append(detected)
-                    if not mrz_candidates(raw):
-                        from app.services.identity_mrz_regions import read_rows
-                        raw["attempts"].extend(read_rows(pixels, detected, recognize, deadline=deadline,
-                                                        dedicated_model=mrz_model.is_file()))
                 if image.side == "back" and not mrz_candidates(raw):
                     # Detect rows on dark ink instead of relying on the first
                     # full-page pass. Never repair digits or mix different passes.
@@ -207,46 +184,24 @@ class LocalOcr:
                         detected=recognize(buffer.getvalue(),{"width":dark.width,"height":dark.height},6,mrz=True)
                         detected.update(source="mrz_dark_detection",threshold=threshold)
                         raw["attempts"].append(detected)
-                        rows=[l for l in detected["lines"] if len(l["text"].replace(" ","")) >= 20]
-                        if len(rows)!=3:
-                            continue
-                        for padding in (12,25):
-                            if deadline-time.monotonic() <= 5:
-                                break
-                            trial={"side":"back","source":"mrz_dark_rows_psm13","threshold":threshold,"padding":padding,"lines":[]}
-                            for index,(row,alphabet) in enumerate(zip(rows,("0123456789IDVNM<","0123456789MFVN<","ABCDEFGHIJKLMNOPQRSTUVWXYZ<"))):
-                                x,y=row["polygon"][0];r,b=row["polygon"][2]
-                                horizontal = padding if index == 2 else 5
-                                vertical = 3 if index == 2 else 5
-                                line=dark.crop((max(0,x-horizontal),max(0,y-vertical),min(dark.width,r+horizontal),min(dark.height,b+vertical)))
-                                if index == 2:
-                                    line=ImageOps.expand(line,border=20,fill=255)
-                                buffer=io.BytesIO();line.save(buffer,format="PNG")
-                                dedicated = index == 2 and mrz_model.is_file()
-                                read=recognize(buffer.getvalue(),{"width":line.width,"height":line.height},6 if dedicated else 13,
-                                               mrz=True,alphabet=None if dedicated else alphabet,language="mrz" if dedicated else None)
-                                trial["lines"].extend(read["lines"])
-                            raw["attempts"].append(trial)
-                            if mrz_candidates(trial):
-                                break
                         if mrz_candidates(raw):
                             break
                 if image.side == "back":
-                    from app.services.identity_parser import folded
-                    text = " ".join(folded(line["text"]) for attempt in [raw]+raw["attempts"] for line in attempt["lines"])
-                    if "of issue" in text and "of expiry" in text:
-                        from app.services.vietocr_local import residence_value_regions
+                    if deadline - time.monotonic() > 1:
+                        from app.services.vietocr_local import residence_value_regions, supplemental_regions
                         anchored_residence = residence_value_regions(raw, pixels.width, pixels.height)
-                        # Cropped, landscape 2024 card: three printed value
-                        # regions. Residence and registered birth place retain
-                        # their own semantics, not permanent address/origin.
-                        regions = (("residence_address", (.055,.092,.47,.147)),
-                                   ("registered_birth_place", (.055,.235,.47,.29)),
-                                   ("issue_place", (.28,.48,.75,.56)))
-                        for key, (left,top,right,bottom) in regions:
+                        semantic_regions = supplemental_regions(raw, pixels.width, pixels.height, set())
+                        for key in ("residence_address", "registered_birth_place", "issue_place"):
                             if deadline - time.monotonic() <= 1:
                                 break
-                            box = anchored_residence["suffix"] if key == "residence_address" and anchored_residence else (left*pixels.width,top*pixels.height,right*pixels.width,bottom*pixels.height)
+                            boxes = semantic_regions.get(key) or []
+                            if key == "residence_address" and anchored_residence:
+                                box = anchored_residence["suffix"]
+                            elif boxes:
+                                box = (min(part[0] for part in boxes), min(part[1] for part in boxes),
+                                       max(part[2] for part in boxes), max(part[3] for part in boxes))
+                            else:
+                                continue
                             region = pixels.crop(tuple(round(v) for v in box))
                             if key in {"residence_address", "registered_birth_place"}:
                                 # Security-pattern background and clipped border
@@ -291,7 +246,8 @@ class LocalOcr:
                                         attempt["lines"] = detail_attempt["lines"] + attempt["lines"]
                                         attempt["includes_inline_detail"] = True
                                         attempt["address_lines"] = [l["text"] for l in attempt["lines"]]
-                            attempt.update(source="new_card_region",field=key)
+                            attempt.update(source="new_card_region",field=key,source_crop=list(box),
+                                           preprocessing="local_threshold" if key in {"residence_address", "registered_birth_place"} else "autocontrast")
                             raw["attempts"].append(attempt)
                 if self.settings.vietocr_enabled:
                     from app.services.vietocr_local import read_regions

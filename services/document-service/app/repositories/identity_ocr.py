@@ -12,7 +12,7 @@ from uuid import uuid4
 from psycopg.types.json import Jsonb
 
 from app.core.errors import DocumentError
-from app.services.identity_parser import merge_fields, parse_additional_fields, residence_components, ADDITIONAL_FIELDS
+from app.services.identity_parser import merge_fields, parse_fields, parse_additional_fields, residence_components, field_diagnostics, FIELDS, ADDITIONAL_FIELDS
 from app.services.identity_card_match import ensure_card_pair
 
 logger = logging.getLogger("document-service")
@@ -35,6 +35,8 @@ class IdentityOcr:
         back = parse_additional_fields(raw_back)
         row["card_match_status"] = (raw_back.get("card_pair_check", {}).get("status", "not_checked")
             if row["status"] == "completed" else "not_checked")
+        row["card_pair_status"] = row["card_match_status"]
+        row["fields"] = {key: (row.get("fields") or {}).get(key) for key in FIELDS}
         row["additional_fields"] = {key: None if front[key] and back[key] and front[key] != back[key]
             else front[key] or back[key] for key in ADDITIONAL_FIELDS}
         components = residence_components(raw_back, row["additional_fields"].get("residence_address"))
@@ -44,6 +46,13 @@ class IdentityOcr:
             correction = raw_back.get("card_pair_check", {}).get("corrections", {}).get("expiry_date")
             if correction:
                 row["additional_fields"]["expiry_date"] = correction
+        observed = row["fields"]
+        if row["status"] == "failed" and raw_front and raw_back:
+            observed, _ = merge_fields(parse_fields(raw_front), parse_fields(raw_back))
+        row["field_diagnostics"] = field_diagnostics(raw_front, raw_back,
+            {**observed, **row["additional_fields"]})
+        if row["status"] == "failed" and row.get("error_code") == "IDENTITY_PAIR_UNVERIFIABLE":
+            row["card_pair_status"] = "unverifiable"
         return row
 
     def _save_raw(self, owner, session_id, side, raw):

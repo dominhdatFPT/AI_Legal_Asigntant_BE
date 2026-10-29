@@ -16,7 +16,7 @@ def _invalid(field):
 
 
 def validate_search_payload(value):
-    if not isinstance(value, dict) or set(value) - {"address", "query", "radius_meters", "limit"}:
+    if not isinstance(value, dict) or set(value) - {"address", "query"}:
         _invalid("body")
     address = value.get("address")
     if not isinstance(address, dict):
@@ -30,13 +30,7 @@ def validate_search_payload(value):
     detail = address.get("detail")
     if not isinstance(detail, str) or not 1 <= len(detail.strip()) <= 300:
         _invalid("address.detail")
-    radius = value.get("radius_meters", 10000)
-    limit = value.get("limit", 5)
-    if isinstance(radius, bool) or not isinstance(radius, int) or not 1000 <= radius <= 50000:
-        _invalid("radius_meters")
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10:
-        _invalid("limit")
-    return {"address": address, "query": query.strip(), "radius_meters": radius, "limit": limit}
+    return {"address": address, "query": query.strip()}
 
 
 @router.post("/search")
@@ -53,4 +47,23 @@ async def search(request: Request, user: CurrentUser = Depends(get_current_user)
         raise LocationError(unavailable, "Tìm kiếm địa điểm hiện chưa sẵn sàng.", 503)
     await state.search_limiter.check(user.id)
     result = await bounded_search(state.goong_client, search_request, settings.search_timeout_seconds)
+    lookups = getattr(state, "contact_lookups", None)
+    if lookups:
+        lookup_id = lookups.register(user.id, result["items"])
+        if lookup_id:
+            result["web_lookup_id"] = lookup_id
+    return success(request, result)
+
+
+@router.post("/enrich")
+async def enrich(request: Request, user: CurrentUser = Depends(get_current_user)):
+    try:
+        payload = await request.json()
+    except ValueError:
+        raise LocationError("BAD_REQUEST", "JSON gửi lên không đọc được.", 400) from None
+    if (not isinstance(payload, dict) or set(payload) != {"lookup_id"}
+            or not isinstance(payload["lookup_id"], str) or not 20 <= len(payload["lookup_id"]) <= 64):
+        _invalid("lookup_id")
+    await request.app.state.web_limiter.check(user.id)
+    result = await request.app.state.contact_lookups.lookup(payload["lookup_id"], user.id)
     return success(request, result)

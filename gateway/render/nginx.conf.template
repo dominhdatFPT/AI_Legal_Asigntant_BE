@@ -120,6 +120,15 @@ http {
             proxy_pass $up;
         }
 
+        # Upload catalog tham chiếu tới 11 MB, lớn hơn giới hạn chung 10m.
+        location = /api/contracts/reference-catalog {
+            set $up "${CONTRACT_SERVICE_URL}";
+            rewrite ^ /api/v1/contracts/reference-catalog break;
+            proxy_pass $up;
+            client_max_body_size 11m;
+            proxy_read_timeout 120s;
+        }
+
         location /api/contracts/ {
             set $up "${CONTRACT_SERVICE_URL}";
             rewrite ^/api/contracts/(.*)$ /api/v1/contracts/$1 break;

@@ -46,8 +46,16 @@ services:
       AGENT_DATABASE_URL: ${AGENT_DATABASE_URL:-}
       # OpenRouter trước; lỗi (hết lượt model free, sai key...) thì tự chuyển sang Gemini
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter,gemini}
+      # Chỉ để test: true = bỏ bước LLM, trả thẳng các đoạn luật rag tìm được
+      LLM_BYPASS: ${LLM_BYPASS:-false}
+      # Chặn câu hỏi ngoài phạm vi kho luật: nhờ LLM chấm độ liên quan của các đoạn luật trước khi trả lời
+      RELEVANCE_CHECK: ${RELEVANCE_CHECK:-false}
+      RELEVANCE_TIMEOUT_SECONDS: ${RELEVANCE_TIMEOUT_SECONDS:-8}
+      GEMINI_MAX_RETRIES: ${GEMINI_MAX_RETRIES:-3}
+      GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-45}
+      OPENROUTER_TIMEOUT_SECONDS: ${OPENROUTER_TIMEOUT_SECONDS:-30}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
@@ -280,6 +288,11 @@ services:
       LOCATION_SEARCH_TIMEOUT_SECONDS: ${LOCATION_SEARCH_TIMEOUT_SECONDS:-20}
       LOCATION_GOONG_MAX_RPS: ${LOCATION_GOONG_MAX_RPS:-4}
       LOCATION_GOONG_DAILY_BUDGET: ${LOCATION_GOONG_DAILY_BUDGET:-1000}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+      LOCATION_WEB_MODEL: ${LOCATION_WEB_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}
+      LOCATION_WEB_LOOKUP_ENABLED: ${LOCATION_WEB_LOOKUP_ENABLED:-false}
+      LOCATION_WEB_DAILY_BUDGET: ${LOCATION_WEB_DAILY_BUDGET:-20}
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
 
@@ -365,10 +378,10 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 10s
-      timeout: 5s
+      interval: 20s
+      timeout: 30s
       retries: 5
-      start_period: 15s
+      start_period: 30s
     networks:
       default:
         aliases:

@@ -2,6 +2,7 @@
 
 Cách chạy (ở thư mục gốc legal-assistant-ai, đã bật venv):
     python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --top-k 5
+    python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --max-chars 0   # in đủ nội dung đoạn
     # văn bản nạp bằng --fake-embedding thì tìm cũng phải thêm --fake-embedding
 """
 
@@ -22,6 +23,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("query")
     p.add_argument("--top-k", type=int, default=5)
+    p.add_argument("--max-chars", type=int, default=300, help="số ký tự in cho mỗi đoạn (mặc định 300, 0 = in đủ)")
     p.add_argument("--fake-embedding", action="store_true")
     args = p.parse_args()
     if args.fake_embedding:
@@ -43,7 +45,11 @@ def main() -> int:
         s = r["section_info"] or {}
         where = ", ".join(f"{k} {v}" for k, v in s.items() if v)
         print(f"[{i}] score {r['score']:.3f} | {r['document']['title']} | {where}")
-        print("    " + r["content"][:300].replace("\n", "\n    "))
+        content = r["content"]
+        cut = args.max_chars > 0 and len(content) > args.max_chars
+        if cut:
+            content = content[:args.max_chars] + "…"
+        print("    " + content.replace("\n", "\n    "))
     return 0
 
 

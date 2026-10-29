@@ -216,8 +216,7 @@ paths:
         ở document-service và đã trích chữ xong. Service lấy chữ từ document-service bằng chính access token của
         người dùng (document-service tự kiểm tra chủ file), đưa vào prompt cho AI phân tích và đối chiếu với luật.
         Nội dung tài liệu **không được lưu**, chỉ lưu `document_ids` vào `metadata` của tin nhắn trả lời.
-        Lượt hỏi sau muốn dùng lại tài liệu thì gửi lại `document_ids`. Có tài liệu thì câu dạng "Điều 45 Luật Đất đai"
-        không còn trả nguyên văn mà đi qua AI. Tài liệu, RAG hoặc AI lỗi thì không lưu tin nhắn nào.
+        Lượt hỏi sau muốn dùng lại tài liệu thì gửi lại `document_ids`. Tài liệu, RAG hoặc AI lỗi thì không lưu tin nhắn nào.
       x-status: implemented
       security:
         - BearerAuth: []
@@ -349,6 +348,86 @@ paths:
                       code: DOCUMENT_SERVICE_ERROR
                       message: Không đọc được tài liệu lúc này, vui lòng thử lại sau.
                     request_id: req-125
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /agent/conversations/{conversation_id}/messages/stream:
+    post:
+      tags: [Conversations]
+      operationId: sendMessageStream
+      summary: Gửi tin nhắn, nhận câu trả lời dạng stream (Server-Sent Events)
+      description: |
+        Như `sendMessage` (cùng body, cùng quyền, cùng cách lưu) nhưng câu trả lời của AI được gửi dần từng mẩu chữ
+        thay vì chờ đủ câu. Endpoint `sendMessage` giữ nguyên.
+
+        **Lỗi trước khi mở stream:** kiểm tra quyền, lấy lịch sử, đọc tài liệu đính kèm và tìm đoạn luật (cùng bước chấm
+        độ liên quan nếu bật) đều xong TRƯỚC khi mở stream. Lỗi ở các bước này trả JSON lỗi bình thường
+        (`application/json`, 401/403/404/409/422/503) giống `sendMessage`, và không lưu gì.
+
+        **Sau khi mở stream** (HTTP 200, `text/event-stream`), mỗi sự kiện có dạng
+        `event: <tên>` rồi `data: <JSON một dòng>` rồi một dòng trống:
+        - `delta` `{"text": "..."}`: một mẩu chữ, nối các `text` theo thứ tự để có câu trả lời.
+        - `done`: kết thúc thành công; `data` là `SendMessageResponse` (cùng dữ liệu `data` của `sendMessage`, gồm
+          `user_message` và `assistant_message` đã lưu DB, có `id`, `metadata`).
+        - `error` `{"code", "message"}`: lỗi giữa chừng (`AI_SERVICE_ERROR` khi LLM lỗi, `INTERNAL_ERROR` khi lỗi khác).
+          Stream kết thúc, **không lưu tin nhắn nào**; client bỏ phần chữ đã nhận và cho người dùng gửi lại.
+        Luôn kết thúc bằng đúng một `done` hoặc một `error`. Chỉ lưu cặp tin nhắn sau khi stream xong đầy đủ; client ngắt
+        kết nối giữa chừng thì không lưu gì.
+
+        Câu trả lời "xong luôn" (câu vô nghĩa, ngoài phạm vi `out_of_scope`, `LLM_BYPASS`) và nhánh có `document_ids`
+        (rà soát tài liệu) không stream: phát cả câu trong một `delta` rồi `done`.
+
+        **Gọi từ trình duyệt:** `EventSource` không gửi được POST kèm token, nên đọc stream bằng `fetch` và `ReadableStream`
+        (`response.body.getReader()`), tách sự kiện theo dòng trống. Header `X-Accel-Buffering: no` để nginx không gom lại.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SendMessageRequest" }
+            example:
+              content: Thủ tục sang tên đất cần những giấy tờ gì?
+      responses:
+        "200":
+          description: Stream sự kiện (xem mô tả). Lỗi sau khi mở stream đi qua sự kiện `error`, mã HTTP vẫn là 200
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+            Cache-Control: { schema: { type: string, example: no-cache } }
+            X-Accel-Buffering: { schema: { type: string, example: "no" } }
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: |
+                event: delta
+                data: {"text": "Theo Khoản 1 Điều 188 "}
+
+                event: delta
+                data: {"text": "Luật Đất đai 2024, ..."}
+
+                event: done
+                data: {"user_message": {"id": "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d", "role": "user", "content": "Thủ tục sang tên đất cần những giấy tờ gì?", "metadata": null, "created_at": "2026-10-07T08:01:00Z"}, "assistant_message": {"id": "2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e", "role": "assistant", "content": "Theo Khoản 1 Điều 188 Luật Đất đai 2024, ...", "metadata": {"rag_chunk_ids": ["a1b2c3d4-e5f6-7890-abcd-ef1234567890"], "model": "google/gemini-2.5-flash", "tokens_used": 512}, "created_at": "2026-10-07T08:01:03Z"}}
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/ConversationForbidden" }
+        "404":
+          description: Không có hội thoại, hoặc (khi gửi `document_ids`) không có tài liệu / tài liệu không phải của người dùng. Như `sendMessage`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Tài liệu chưa trích chữ xong, hoặc không đọc được / không đạt kiểm tra an toàn. Như `sendMessage`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "503":
+          description: RAG-service, LLM hoặc document-service không phản hồi TRƯỚC khi mở stream. Như `sendMessage`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
         "500": { $ref: "#/components/responses/InternalError" }
 
 components:
@@ -552,7 +631,7 @@ components:
         model:
           type: string
           nullable: true
-          description: Model LLM đã dùng (Groq hoặc Gemini, theo `LLM_PROVIDER`); `null` khi không gọi AI (câu vô nghĩa, tra cứu nguyên văn)
+          description: "Model LLM đã dùng (Groq, Gemini hoặc OpenRouter, theo `LLM_PROVIDER`); `null` khi không gọi AI (câu vô nghĩa); câu ngoài phạm vi (`type` = `out_of_scope`) là model đã chấm độ liên quan"
           example: qwen/qwen3.8-27b
         tokens_used:
           type: integer
@@ -561,8 +640,20 @@ components:
           example: 512
         type:
           type: string
-          enum: [article_lookup]
-          description: Chỉ có khi câu trả lời là nguyên văn Điều/Khoản lấy từ kho, không qua AI
+          enum: [out_of_scope]
+          description: |
+            Chỉ có khi server bật `RELEVANCE_CHECK` và không đoạn luật nào tìm được dùng trả lời câu hỏi: `content` là câu
+            cố định "chưa tìm thấy quy định liên quan trong kho văn bản", `rag_chunk_ids` rỗng, `model` là model đã dùng để chấm
+        llm_bypass:
+          type: boolean
+          description: Chỉ có khi server bật `LLM_BYPASS` (chế độ test, không qua LLM); khi đó `model` là `no-llm`, `content` là các đoạn luật rag tìm được
+        queries:
+          type: array
+          items: { type: string }
+          description: Chỉ có khi `llm_bypass`; các câu thực sự gửi đi tìm trong rag-service
+        system_prompt:
+          type: string
+          description: Chỉ có khi `llm_bypass`; prompt hệ thống lẽ ra được gửi cho LLM
         mode:
           type: string
           enum: [contract_review]

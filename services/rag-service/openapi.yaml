@@ -351,118 +351,6 @@ paths:
                       message: Không truy cập được kho văn bản, vui lòng thử lại sau.
                     request_id: req-123
 
-  /internal/v1/rag/articles:
-    post:
-      tags: [Internal]
-      operationId: getArticle
-      summary: Tra cứu nguyên văn một Điều / Khoản
-      description: |
-        Chỉ agent-service gọi, kèm `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`.
-        Tìm văn bản theo tên hoặc số hiệu (`law`, không phân biệt hoa thường, có dấu hay không dấu, có thể bỏ năm),
-        rồi cắt đúng Điều `dieu` (và Khoản `khoan` nếu có) từ toàn văn gốc. Không dùng embedding, không gọi Gemini.
-        Tên khớp nhiều văn bản thì ưu tiên văn bản `active`; tên có năm mà kho không có năm đó thì dùng bản đang có và ghi `note`.
-      x-status: implemented
-      servers:
-        - url: http://rag-service:8000
-          description: Chỉ gọi được trong mạng Docker
-      security:
-        - InternalToken: []
-      parameters:
-        - $ref: "#/components/parameters/RequestId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/ArticleRequest" }
-            example:
-              law: Luật Đất đai 2024
-              dieu: "220"
-              khoan: "2"
-      responses:
-        "200":
-          description: Nguyên văn Điều / Khoản
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ArticleResponse" }
-              example:
-                data:
-                  document:
-                    id: f1e2d3c4-b5a6-7890-abcd-ef1234567890
-                    title: Luật Đất đai 2024
-                    doc_number: 31/2024/QH15
-                    doc_type: luat
-                    status: active
-                  chuong: XIII
-                  dieu: "220"
-                  khoan: "2"
-                  content: "Điều 220. Tách thửa đất, hợp thửa đất\n2. Trường hợp tách thửa đất thì ..."
-                  note: null
-                error: null
-                request_id: req-123
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "404":
-          description: Không có văn bản, Điều hoặc Khoản được hỏi
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              examples:
-                document:
-                  summary: Kho chưa có văn bản
-                  value:
-                    data: null
-                    error:
-                      code: DOCUMENT_NOT_FOUND
-                      message: "Kho văn bản chưa có \"Luật Hôn nhân và gia đình\". Hiện kho có: Luật Doanh nghiệp 2020, Luật Đất đai 2024."
-                    request_id: req-123
-                article:
-                  summary: Văn bản không có Điều này
-                  value:
-                    data: null
-                    error:
-                      code: ARTICLE_NOT_FOUND
-                      message: Luật Đất đai 2024 không có Điều 999 (văn bản này có 260 Điều).
-                    request_id: req-123
-                khoan:
-                  summary: Điều không có Khoản này
-                  value:
-                    data: null
-                    error:
-                      code: KHOAN_NOT_FOUND
-                      message: Điều 220 Luật Đất đai 2024 không có khoản 9 (Điều này chỉ có 4 khoản).
-                    request_id: req-123
-        "409":
-          description: Tên văn bản khớp nhiều văn bản cùng còn hiệu lực
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              example:
-                data: null
-                error:
-                  code: DOCUMENT_AMBIGUOUS
-                  message: "\"Luật Đầu tư\" khớp nhiều văn bản: Luật Đầu tư 2020, Luật Đầu tư 2025. Vui lòng ghi rõ năm hoặc số hiệu."
-                request_id: req-123
-        "422": { $ref: "#/components/responses/ValidationError" }
-        "500": { $ref: "#/components/responses/InternalError" }
-        "503":
-          description: Không kết nối được database
-          headers:
-            X-Request-ID: { $ref: "#/components/headers/RequestId" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-              example:
-                data: null
-                error:
-                  code: RAG_DATABASE_UNAVAILABLE
-                  message: Không truy cập được kho văn bản, vui lòng thử lại sau.
-                request_id: req-123
-
 components:
   securitySchemes:
     BearerAuth:
@@ -815,25 +703,6 @@ components:
           items:
             $ref: "#/components/schemas/DocType"
 
-    ArticleRequest:
-      type: object
-      required: [law, dieu]
-      properties:
-        law:
-          type: string
-          minLength: 1
-          maxLength: 200
-          description: Tên hoặc số hiệu văn bản, vd `Luật Đất đai 2024`, `luat dat dai`, `31/2024/QH15`
-        dieu:
-          type: string
-          pattern: "^\\d{1,4}[a-zA-Zđ]?$"
-          description: Số Điều, vd `45`, `10a`
-        khoan:
-          type: string
-          nullable: true
-          pattern: "^\\d{1,3}$"
-          description: Số Khoản. Bỏ trống = cả Điều.
-
     # ---------- Kết quả từng API ----------
     DocumentResponse:
       type: object
@@ -869,36 +738,6 @@ components:
             chunks:
               type: array
               items: { $ref: "#/components/schemas/ChunkSearchResult" }
-        error:      { $ref: "#/components/schemas/NoError" }
-        request_id: { $ref: "#/components/schemas/RequestIdValue" }
-
-    ArticleResponse:
-      type: object
-      required: [data, error, request_id]
-      properties:
-        data:
-          type: object
-          required: [document, dieu, content]
-          properties:
-            document:
-              type: object
-              required: [id, title, doc_type, status]
-              properties:
-                id:         { type: string, format: uuid }
-                title:      { type: string, example: Luật Đất đai 2024 }
-                doc_number: { type: string, nullable: true, example: 31/2024/QH15 }
-                doc_type:   { $ref: "#/components/schemas/DocType" }
-                status:     { $ref: "#/components/schemas/DocStatus" }
-            chuong:  { type: string, nullable: true, example: XIII }
-            dieu:    { type: string, example: "220" }
-            khoan:   { type: string, nullable: true, example: "2" }
-            content:
-              type: string
-              description: Nguyên văn, dòng đầu là "Điều X. Tên điều"; hỏi Khoản thì chỉ gồm dòng tên Điều + Khoản đó
-            note:
-              type: string
-              nullable: true
-              description: Ghi chú khi phải dùng văn bản khác năm người hỏi
         error:      { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 

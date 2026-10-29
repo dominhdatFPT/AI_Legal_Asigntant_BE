@@ -97,6 +97,28 @@ def test_damaged_number_label_does_not_hide_conflicting_numbers(foundation):
     assert parse_fields(value)["identity_number"] is None
 
 
+@pytest.mark.parametrize("noise", ['`"', "security pattern", " "])
+def test_number_geometry_survives_interleaved_background_line(foundation, noise):
+    from app.services.identity_parser import parse_fields
+    value = raw(["damaged label", noise, "Họ và tên:", "TEST PERSON"])
+    value["side"] = "front"
+    value["lines"][0]["words"] = [{"text": "099000000001", "confidence": .96, "bbox": [100, 0, 200, 30]}]
+    # OCR emitted a fragment in another column after the real number.
+    value["lines"][1]["polygon"] = [[700,20],[720,20],[720,45],[700,45]]
+    assert parse_fields(value)["identity_number"] == "099000000001"
+    value["lines"][1]["text"] = "Ngày sinh: 01/01/2000"
+    assert parse_fields(value)["identity_number"] is None
+
+
+def test_nearby_number_search_rejects_conflicting_digit_words(foundation):
+    from app.services.identity_parser import parse_fields
+    value = raw(["number one", "number two", "noise", "Họ và tên:"])
+    value["side"] = "front"
+    for i, digits in enumerate(("099000000001", "099000000002")):
+        value["lines"][i]["words"] = [{"text": digits, "confidence": .96, "bbox": [100, 40*i, 200, 30]}]
+    assert parse_fields(value)["identity_number"] is None
+
+
 def test_date_uses_value_confidence_not_bilingual_heading(foundation):
     from app.services.identity_parser import parse_fields
     value = raw(["Ngày sinh / Date of birth: 01/01/2000"])

@@ -21,9 +21,9 @@ class Settings(BaseSettings):
 
     # Gemini
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
-    gemini_timeout_seconds: float = 15.0
-    gemini_max_retries: int = 1
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_timeout_seconds: float = 45.0
+    gemini_max_retries: int = 3
 
     # Groq
     groq_api_key: str = ""
@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     llm_review_timeout_seconds: float = 40.0
     # Số đoạn luật lấy từ rag-service đưa vào prompt
     rag_top_k: int = 4
+    # CHỈ ĐỂ TEST, không bật ở môi trường thật: bỏ bước LLM, trả thẳng các đoạn luật rag tìm được
+    llm_bypass: bool = False
+    # Chấm độ liên quan (qa_agent): nhờ LLM chọn đoạn luật rag tìm được thật sự dùng trả lời câu hỏi, không có đoạn nào thì
+    # trả câu "ngoài phạm vi" thay vì để LLM tự suy diễn. Mỗi câu hỏi thêm một lượt gọi LLM ngắn nên tắt mặc định;
+    # không áp dụng cho rà soát tài liệu. Lỗi hoặc quá giờ thì bỏ qua bước chấm (giữ nguyên các đoạn)
+    relevance_check: bool = False
+    relevance_timeout_seconds: float = 8.0
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

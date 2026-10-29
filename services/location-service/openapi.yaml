@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Location Service API
-  version: 0.3.0
+  version: 0.4.0
   description: Danh mục hành chính công khai và tìm cơ quan qua Goong V2.
 servers:
   - url: http://localhost:8080/api/locations
@@ -99,8 +99,10 @@ paths:
       operationId: searchNearbyOffices
       x-status: implemented
       description: |
-        Tìm trong tập ứng viên hữu hạn của Goong, lọc theo bán kính và sắp xếp
-        khoảng cách đường thẳng. Đây không phải quãng đường đi xe hay danh sách
+        Trả tối đa 5 địa điểm, sắp xếp khoảng cách đường thẳng trong dữ liệu hiện có.
+        Trung tâm hành chính công Đà Nẵng dùng snapshot địa chỉ nguồn chính thức;
+        loại cơ quan/tỉnh thành khác dùng tập ứng viên hữu hạn của Goong.
+        Đây không phải quãng đường đi xe hay danh sách
         đầy đủ; kết quả không xác nhận thẩm quyền tiếp nhận thủ tục. Không gọi
         Procedure Service và không suy đoán mã hành chính giữa hai phiên bản.
       security:
@@ -114,8 +116,6 @@ paths:
             example:
               address: {administrative_version: current, detail: 12 Lê Duẩn, province_code: 79, district_code: null, ward_code: 26740}
               query: Trung tâm phục vụ hành chính công
-              radius_meters: 10000
-              limit: 5
       responses:
         '200':
           description: Kết quả (có thể rỗng hoặc một phần)
@@ -129,6 +129,40 @@ paths:
         '502': {$ref: '#/components/responses/Error'}
         '503': {$ref: '#/components/responses/Error'}
         '504': {$ref: '#/components/responses/Error'}
+  /offices/enrich:
+    post:
+      tags: [Offices]
+      operationId: enrichOfficeContacts
+      x-status: implemented
+      description: |
+        Tra cứu giờ làm việc bằng Google Places với điều kiện khớp chính xác số nhà/tên
+        đường; bổ sung hotline/giờ bằng Google Search grounding và xác minh trích dẫn
+        trên website .gov.vn khớp tên và địa chỉ cơ quan. Không nhận URL tùy ý từ client.
+        Handle thuộc người dùng, hết hạn sau 5 phút. Lỗi nhà cung cấp trả trạng thái
+        unavailable theo cơ quan, không làm mất kết quả tìm địa điểm.
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lookup_id]
+              properties:
+                lookup_id: {type: string, minLength: 20, maxLength: 64}
+      responses:
+        '200':
+          description: Chỉ gồm thông tin bổ sung; không sửa địa chỉ, tọa độ hoặc thứ tự.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OfficeEnrichmentResponse'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:
     BearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
@@ -186,13 +220,12 @@ components:
             - {$ref: '#/components/schemas/LegacyAddress'}
             - {$ref: '#/components/schemas/CurrentAddress'}
         query: {type: string, minLength: 1, maxLength: 150}
-        radius_meters: {type: integer, minimum: 1000, maximum: 50000, default: 10000}
-        limit: {type: integer, minimum: 1, maximum: 10, default: 5}
     Office:
       type: object
       required: [provider, place_id, name, address, latitude, longitude, distance_meters, distance_type, directions_url]
       properties:
-        provider: {type: string, enum: [goong]}
+        provider: {type: string, enum: [goong, official_directory]}
+        province: {type: string, description: Tỉnh/thành hiện tại đã xác minh cho ứng viên Goong}
         place_id: {type: string}
         name: {type: string}
         address: {type: string}
@@ -201,6 +234,44 @@ components:
         distance_meters: {type: integer, minimum: 0}
         distance_type: {type: string, enum: [straight_line]}
         directions_url: {type: string, format: uri, pattern: '^https://www[.]google[.]com/maps/dir/'}
+        maps_url: {type: string, format: uri, nullable: true, description: Địa điểm Google Maps đã đối chiếu với đúng cơ quan}
+        map_embed_url: {type: string, format: uri, nullable: true, description: Bản đồ nhúng của địa điểm đã đối chiếu}
+        map_destination_name: {type: string, description: Tên cơ quan hoặc tòa nhà đã đối chiếu để mở bản đồ}
+        google_place_id: {type: string, nullable: true, description: Mã Google được đối chiếu độc lập; không dùng mã Goong}
+        location_verification: {type: string, enum: [official_address_and_google_place, official_address_geocoded, provider_address_geocoded]}
+        map_location_note: {type: string, description: Ghi chú khi cơ quan ở một tầng trong tòa nhà}
+        service_note: {type: string, description: Hướng dẫn hình thức tiếp nhận đã có nguồn}
+        online_service_url: {type: string, format: uri}
+        source_url: {type: string, format: uri, description: Nguồn công bố địa chỉ cơ quan}
+        source_published_at: {type: string, format: date}
+        source_checked_at: {type: string, format: date}
+        unit_name: {type: string}
+        category_label: {type: string}
+        contact_phone: {type: string, nullable: true, description: Số liên hệ đã đối chiếu website hiện hành}
+        contact_label: {type: string}
+        contact_source_url: {type: string, format: uri, nullable: true}
+        website_url: {type: string, format: uri, nullable: true}
+        appointment_url: {type: string, format: uri, nullable: true, description: Cổng lịch hẹn theo ngày và quầy}
+        appointment_source_url: {type: string, format: uri, nullable: true, description: Website chính thức liên kết cổng hẹn}
+        photo:
+          type: object
+          nullable: true
+          properties:
+            url: {type: string, description: Đường dẫn ảnh công khai trên frontend}
+            alt: {type: string}
+            object_position: {type: string, description: Vị trí canh ảnh trong khung}
+            credit: {type: string}
+            source_url: {type: string, format: uri}
+        opening_hours:
+          type: object
+          nullable: true
+          properties:
+            text: {type: string, description: Giờ của đúng cơ quan; AI tổng hợp chỉ bổ sung khi thiếu giờ từ nguồn ưu tiên}
+            source_url: {type: string, format: uri}
+            source_type: {type: string, enum: [google_places, google_maps_reviewed, reviewed_website, ai_summary]}
+            verification_status: {type: string, enum: [reference, unverified], description: Trạng thái nội bộ của giờ từ nguồn độc lập hoặc AI tổng hợp}
+            source_label: {type: string}
+            checked_at: {type: string, format: date}
     OfficeModel:
       type: object
       properties:
@@ -229,6 +300,7 @@ components:
           type: object
           required: [origin, items, is_partial, warnings]
           properties:
+            web_lookup_id: {type: string, description: Handle tra cứu liên hệ tùy chọn; không gọi Google khi tìm địa điểm}
             origin:
               type: object
               required: [input_address, resolved_address, latitude, longitude]
@@ -237,9 +309,55 @@ components:
                 resolved_address: {type: string}
                 latitude: {type: number}
                 longitude: {type: number}
-            items: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/Office'}}
+            items: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/Office'}}
             is_partial: {type: boolean}
+            coverage:
+              type: object
+              properties:
+                source: {type: string, enum: [official_directory, goong_candidates]}
+                province: {type: string}
+                matched_offices: {type: integer}
+                located_offices: {type: integer}
+                excluded_outside_province: {type: integer, description: Số gợi ý bị bỏ do khác hoặc chưa xác minh địa phương}
+                excluded_unverified_locations: {type: integer, description: Số gợi ý thiếu địa chỉ đường hoặc có tọa độ không khớp địa chỉ}
+                source_url: {type: string, format: uri}
+                checked_at: {type: string, format: date}
             warnings: {type: array, items: {type: object, properties: {code: {type: string}, message: {type: string}}}}
+        error: {nullable: true}
+        request_id: {type: string}
+    OfficeEnrichmentResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            google_search_widgets: {type: array, maxItems: 5, items: {type: string}, description: Google Search suggestions HTML; chỉ render trong iframe sandbox}
+            items:
+              type: array
+              maxItems: 5
+              items:
+                type: object
+                required: [place_id, web_lookup_status]
+                properties:
+                  place_id: {type: string}
+                  web_lookup_status: {type: string, enum: [verified, unverified, unavailable]}
+                  web_checked_at: {type: string, format: date-time}
+                  google_place_id: {type: string, description: Google Place ID đã khớp tên cơ quan và địa chỉ}
+                  map_destination_name: {type: string}
+                  map_identity_source: {type: string, enum: [google_places]}
+                  map_identity_source_url: {type: string, format: uri}
+                  contact_phone: {type: string}
+                  contact_label: {type: string}
+                  contact_source_url: {type: string, format: uri}
+                  contact_evidence: {type: string}
+                  opening_hours:
+                    type: object
+                    properties:
+                      text: {type: string}
+                      source_url: {type: string, format: uri}
+                      source_type: {type: string, enum: [google_places, google_maps_reviewed, ai_summary]}
+                      verification_status: {type: string, enum: [unverified]}
+                      evidence: {type: string}
         error: {nullable: true}
         request_id: {type: string}
     ErrorResponse:

@@ -1,12 +1,37 @@
 openapi: 3.1.0
 info:
-  title: Read-only Source Document Library
-  version: 1.0.0
-  description: Public blank source documents only. No drafts, uploads or generation; private Contract APIs retain their existing authorization.
+  title: Source Document Library
+  version: 1.1.0
+  description: Public blank source documents and administrator PDF uploads. Private Contract APIs retain their existing authorization.
 servers:
   - url: http://localhost:8080
 paths:
   /api/contracts/reference-catalog:
+    post:
+      summary: Upload a blank PDF template (admin only)
+      security:
+        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, name, domain, procedure]
+              properties:
+                file: {type: string, format: binary, description: PDF up to 10 MiB and 100 pages, without password}
+                name: {type: string, minLength: 5, maxLength: 255}
+                domain: {type: string, enum: [land, business]}
+                procedure: {type: string, maxLength: 100, description: A classification key for the selected domain}
+      responses:
+        '201': {description: Persisted reference metadata and public page URLs}
+        '401': {description: Login required}
+        '403': {description: Administrator access or permitted cookie Origin required}
+        '409': {description: Identical PDF already exists for this domain and classification}
+        '413': {description: Multipart request exceeds Gateway limit}
+        '422': {description: Invalid file or metadata}
+        '503': {description: Database or upload schema unavailable}
     get:
       summary: List blank source documents
       security: []
@@ -23,7 +48,7 @@ paths:
         '200':
           description: Standard data/error/request_id envelope with items, pagination, domains, classifications, counts, revision and read_only=true.
         '422': {description: Invalid query}
-        '503': {description: Packaged catalogue unavailable}
+        '503': {description: Reference database unavailable}
   /api/contracts/reference-catalog/{template_id}:
     get:
       summary: Read one source document's metadata and page URLs
@@ -42,7 +67,7 @@ paths:
         - {in: path, name: asset_name, required: true, schema: {type: string}}
       responses:
         '200':
-          description: Inline PNG/PDF, X-Content-Type-Options=nosniff. Filenames must belong to the packaged asset whitelist.
+          description: Inline PNG/PDF, X-Content-Type-Options=nosniff. Packaged assets must be whitelisted; uploaded assets must exist in the Contract database.
           content:
             image/png: {schema: {type: string, format: binary}}
             application/pdf: {schema: {type: string, format: binary}}
@@ -55,3 +80,7 @@ paths:
       responses:
         '200':
           description: Standard envelope with schema_version, domains and items. Project procedures have existing codes/IDs; document groups have code=null and procedure_id=null.
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    cookieAuth: {type: apiKey, in: cookie, name: access_token}

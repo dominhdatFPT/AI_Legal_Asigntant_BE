@@ -14,6 +14,6 @@ RUN python /app/scripts/download_vietocr_model.py
 COPY services/document-service/scripts/download_mrz_model.py /app/scripts/download_mrz_model.py
 RUN python /app/scripts/download_mrz_model.py
 COPY services/document-service/app ./app
-COPY services/document-service/scripts/check_local_ocr*.py /app/scripts/
+COPY services/document-service/scripts/check_local_ocr*.py services/document-service/scripts/check_identity_photos.py /app/scripts/
 COPY services/document-service/scripts/setup_identity_profile.py services/document-service/scripts/setup_document_outbox.py services/document-service/scripts/check_release.py /app/scripts/
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

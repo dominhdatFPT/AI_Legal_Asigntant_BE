@@ -12,6 +12,6 @@ RUN python /app/scripts/download_vietocr_model.py
 COPY scripts/download_mrz_model.py /app/scripts/download_mrz_model.py
 RUN python /app/scripts/download_mrz_model.py
 COPY app ./app
-COPY scripts/check_local_ocr*.py /app/scripts/
+COPY scripts/check_local_ocr*.py scripts/check_identity_photos.py /app/scripts/
 COPY scripts/setup_identity_profile.py scripts/setup_document_outbox.py scripts/check_release.py /app/scripts/
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

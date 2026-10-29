@@ -16,11 +16,12 @@ router = APIRouter()
 @router.get("/templates")
 def list_form_templates(
     domain: Literal["land", "business"] | None = None,
+    procedure_code: str | None = Query(default=None, max_length=50),
     q: str | None = Query(default=None, max_length=200),
     x_request_id: str | None = Header(default=None),
 ):
     """Danh sách mẫu đơn tham khảo (đơn, tờ khai, hợp đồng mẫu) kèm lĩnh vực và định dạng file."""
-    items = TemplateRepository.list_templates(domain, q)
+    items = TemplateRepository.list_templates(domain=domain, procedure_code=procedure_code, q=q)
     return {
         "data": {"items": items, "total": len(items)},
         "error": None,

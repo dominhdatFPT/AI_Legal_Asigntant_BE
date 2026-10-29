@@ -13,6 +13,174 @@ from PIL import Image, ImageFilter, ImageOps
 from app.services.identity_card_match import mrz_candidates
 
 
+def detected_band(raw, size):
+    """Find three lower-card text rows, tolerating recognition errors in them.
+
+    This chooses pixels only. Recognition and all TD1 checks still run afresh.
+    A small lower margin excludes the card edge that otherwise becomes '<'.
+    """
+    width, height = size
+    rows = []
+    for line in raw.get("lines", []):
+        text = re.sub(r"\s+", "", line.get("text", ""))
+        polygon = line.get("polygon")
+        if not polygon or len(polygon) != 4 or "<" not in text or not 20 <= len(text) <= 42:
+            continue
+        x, y = polygon[0]; r, b = polygon[2]
+        if 0 <= x < r <= width and height * .45 < y < b <= height and r - x > width * .5:
+            rows.append((x, y, r, b))
+    rows.sort(key=lambda box: box[1])
+    if len(rows) != 3:
+        return None
+    gaps = [rows[i + 1][1] - rows[i][1] for i in range(2)]
+    line_height = statistics.median(b - y for _, y, _, b in rows)
+    if min(gaps) <= 0 or max(gaps) > min(gaps) * 1.8 or not .45 * line_height <= min(gaps) <= 2 * line_height:
+        return None
+    return (0, round(rows[0][1]), width, min(height, round(rows[-1][3] + .25 * line_height)))
+
+
+def read_bands(pixels, raw, recognize, *, deadline, dedicated_model):
+    """Read complete MRZs with the MRZ model, before expensive row fallbacks.
+
+    Work from detected geometry when available, then the lower card area.
+    Lighting normalization and bounded scale variants handle photographic
+    texture. No character substitution, front values, or cached text is used.
+    """
+    if not dedicated_model:
+        return []
+    box = detected_band(raw, pixels.size)
+    boxes = [box] if box else []
+    fallback = (0, int(pixels.height * .60), pixels.width, pixels.height)
+    if fallback not in boxes:
+        boxes.append(fallback)
+    attempts = []
+    for box in boxes:
+        band = pixels.crop(box)
+        for mode, factor in (("gray", 2), ("normalized", 1.5), ("normalized", 2)):
+            if deadline - time.monotonic() <= 4:
+                return attempts
+            region = (ImageOps.autocontrast(band.convert("L")) if mode == "gray"
+                      else normalize_ink(band))
+            scale = min(factor, 2400 / region.width)
+            region = region.resize((max(1, round(region.width * scale)),
+                                    max(1, round(region.height * scale))), Image.Resampling.LANCZOS)
+            region = ImageOps.expand(region, border=20, fill=255)
+            encoded = io.BytesIO(); region.save(encoded, format="PNG")
+            trial = recognize(encoded.getvalue(), {"width": region.width, "height": region.height},
+                              6, mrz=True, language="mrz")
+            trial.update(side="back", source="mrz_model_band", source_crop=list(box),
+                         preprocessing=mode, scale=scale)
+            attempts.append(trial)
+            if mrz_candidates(trial):
+                return attempts
+    if deadline - time.monotonic() > 6:
+        rectified = rectified_band(pixels)
+        if rectified:
+            band, geometry = rectified
+            for mode, factor in (("gray", 2), ("normalized", 1.5), ("normalized", 2), ("normalized", 1)):
+                if deadline - time.monotonic() <= 4:
+                    break
+                region = ImageOps.autocontrast(band.convert("L")) if mode == "gray" else normalize_ink(band)
+                scale = min(factor, 2400 / region.width)
+                region = region.resize((max(1, round(region.width * scale)), max(1, round(region.height * scale))),
+                                       Image.Resampling.LANCZOS)
+                region = ImageOps.expand(region, border=20, fill=255)
+                encoded = io.BytesIO(); region.save(encoded, format="PNG")
+                trial = recognize(encoded.getvalue(), {"width": region.width, "height": region.height},
+                                  6, mrz=True, language="mrz")
+                trial.update(side="back", source="mrz_rectified_band", geometry=geometry,
+                             preprocessing=mode, scale=scale)
+                attempts.append(trial)
+                if mrz_candidates(trial):
+                    break
+    return attempts
+
+
+def rectified_band(pixels):
+    """Locate aligned ink rows when page OCR merged rows with the card border.
+
+    Projection scoring estimates a small photographic skew. Three similarly
+    spaced, wide rows locate the MRZ without requiring any recognized text.
+    Isolating their ink span keeps the table/card edges out of recognition.
+    """
+    if pixels.width < 100 or pixels.height < 60:
+        return None
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    source_crop = (0, round(pixels.height * .55), pixels.width, round(pixels.height * .96))
+    band = pixels.crop(source_crop)
+    mask = normalize_ink(band)
+    small = mask.crop((round(mask.width * .04), 0, round(mask.width * .96), mask.height))
+    small = small.resize((800, max(1, round(small.height * 800 / small.width))))
+    scores = []
+    for quarter in range(-16, 17):
+        angle = quarter / 4
+        rotated = small.rotate(angle, resample=Image.Resampling.NEAREST, fillcolor=255)
+        counts = (np.asarray(rotated) < 128).sum(axis=1).astype(float)
+        scores.append((float((counts * counts).sum()), -abs(angle), angle))
+    angle = max(scores)[2]
+    band = band.rotate(angle, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+    ink = np.asarray(normalize_ink(band)) < 128
+    profile = ink[:, round(band.width * .04):round(band.width * .96)].mean(axis=1)
+    profile = np.convolve(profile, np.ones(5) / 5, mode="same")
+
+    def groups(values, gap):
+        result = []
+        for value in values:
+            if not result or value - result[-1][-1] > gap:
+                result.append([])
+            result[-1].append(int(value))
+        return result
+
+    boxes = []
+    for row in groups(np.flatnonzero(profile > .18), 4):
+        if len(row) <= 6:
+            continue
+        y, b = row[0], row[-1]
+        height = b - y
+        columns = np.flatnonzero(ink[y:b + 1].sum(axis=0) > height * .25)
+        runs = groups(columns, height * .8)
+        if not runs:
+            continue
+        run = max(runs, key=lambda values: values[-1] - values[0])
+        if run[-1] - run[0] >= band.width * .55:
+            boxes.append((run[0], y, run[-1], b))
+    candidates = []
+    for i in range(len(boxes) - 2):
+        rows = boxes[i:i + 3]
+        heights = [b - y for _, y, _, b in rows]
+        gaps = [rows[j + 1][1] - rows[j][1] for j in range(2)]
+        if (max(heights) > min(heights) * 1.8 or min(gaps) <= 0
+                or max(gaps) > min(gaps) * 1.5 or max(gaps) > max(heights) * 2.5):
+            continue
+        h = max(heights)
+        box = (max(0, round(min(row[0] for row in rows) - h * .25)),
+               max(0, round(rows[0][1] - h * .5)),
+               min(band.width, round(max(row[2] for row in rows) + h * .25)),
+               min(band.height, round(rows[-1][3] + h * .6)))
+        candidates.append(box)
+    if len(candidates) != 1:
+        return None
+    region = band.crop(candidates[0])
+    # A dark card edge can touch all three rows and appear as an extra digit.
+    # Only remove broad, nearly continuous vertical ink at the outer margins;
+    # text strokes are separated by the white gaps between the three rows.
+    columns = (np.asarray(normalize_ink(region)) < 128).mean(axis=0)
+    left, right = 0, region.width
+    for run in groups(np.flatnonzero(columns > .7), 2):
+        if run[-1] - run[0] < region.height * .08:
+            continue
+        if run[-1] < region.width * .15:
+            left = max(left, run[-1] + 3)
+        elif run[0] > region.width * .85:
+            right = min(right, run[0] - 2)
+    region = region.crop((left, 0, right, region.height))
+    return region, {"source_crop": list(source_crop), "angle": angle,
+                    "rotated_crop": list(candidates[0]), "horizontal_trim": [left, right]}
+
+
 def row_regions(detected, size):
     """Map a coarse MRZ band back to source coordinates, including its offset."""
     crop = detected.get("source_crop")

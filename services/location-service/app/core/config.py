@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import math
 import os
+import re
 
 
 class ConfigurationError(ValueError):
@@ -47,6 +48,11 @@ class LocationSettings:
     search_timeout_seconds: float = 20.0
     goong_max_rps: float = 4.0
     goong_daily_budget: int = 1000
+    web_lookup_enabled: bool = False
+    web_api_key: str = field(default="", repr=False)
+    google_maps_api_key: str = field(default="", repr=False)
+    web_model: str = "gemini-2.5-flash"
+    web_daily_budget: int = 20
 
     @classmethod
     def from_env(cls) -> "LocationSettings":
@@ -68,6 +74,15 @@ class LocationSettings:
                 "LOCATION_SEARCH_TIMEOUT_SECONDS không được nhỏ hơn LOCATION_GOONG_TIMEOUT_SECONDS."
             )
 
+        web_model = os.getenv("LOCATION_WEB_MODEL", os.getenv("GEMINI_MODEL", "gemini-2.5-flash")).strip()
+        web_key = os.getenv("GEMINI_API_KEY", "").strip()
+        google_maps_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", web_model):
+            raise ConfigurationError("LOCATION_WEB_MODEL không hợp lệ.")
+        if len(web_key) > 512 or any(ord(c) < 33 or ord(c) > 126 for c in web_key):
+            raise ConfigurationError("GEMINI_API_KEY không hợp lệ.")
+        if len(google_maps_key) > 512 or any(ord(c) < 33 or ord(c) > 126 for c in google_maps_key):
+            raise ConfigurationError("GOOGLE_MAPS_API_KEY không hợp lệ.")
         return cls(
             goong_api_key=key,
             search_enabled=_boolean("LOCATION_SEARCH_ENABLED", "false"),
@@ -75,6 +90,11 @@ class LocationSettings:
             search_timeout_seconds=search_timeout,
             goong_max_rps=_number("LOCATION_GOONG_MAX_RPS", "4", minimum=0.1, maximum=100),
             goong_daily_budget=_integer("LOCATION_GOONG_DAILY_BUDGET", "1000", minimum=1, maximum=1000000),
+            web_lookup_enabled=_boolean("LOCATION_WEB_LOOKUP_ENABLED", "false"),
+            web_api_key=web_key,
+            google_maps_api_key=google_maps_key,
+            web_model=web_model,
+            web_daily_budget=_integer("LOCATION_WEB_DAILY_BUDGET", "20", minimum=1, maximum=1000),
         )
 
     def search_unavailable_code(self) -> str | None:

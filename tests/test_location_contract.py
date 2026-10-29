@@ -41,8 +41,9 @@ def test_request_versions_and_limits_match_runtime():
     legacy, current = (resolve(ref["$ref"]) for ref in request["properties"]["address"]["oneOf"])
     assert "ward_code" not in legacy["required"]
     assert current["properties"]["district_code"]["nullable"] is True
-    assert request["properties"]["radius_meters"]["minimum"] == 1000
-    assert request["properties"]["limit"]["maximum"] == 10
+    assert "radius_meters" not in request["properties"]
+    assert "limit" not in request["properties"]
+    assert SPEC["components"]["schemas"]["OfficeSearchResponse"]["properties"]["data"]["properties"]["items"]["maxItems"] == 5
     assert request["properties"]["query"]["maxLength"] == 150
 
 

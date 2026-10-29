@@ -9,6 +9,7 @@ from app.core.config import LocationSettings
 from app.core.errors import failure, install_error_handlers
 from app.services.goong_client import GoongClient
 from app.services.search_limits import SearchLimiter
+from app.services.web_contacts import ContactLookups, ContactProviders, GoogleContacts, GooglePlacesHours
 
 
 @asynccontextmanager
@@ -16,6 +17,16 @@ async def lifespan(app):
     settings = LocationSettings.from_env()
     app.state.location_settings = settings
     app.state.search_limiter = SearchLimiter()
+    app.state.web_limiter = SearchLimiter()
+    app.state.web_contacts = ContactProviders(
+        places=(GooglePlacesHours(settings.google_maps_api_key)
+                if settings.google_maps_api_key else None),
+        websites=(GoogleContacts(settings.web_api_key, settings.web_model,
+                                 daily_budget=settings.web_daily_budget)
+                  if settings.web_api_key else None),
+    )
+    app.state.contact_lookups = ContactLookups(app.state.web_contacts,
+        enabled=settings.web_lookup_enabled and bool(settings.web_api_key or settings.google_maps_api_key))
     app.state.goong_client = GoongClient(settings.goong_api_key,
                                          timeout=settings.goong_timeout_seconds,
                                          max_rps=settings.goong_max_rps,
@@ -24,6 +35,7 @@ async def lifespan(app):
         yield
     finally:
         await app.state.goong_client.aclose()
+        await app.state.web_contacts.close()
 
 
 app = FastAPI(title="Location Service", version="0.1.0", lifespan=lifespan)

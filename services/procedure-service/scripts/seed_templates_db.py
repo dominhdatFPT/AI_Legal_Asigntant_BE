@@ -6,6 +6,7 @@ import requests
 SERVICE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BIZ_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục kinh doanh")
 LAND_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục đất đai")
+PREVIEW_DIR = os.path.join(SERVICE_DIR, "database", "form_templates_preview")
 
 SUPABASE_URL = "https://qqwuhiymixomwrdunfkz.supabase.co"
 SUPABASE_ANON_KEY = (
@@ -508,11 +509,13 @@ def seed_templates():
     success_count = 0
     for idx, entry in enumerate(TEMPLATE_ENTRIES, 1):
         file_path = os.path.join(entry["folder"], entry["file_name"])
-        if not os.path.exists(file_path):
+        preview_path = os.path.join(PREVIEW_DIR, os.path.basename(entry["folder"]), entry["file_name"])
+        read_path = preview_path if (entry.get("format") == "PDF" and os.path.exists(preview_path)) else file_path
+        if not os.path.exists(read_path):
             print(f"[{idx}/{len(TEMPLATE_ENTRIES)}] BỎ QUA - File không tồn tại: {entry['file_name']}")
             continue
             
-        with open(file_path, "rb") as f:
+        with open(read_path, "rb") as f:
             raw_bytes = f.read()
             
         file_size = len(raw_bytes)

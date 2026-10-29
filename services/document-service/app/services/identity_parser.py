@@ -2,27 +2,96 @@
 from datetime import date, datetime
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 FIELDS = ("full_name", "identity_number", "date_of_birth", "issue_date", "issue_place", "permanent_address")
 ADDITIONAL_FIELDS = ("sex", "nationality", "place_of_origin", "expiry_date", "residence_address", "registered_birth_place")
 LABELS = {
-    "full_name": ("ho, chu dem va ten khai sinh", "ho va ten", "full name"),
-    "identity_number": ("so dinh danh ca nhan", "personal identification number", "so", "no", "identity number"),
-    "date_of_birth": ("ngay, thang, nam sinh", "ngay sinh", "date of birth"),
-    "issue_date": ("ngay, thang, nam cap", "ngay cap", "date of issue", "issued on"),
-    "issue_place": ("noi cap", "place of issue"),
-    "permanent_address": ("dia chi thuong tru", "noi thuong tru", "place of residence", "permanent address"),
-    "sex": ("gioi tinh", "sex"),
-    "nationality": ("quoc tich", "nationality"),
-    "place_of_origin": ("que quan", "place of origin"),
-    "expiry_date": ("co gia tri den", "ngay, thang, nam het han", "ngay het han", "date of expiry", "expiry date"),
-    "residence_address": ("noi cu tru", "place of residence"),
-    "registered_birth_place": ("noi dang ky khai sinh", "place of birth"),
+    "full_name": ("ho chu dem va ten khai sinh", "ho chu dem va ten", "ho ten khai sinh", "ho va ten", "full name", "name at birth", "name"),
+    "identity_number": ("so dinh danh ca nhan", "personal identification number", "identity number", "personal number", "so can cuoc", "so cccd", "so cmnd", "so", "no", "id number"),
+    "date_of_birth": ("ngay thang nam sinh", "ngay sinh", "date of birth", "birth date", "dob"),
+    "issue_date": ("ngay thang nam cap", "ngay phat hanh", "ngay cap the", "ngay cap", "date of issue", "issued on", "issue date", "date issued"),
+    "issue_place": ("noi cap", "co quan cap", "don vi cap", "cap boi", "place of issue", "issuing authority", "issued by"),
+    "permanent_address": ("dia chi dang ky thuong tru", "dia chi thuong tru", "noi thuong tru", "permanent address", "registered address", "address of permanent residence"),
+    "sex": ("gioi tinh", "sex", "gender"),
+    "nationality": ("quoc tich", "nationality", "citizenship"),
+    "place_of_origin": ("que quan", "noi sinh", "noi khai sinh", "nguyen quan", "place of origin", "place of birth", "birth place", "origin"),
+    "expiry_date": ("co gia tri den", "ngay thang nam het han", "ngay het han", "ngay co gia tri den", "han su dung", "han the", "date of expiry", "expiry date", "valid until", "valid through"),
+    "residence_address": ("noi cu tru", "dia chi cu tru", "cho o hien nay", "dia chi hien tai", "place of residence", "of residence", "current address", "residential address", "present address"),
+    "registered_birth_place": ("noi dang ky khai sinh", "noi khai sinh dang ky", "dang ky khai sinh", "ky khai sinh", "registered place of birth", "registered birth place"),
 }
 
 
+def normalize_label(value):
+    """Normalize OCR headings only; never apply character repair to values."""
+    value = folded(value)
+    value = re.sub(r"c\s+u\b", "cu", value)  # split Vietnamese diacritic
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def resolve_label(value):
+    """Find a unique heading at the start of a line, with bounded OCR fuzz."""
+    original = normalize_label(value)
+    text = re.sub(r"^(?:[0-9il]\s+)", "", original)
+    tokens = text.split()
+    matches = []
+    for key, aliases in LABELS.items():
+        for alias in aliases:
+            target = normalize_label(alias)
+            parts = target.split()
+            for count in {len(parts)-1, len(parts), len(parts)+1}:
+                if count <= 0 or count > len(tokens):
+                    continue
+                head = " ".join(tokens[:count])
+                if target in {"so", "no"} and len(tokens) > count:
+                    number = tokens[count] if re.fullmatch(r"[0-9]{12}", tokens[count]) else (
+                        tokens[count + 1] if len(tokens) > count + 1 and tokens[count] in {"so", "no"} else "")
+                    if not re.fullmatch(r"[0-9]{12}", number):
+                        continue
+                if head == target:
+                    score = 1.0
+                elif len(target) >= 8 and abs(len(head)-len(target)) <= 2:
+                    errors = round((1 - SequenceMatcher(None, head, target).ratio()) * max(len(head), len(target)))
+                    if errors > (1 if len(target) < 14 else 2):
+                        continue
+                    score = SequenceMatcher(None, head, target).ratio()
+                else:
+                    continue
+                matches.append((score, len(target), key, alias, count))
+    if not matches:
+        return {"field": "unknown_field", "normalized_label": original, "label_confidence": 0}
+    matches.sort(reverse=True)
+    best = matches[0]
+    if any(other[2] != best[2] and other[0] >= best[0] - .04 for other in matches[1:]):
+        return {"field": "unknown_field", "normalized_label": original, "label_confidence": 0}
+    return {"field": best[2], "matched_label": best[3], "normalized_label": " ".join(tokens[:best[4]]),
+            "label_confidence": best[0], "label_token_count": best[4]}
+
+
 def has_label(text, key):
-    return any(re.search(r"(?<![a-z])" + re.escape(label) + r"(?=$|[\s:/.,-])", folded(text)) for label in LABELS[key])
+    primary = resolve_label(text)["field"]
+    if primary not in {"unknown_field", key} and key not in {"sex", "nationality"}:
+        return False
+    normalized = normalize_label(text)
+    if any((label not in {"origin", "name", "so", "no"} or normalized.startswith(normalize_label(label) + " "))
+               and re.search(r"(?:^| )" + re.escape(normalize_label(label)) + r"(?:$| )", normalized)
+               for label in LABELS[key]) or primary == key:
+        return True
+    tokens = normalized.split()
+    for alias in LABELS[key]:
+        target = normalize_label(alias)
+        width = len(target.split())
+        if len(target) < 14 or width < 2:
+            continue
+        for index in range(len(tokens) - width + 1):
+            candidate = " ".join(tokens[index:index + width])
+            if abs(len(candidate) - len(target)) > 2:
+                continue
+            ratio = SequenceMatcher(None, candidate, target).ratio()
+            if round((1 - ratio) * max(len(candidate), len(target))) <= 2:
+                return True
+    return False
 
 
 def following_values(lines, index):
@@ -50,10 +119,34 @@ def _bounds(line):
 
 def _strip_labels(text, key):
     value = unicodedata.normalize("NFC", text)
+    bilingual_permanent = key == "permanent_address" and any(
+        normalize_label(text).startswith(normalize_label(label))
+        for label in ("noi thuong tru", "dia chi thuong tru", "dia chi dang ky thuong tru"))
+    bilingual_registered = key == "registered_birth_place" and any(
+        normalize_label(text).startswith(normalize_label(label))
+        for label in ("noi dang ky khai sinh", "noi khai sinh dang ky", "dang ky khai sinh", "ky khai sinh"))
     for label in sorted(LABELS[key], key=len, reverse=True):
-        match = re.search(re.escape(label), folded(value))
+        pattern = r"\b" + r"[\s\W_]*".join(re.escape(part) for part in label.split()) + r"\b"
+        match = re.search(pattern, folded(value))
         if match:
             value = value[:match.start()] + value[match.end():]
+    if bilingual_permanent:
+        match = re.search(r"\bplace\s+of\s+residen[a-z]{1,4}\b", folded(value))
+        if match:
+            value = value[:match.start()] + value[match.end():]
+    if bilingual_registered:
+        match = re.search(r"\bplace\s+of\s+birth\b", folded(value))
+        if match:
+            value = value[:match.start()] + value[match.end():]
+    if key == "residence_address" and "of residence" in normalize_label(text):
+        match = re.search(r"\bof\s+residence\b", folded(text))
+        if match:
+            value = text[match.end():]
+    if resolve_label(text)["field"] == key and normalize_label(value) == normalize_label(text):
+        count = resolve_label(text)["label_token_count"]
+        words = list(re.finditer(r"\w+", text, re.UNICODE))
+        if len(words) >= count:
+            value = text[words[count - 1].end():]
     return value.strip(" :/.-")
 
 
@@ -66,6 +159,45 @@ def _date_value(text, *, future=False):
         except ValueError:
             pass
     return None
+
+
+def field_diagnostics(raw_front, raw_back, values):
+    """Expose evidence and missing reasons without promoting weak OCR to values."""
+    result = {}
+    for key in FIELDS + ADDITIONAL_FIELDS:
+        evidence = []
+        for raw in (raw_front, raw_back):
+            bilingual_permanent = key == "residence_address" and raw.get("side") == "front" and any(
+                has_label(line.get("text", ""), "permanent_address")
+                and "place of residence" in normalize_label(line.get("text", ""))
+                for line in raw.get("lines", []))
+            for attempt in [raw] + raw.get("attempts", []):
+                for line in attempt.get("lines", []):
+                    match = resolve_label(line.get("text", ""))
+                    tagged = attempt.get("field") == key
+                    if bilingual_permanent and tagged and attempt.get("source") == "vietocr_field" and not region_value(attempt):
+                        continue
+                    if match["field"] != key and not tagged:
+                        continue
+                    evidence.append({"matched_label": match.get("matched_label"),
+                                     "normalized_label": match["normalized_label"],
+                                     "label_confidence": match["label_confidence"],
+                                     "field_confidence": min(float(line.get("confidence", 0)),
+                                                             match["label_confidence"] if not tagged else 1),
+                                     "source": attempt.get("source", raw.get("engine", "unknown")),
+                                     "crop_box": attempt.get("source_crop") or line.get("polygon"),
+                                     "ocr_engine": attempt.get("engine", raw.get("engine", "unknown")),
+                                     "preprocessing_variant": attempt.get("preprocessing", attempt.get("variant", "primary"))})
+        best = max(evidence, key=lambda item: item["field_confidence"], default=None)
+        value = values.get(key)
+        if value is None:
+            result[key] = {"value": None, "reason": "unreadable" if evidence else "not_present_on_card",
+                           "confidence": 0, "diagnostics": best or {}}
+        else:
+            result[key] = {"value": value, "reason": None,
+                           "confidence": best["field_confidence"] if best else None,
+                           "diagnostics": best or {"source": "provider", "ocr_engine": raw_front.get("engine")}}
+    return result
 
 
 def _dates(line, *, future=False):
@@ -120,7 +252,7 @@ def _address(lines, index, key):
                 continue
             if abs(x - left) > 3 * height or label_of(following["text"]) or following["confidence"] < .75:
                 break
-            parts.append(following["text"].strip())
+            parts.append(following["text"].strip(" \t'\"_—-.:;"))
             bottom = end
     elif not parts[0] and index + 1 < len(lines):
         following = lines[index + 1]
@@ -162,16 +294,10 @@ def _nationality_value(value):
 
 
 def label_of(text):
+    resolved = resolve_label(text)
+    if resolved["field"] != "unknown_field":
+        return resolved["field"]
     text = folded(text).strip()
-    text = re.sub(r"^[0-9il][.)]?\s+", "", text)
-    for key, labels in LABELS.items():
-        for label in labels:
-            if re.match(r"^" + re.escape(label) + r"(?=$|[\s:/.-])", text):
-                # 'Place of residence' alone can be current, not permanent.
-                # Remove it from bilingual headings, but never infer its semantics.
-                if key == "permanent_address" and label == "place of residence":
-                    continue
-                return key
     # Printed bilingual labels may have a damaged Vietnamese prefix.
     for key, english in (("full_name", "full name"), ("identity_number", "personal identification number")):
         if re.search(r"\b" + re.escape(english) + r"\b", text):
@@ -207,11 +333,7 @@ def _parse_single(raw):
                     for match in re.finditer(re.escape(label), folded(value))]
             if ends:
                 value = value[max(ends):]
-        for label in sorted(LABELS[key], key=len, reverse=True):
-            match = re.search(re.escape(label), folded(value))
-            if match:
-                value = value[:match.start()] + value[match.end():]
-        value = value.strip(" :/.-")
+        value = _strip_labels(value, key)
         if not value and i + 1 < len(lines):
             following = lines[i + 1]
             if following["confidence"] >= .75 and label_of(following["text"]) is None:
@@ -225,7 +347,7 @@ def _parse_single(raw):
                 continue
         elif key in {"date_of_birth", "issue_date"}:
             parsed = None
-            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+            for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d"):
                 try:
                     candidate = datetime.strptime(value, fmt).date()
                     if date(1900, 1, 1) <= candidate <= date.today():
@@ -295,16 +417,21 @@ def _parse_single(raw):
         for i, heading in enumerate(lines):
             if i == 0 or label_of(heading["text"]) != "full_name":
                 continue
-            previous = lines[i - 1]
-            if label_of(previous["text"]) not in (None, "identity_number"):
-                continue
             polygon = heading.get("polygon", [])
             if len(polygon) != 4:
                 continue
             left, top = polygon[0]
             right, bottom = polygon[2]
             height = bottom - top
-            for word in previous.get("words", []):
+            # OCR may interleave security-pattern fragments between the number
+            # and the name label. Use nearby geometry, not list adjacency.
+            # Stop at another real field and still reject ambiguous numbers.
+            nearby = []
+            for previous in reversed(lines[max(0, i - 4):i]):
+                if label_of(previous["text"]) not in (None, "identity_number"):
+                    break
+                nearby.extend(previous.get("words", []))
+            for word in nearby:
                 if word["confidence"] < .9 or not re.fullmatch(r"[0-9]{12}", word["text"]):
                     continue
                 x, y, width, word_height = word["bbox"]
@@ -326,7 +453,7 @@ def merge_fields(front, back):
             warnings.append("CONFLICT_" + key.upper())
         else:
             result[key] = front[key] or back[key]
-        if not result[key]:
+        if not result[key] and key in {"full_name", "identity_number", "date_of_birth"}:
             warnings.append("REVIEW_" + key.upper())
     return result, warnings
 
@@ -409,6 +536,33 @@ def _with_attempts(raw, parser):
             candidates = {attempt[key] for attempt in attempts if attempt[key] is not None}
             if len(candidates) == 1:
                 result[key] = candidates.pop()
+    if raw.get("side") == "front" and "permanent_address" in result:
+        complete = [(a, values["permanent_address"]) for a, values in zip(raw.get("attempts", []), attempts)
+            if a.get("source") == "vietocr_field" and a.get("variant") == "old_card_layout"
+            and values.get("permanent_address") and a.get("lines")
+            and min(line.get("confidence", 0) for line in a["lines"]) >= .8]
+        def agrees_or_truncated(reading, full):
+            words = re.findall(r"[a-z0-9]+", folded(reading))
+            complete_words = re.findall(r"[a-z0-9]+", folded(full))
+            if words == complete_words:
+                return True
+            if len(words) >= len(complete_words):
+                return False
+            for index, word in enumerate(words):
+                tail = words[index + 1:]
+                if (1 <= len(word) <= 2 and index < len(complete_words)
+                        and words[:index] == complete_words[:index]
+                        and complete_words[index].startswith(word)
+                        and (not tail or tail == complete_words[-len(tail):])):
+                    return True
+            return False
+        for _, value in complete:
+            others = [item["permanent_address"] for item in attempts if item.get("permanent_address")]
+            if result.get("permanent_address"):
+                others.append(result["permanent_address"])
+            if all(agrees_or_truncated(other, value) for other in others):
+                result["permanent_address"] = value
+                break
     # A heading failure can leave only the administrative suffix. Prefer a
     # separately read street+suffix ONLY if all readings agree on that suffix.
     # Never copy street information from birthplace or a different address.
@@ -626,4 +780,41 @@ def parse_additional_fields(raw):
                     for key in names:
                         if folded(result[key]).endswith(folded(tails[key])):
                             result[key] = result[key][:-len(tails[key])] + tails[winner]
+    # New cards print the same administrative suffix in two separate regions.
+    # Reuse its accents only when the complete suffix agrees letter for letter
+    # and the registration crop has at least as strong an independent reading.
+    residence = result.get("residence_address")
+    registration = result.get("registered_birth_place")
+    if raw.get("side") == "back" and residence and registration:
+        readings = {key: max((min(line.get("confidence", 0) for line in attempt.get("lines", []))
+            for attempt in raw.get("attempts", []) if attempt.get("source") == "vietocr_field"
+            and attempt.get("field") == key and attempt.get("lines")), default=0)
+            for key in ("residence_address", "registered_birth_place")}
+        words = list(re.finditer(r"[^\W_]+", residence))
+        suffix_words = re.findall(r"[^\W_]+", registration)
+        if (readings["registered_birth_place"] >= .75
+                and readings["registered_birth_place"] >= readings["residence_address"]
+                and len(words) > len(suffix_words) >= 2
+                and [folded(item.group()) for item in words[-len(suffix_words):]]
+                    == [folded(item) for item in suffix_words]):
+            result["residence_address"] = residence[:words[-len(suffix_words)].start()] + registration
+    residence = result.get("residence_address")
+    if raw.get("side") == "back" and residence and re.match(r"^Áp\s+", residence, re.IGNORECASE):
+        second = residence.split()[1]
+        scores = {"ap": 0, "ap_hamlet": 0}
+        for attempt in [raw] + raw.get("attempts", []):
+            if attempt.get("source"):
+                continue
+            for line in attempt.get("lines", []):
+                words = line.get("words", [])
+                for index, word in enumerate(words[:-1]):
+                    if folded(words[index + 1].get("text", "")) != folded(second):
+                        continue
+                    token = word.get("text", "").strip(" .:-")
+                    if token == "Ấp":
+                        scores["ap_hamlet"] = max(scores["ap_hamlet"], word.get("confidence", 0))
+                    elif token == "Áp":
+                        scores["ap"] = max(scores["ap"], word.get("confidence", 0))
+        if scores["ap_hamlet"] >= .9 and scores["ap_hamlet"] >= scores["ap"] + .02:
+            result["residence_address"] = "Ấp" + residence[2:]
     return result

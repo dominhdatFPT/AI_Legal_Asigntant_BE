@@ -47,19 +47,21 @@ def test_bad_or_ambiguous_geometry_is_not_guessed(foundation, kind):
     assert row_regions(value, (1000,1000)) is None
 
 
-def test_same_image_fresh_reads_preserve_model_text_and_checks(foundation):
+def test_separate_row_reads_never_validate_a_pair(foundation):
     from app.services.identity_mrz_regions import read_rows
     from app.services.identity_card_match import ensure_card_pair
     calls=[]; rows=mrz_raw()["lines"]
     def recognize(content, size, psm, **kwargs):
-        index=len(calls); calls.append(kwargs)
+        index=len(calls)%3; calls.append(kwargs)
         with Image.open(io.BytesIO(content)) as image: assert image.size == (size['width'],size['height'])
         return {"ocr_size":size,"lines":[copy.deepcopy(rows[index])]}
     result=read_rows(Image.new("RGB", (1000,1000), "white"), detected(), recognize,
                      deadline=time.monotonic()+15, dedicated_model=True)
-    assert len(calls) == 3 and [c['language'] for c in calls] == ['eng','mrz','mrz']
+    assert len(calls) == 6
     assert result[0]['lines'] == rows and len(result[0]['row_crops']) == 3
-    assert ensure_card_pair(front_fields(), {}, result[0])['status'] == 'matched'
+    with pytest.raises(Exception) as error:
+        ensure_card_pair(front_fields(), {}, result[0])
+    assert error.value.code == 'IDENTITY_PAIR_UNVERIFIABLE'
 
 
 @pytest.mark.parametrize("kind", ["checksum", "short_name", "missing"])
@@ -97,3 +99,55 @@ def test_normalization_changes_pixels_not_recognized_strings(foundation):
     assert result.size == image.size
     assert result.getpixel((65,40)) == 0 and result.getpixel((200,40)) == 255
     assert set(result.getdata()) == {0,255}
+
+
+def test_whole_band_uses_mrz_model_and_keeps_checksum_validation(foundation):
+    from app.services.identity_mrz_regions import read_bands
+    from app.services.identity_card_match import mrz_candidates
+    calls = []
+    correct = mrz_raw()
+    broken = copy.deepcopy(correct)
+    broken["lines"][1]["text"] = broken["lines"][1]["text"][:-1] + "X"
+    def recognize(content, size, psm, **kwargs):
+        calls.append(kwargs)
+        with Image.open(io.BytesIO(content)) as image:
+            assert image.size == (size["width"], size["height"])
+        return {"lines": copy.deepcopy((broken if len(calls) == 1 else correct)["lines"])}
+    results = read_bands(Image.new("RGB", (1000,650), "white"), {"lines": []}, recognize,
+                         deadline=time.monotonic()+15, dedicated_model=True)
+    assert len(calls) == 2 and all(call["language"] == "mrz" for call in calls)
+    assert not mrz_candidates(results[0]) and mrz_candidates(results[1])
+    assert results[0]["lines"] == broken["lines"]  # No repaired characters.
+
+
+@pytest.mark.parametrize("model,seconds", [(False,15),(True,0)])
+def test_band_reader_respects_deadline_and_model_availability(foundation, model, seconds):
+    from app.services.identity_mrz_regions import read_bands
+    def unexpected(*args, **kwargs):
+        pytest.fail("Must not start OCR")
+    assert read_bands(Image.new("RGB", (1000,650)), {}, unexpected,
+                      deadline=time.monotonic()+seconds, dedicated_model=model) == []
+
+
+@pytest.mark.parametrize("size", [(1000,650), (1,1), (80,40)])
+def test_ambiguous_or_blank_ink_does_not_invent_mrz_region(foundation, size):
+    from app.services.identity_mrz_regions import rectified_band, detected_band
+    assert rectified_band(Image.new("RGB", size, "white")) is None
+    assert detected_band({"lines": []}, (1000,650)) is None
+
+
+def test_pixel_region_deskews_three_rows_and_excludes_card_edge(foundation):
+    from PIL import ImageDraw
+    from app.services.identity_mrz_regions import rectified_band
+    picture = Image.new("RGB", (1000,650), (220,225,220))
+    draw = ImageDraw.Draw(picture)
+    for y in (390,450,510):
+        for x in range(100,850,25):
+            draw.rectangle((x,y,x+12,y+35), fill="black")
+    draw.rectangle((950,360,985,600), fill="black")
+    picture = picture.rotate(-1, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+    result = rectified_band(picture)
+    assert result is not None
+    region, geometry = result
+    assert .25 <= geometry["angle"] <= 1.75
+    assert 700 <= region.width < 900 and 130 <= region.height <= 220

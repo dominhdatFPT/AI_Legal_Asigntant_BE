@@ -1,14 +1,20 @@
 """Test 5 endpoint hội thoại: SQLite trong RAM, JWT giả, RAG + Gemini giả lập."""
+import asyncio
+import json
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user
+from app.api.v1 import conversations
 from app.core.auth import TokenPayload
 from app.core.database import get_db
 from app.main import app
-from app.services import agent, document_client, llm_client, rag_client
+from app.repositories import conversation as repo
+from app.schemas.message import SendMessageRequest
+from app.services import agent, document_client, llm_client, prompts, query_filter, rag_client, relevance, responder
 
 USER_A = "11111111-1111-4111-8111-111111111111"
 USER_B = "22222222-2222-4222-8222-222222222222"
@@ -397,3 +403,310 @@ def test_delete_conversation(client, fake_agent):
     assert r.status_code == 200
     assert r.json()["data"] == {"deleted": True}
     assert client.get(f"{BASE}/{conversation_id}").status_code == 404
+
+
+# ── Stream: POST /conversations/{id}/messages/stream ───────────────────────────────────────────────────────
+
+STREAM_PARTS = ["Theo ", "Khoản 1 ", "Điều 188."]
+
+
+def stream_url(conversation_id):
+    return f"{BASE}/{conversation_id}/messages/stream"
+
+
+def parse_sse(text):
+    """[(tên sự kiện, dữ liệu JSON)] theo thứ tự nhận."""
+    events = []
+    for block in text.strip().split("\n\n"):
+        event_line, data_line = block.split("\n")
+        assert event_line.startswith("event: ") and data_line.startswith("data: ")
+        events.append((event_line[len("event: "):], json.loads(data_line[len("data: "):])))
+    return events
+
+
+@pytest.fixture
+def streaming(monkeypatch, chunk):
+    """rag giả + generate_stream giả (chạy agent.prepare thật). state["fail_after"] = n: ném LLMError sau n mẩu."""
+    state = {"stream_calls": [], "searches": [], "parts": list(STREAM_PARTS), "fail_after": None}
+
+    async def fake_search(query, top_k=5, request_id=None, transport=None):
+        state["searches"].append(query)
+        return [chunk]
+
+    async def fake_stream(system_prompt, history, user_content, info=None):
+        state["stream_calls"].append({"system_prompt": system_prompt, "history": history, "user_content": user_content})
+        for i, part in enumerate(state["parts"]):
+            if state["fail_after"] == i:
+                raise llm_client.LLMError("503 giữa chừng")
+            yield part
+        if info is not None:
+            info.update(model="stream-model", tokens=77)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("llm_client.generate không được gọi khi stream")
+
+    monkeypatch.setattr(rag_client, "search", fake_search)
+    monkeypatch.setattr(llm_client, "generate_stream", fake_stream)
+    monkeypatch.setattr(llm_client, "generate", forbidden)
+    return state
+
+
+def saved_messages(client, conversation_id):
+    return client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"]
+
+
+def test_stream_emits_deltas_then_done_matching_saved_messages(client, streaming, chunk):
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), json={"content": "  Sang tên sổ đỏ cần gì?  "},
+                    headers={"X-Request-ID": "req-s1"})
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.headers["cache-control"] == "no-cache"
+    assert r.headers["x-accel-buffering"] == "no"
+    assert r.headers["x-request-id"] == "req-s1"
+    events = parse_sse(r.text)
+    assert [name for name, _ in events] == ["delta", "delta", "delta", "done"]
+    assert [d["text"] for name, d in events if name == "delta"] == STREAM_PARTS
+
+    done = events[-1][1]
+    assert done["assistant_message"]["content"] == "".join(STREAM_PARTS)
+    assert done["user_message"]["content"] == "Sang tên sổ đỏ cần gì?"
+    assert done["assistant_message"]["metadata"] == {
+        "rag_chunk_ids": [chunk["id"]], "model": "stream-model", "tokens_used": 77,
+    }
+    # done khớp từng trường với dữ liệu đã lưu DB
+    saved = saved_messages(client, conversation_id)
+    assert [m["role"] for m in saved] == ["user", "assistant"]
+    assert saved[0] == done["user_message"] and saved[1] == done["assistant_message"]
+    assert streaming["searches"] == ["Sang tên sổ đỏ cần gì?"]
+    assert streaming["stream_calls"][0]["user_content"] == "Sang tên sổ đỏ cần gì?"
+    assert "Khoản 1 Điều 188, Luật Đất đai 2024" in streaming["stream_calls"][0]["system_prompt"]
+
+
+def test_stream_sets_title_and_passes_history(client, streaming):
+    conversation_id = create(client)
+    client.post(stream_url(conversation_id), json={"content": "Câu 1"})
+    client.post(stream_url(conversation_id), json={"content": "Câu 2"})
+
+    assert streaming["stream_calls"][1]["history"] == [
+        {"role": "user", "content": "Câu 1"},
+        {"role": "assistant", "content": "".join(STREAM_PARTS)},
+    ]
+    assert client.get(f"{BASE}/{conversation_id}").json()["data"]["title"] == "Câu 1"
+
+
+def test_stream_event_format_keeps_vietnamese_and_escapes_newlines(client, streaming):
+    streaming["parts"] = ["Dòng 1\nDòng 2 đ"]
+    conversation_id = create(client)
+
+    raw = client.post(stream_url(conversation_id), json={"content": "Hỏi"}).text
+
+    assert raw.startswith('event: delta\ndata: {"text": "Dòng 1\\nDòng 2 đ"}\n\n')
+    assert raw.endswith("\n\n")
+
+
+def test_stream_llm_error_midway_sends_error_event_and_saves_nothing(client, streaming):
+    streaming["fail_after"] = 1
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), json={"content": "Hỏi"})
+
+    assert r.status_code == 200  # đã mở stream nên không còn đổi được mã HTTP
+    events = parse_sse(r.text)
+    assert [name for name, _ in events] == ["delta", "error"]
+    assert events[1][1]["code"] == "AI_SERVICE_ERROR" and events[1][1]["message"]
+    assert saved_messages(client, conversation_id) == []
+
+
+def test_stream_llm_error_before_first_chunk_sends_error_event_and_saves_nothing(client, streaming):
+    streaming["fail_after"] = 0
+    conversation_id = create(client)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "Hỏi"}).text)
+
+    assert [name for name, _ in events] == ["error"]
+    assert saved_messages(client, conversation_id) == []
+
+
+def test_stream_unexpected_error_sends_internal_error_event(client, streaming, monkeypatch):
+    def broken_add_message_pair(*args, **kwargs):
+        raise RuntimeError("DB down")
+
+    monkeypatch.setattr(repo, "add_message_pair", broken_add_message_pair)
+    conversation_id = create(client)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "Hỏi"}).text)
+
+    assert [name for name, _ in events] == ["delta", "delta", "delta", "error"]
+    assert events[-1][1]["code"] == "INTERNAL_ERROR"
+
+
+def test_stream_client_disconnect_midway_saves_nothing(db, streaming):
+    conversation = repo.create_conversation(db, uuid.UUID(USER_A))
+    call = responder.LLMCall("system prompt", [], [], "Hỏi", "req-d", 0.0, 0.0)
+
+    async def run():
+        events = conversations._stream_events(
+            db, conversation, SendMessageRequest(content="Hỏi"), "req-d", datetime.now(timezone.utc), call, None,
+        )
+        first = await events.__anext__()
+        await events.aclose()  # client ngắt kết nối sau mẩu đầu
+        return first
+
+    assert asyncio.run(run()).startswith("event: delta")
+    assert repo.get_messages(db, conversation.id) == []
+
+
+def test_stream_meaningless_question_is_single_delta_then_done(client, streaming):
+    conversation_id = create(client)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "asdfgh qwerty zxcvb"}).text)
+
+    assert [name for name, _ in events] == ["delta", "done"]
+    assert events[0][1] == {"text": query_filter.DEFAULT_ANSWER}
+    assert streaming["searches"] == [] and streaming["stream_calls"] == []
+    assert len(saved_messages(client, conversation_id)) == 2
+
+
+def test_stream_out_of_scope_is_single_delta_without_answering_llm(client, streaming, monkeypatch):
+    from app.core.config import get_settings
+
+    async def grade(user_content, chunks, request_id=None, info=None):
+        info.update(model="grader-model", tokens=9)
+        return []
+
+    monkeypatch.setenv("RELEVANCE_CHECK", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(relevance, "grade", grade)
+    conversation_id = create(client)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "Ly hôn chia tài sản thế nào?"}).text)
+
+    assert [name for name, _ in events] == ["delta", "done"]
+    assert events[0][1] == {"text": prompts.OUT_OF_SCOPE_ANSWER}
+    assert events[1][1]["assistant_message"]["metadata"] == {
+        "rag_chunk_ids": [], "model": "grader-model", "tokens_used": 9, "type": "out_of_scope",
+    }
+    assert streaming["stream_calls"] == []
+
+
+def test_stream_llm_bypass_is_single_delta(client, streaming, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("LLM_BYPASS", "true")
+    get_settings.cache_clear()
+    conversation_id = create(client)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "Hỏi"}).text)
+
+    assert [name for name, _ in events] == ["delta", "done"]
+    assert events[0][1]["text"].startswith(responder.BYPASS_HEADER)
+    assert events[1][1]["assistant_message"]["metadata"]["llm_bypass"] is True
+    assert streaming["stream_calls"] == []
+
+
+def test_stream_with_documents_reviews_without_streaming_and_saves_document_ids(
+    client, streaming, monkeypatch, real_agent_prompts,
+):
+    async def contract(document_ids, token, request_id=None, transport=None):
+        return [{"document_id": str(document_ids[0]), "source_kind": "docx",
+                 "text": "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT"}]
+
+    monkeypatch.setattr(document_client, "get_extractions", contract)
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), headers=USER_AUTH,
+                    json={"content": "kiểm tra giúp tôi", "document_ids": [DOC_A]})
+
+    events = parse_sse(r.text)
+    assert [name for name, _ in events] == ["delta", "done"]
+    assert events[0][1] == {"text": "Hợp đồng có điểm chưa phù hợp..."}
+    metadata = events[1][1]["assistant_message"]["metadata"]
+    assert metadata["mode"] == "contract_review" and metadata["document_ids"] == [DOC_A]
+    assert streaming["stream_calls"] == []  # rà soát không stream
+    assert "KHÔNG hỏi lại người dùng" in real_agent_prompts[0]
+
+
+@pytest.mark.parametrize("case", ["other_user", "not_found", "no_token_for_documents", "invalid_body"])
+def test_stream_errors_before_opening_stream_are_plain_json(client, current_user, streaming, fake_documents, case):
+    conversation_id = create(client)
+    url, headers, body, status, code = stream_url(conversation_id), {}, {"content": "Hỏi"}, 403, "CONVERSATION_FORBIDDEN"
+    if case == "other_user":
+        current_user["sub"] = USER_B
+    elif case == "not_found":
+        url, status, code = stream_url(uuid.uuid4()), 404, "CONVERSATION_NOT_FOUND"
+    elif case == "no_token_for_documents":
+        body, status, code = {"content": "Hỏi", "document_ids": [DOC_A]}, 401, "UNAUTHORIZED"
+    elif case == "invalid_body":
+        body, status, code = {"content": ""}, 422, "VALIDATION_ERROR"
+
+    r = client.post(url, json=body, headers=headers)
+
+    assert r.status_code == status
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["error"]["code"] == code
+    assert streaming["searches"] == [] and streaming["stream_calls"] == []
+    assert fake_documents == []
+
+
+@pytest.mark.parametrize("error,status,code", [
+    (document_client.DocumentNotFound("x"), 404, "DOCUMENT_NOT_FOUND"),
+    (document_client.DocumentNotReady("Tài liệu đang xử lý, vui lòng thử lại sau."), 409, "DOCUMENT_NOT_READY"),
+    (document_client.DocumentServiceError("down"), 503, "DOCUMENT_SERVICE_ERROR"),
+])
+def test_stream_document_errors_are_plain_json(client, monkeypatch, streaming, error, status, code):
+    async def broken(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(document_client, "get_extractions", broken)
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), headers=USER_AUTH, json={"content": "Hỏi", "document_ids": [DOC_A]})
+
+    assert r.status_code == status and r.json()["error"]["code"] == code
+    assert streaming["searches"] == []
+    assert saved_messages(client, conversation_id) == []
+
+
+@pytest.mark.parametrize("error,code", [
+    (rag_client.RAGError("down"), "RAG_SERVICE_ERROR"),
+    (llm_client.LLMError("503"), "AI_SERVICE_ERROR"),
+])
+def test_stream_rag_or_prepare_error_is_plain_503_and_saves_nothing(client, monkeypatch, streaming, error, code):
+    async def broken(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(agent, "prepare", broken)
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), json={"content": "Hỏi"})
+
+    assert r.status_code == 503
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["error"]["code"] == code
+    assert saved_messages(client, conversation_id) == []
+    assert streaming["stream_calls"] == []
+
+
+def test_stream_rag_down_for_real_is_503_before_stream(client, monkeypatch, streaming):
+    async def broken_search(*args, **kwargs):
+        raise rag_client.RAGError("down")
+
+    monkeypatch.setattr(rag_client, "search", broken_search)
+    conversation_id = create(client)
+
+    r = client.post(stream_url(conversation_id), json={"content": "Hỏi"})
+
+    assert r.status_code == 503 and r.json()["error"]["code"] == "RAG_SERVICE_ERROR"
+    assert streaming["stream_calls"] == []
+
+
+def test_old_endpoint_unchanged_while_stream_exists(client, fake_agent):
+    conversation_id = create(client)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Hỏi"})
+
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
+    assert r.json()["data"]["assistant_message"]["content"] == AI_RESULT["content"]

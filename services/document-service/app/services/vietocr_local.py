@@ -1,5 +1,6 @@
 """Crop Vietnamese text, then run an offline VietOCR child with a hard timeout."""
 import base64
+from difflib import SequenceMatcher
 import io
 import json
 import math
@@ -11,7 +12,7 @@ import sys
 import time
 
 from app.core.errors import DocumentError
-from app.services.identity_parser import LABELS, folded, label_of, has_label, format_residence_lines, parse_fields, parse_additional_fields
+from app.services.identity_parser import LABELS, folded, label_of, has_label, resolve_label, format_residence_lines, parse_fields, parse_additional_fields
 
 TEXT_FIELDS = {"full_name", "date_of_birth", "issue_date", "expiry_date", "sex", "permanent_address", "place_of_origin", "nationality", "issue_place",
                "residence_address", "registered_birth_place"}
@@ -36,7 +37,8 @@ def supplemental_regions(raw, width, height, excluded):
             keys = [key for key in sorted(TEXT_FIELDS) if has_label(text, key)]
             legacy_date = (raw.get("side") == "back" and
                 re.search(r"\bmonth\b", folded(text)) and re.search(r"\byear\b", folded(text)))
-            authority = raw.get("side") == "back" and "cuc canh sat" in folded(text)
+            authority = raw.get("side") == "back" and any(
+                label in folded(text) for label in ("cuc canh sat", "bo cong an"))
             if authority and "issue_place" not in keys:
                 keys.append("issue_place")
             if legacy_date and "issue_date" not in keys:
@@ -50,8 +52,23 @@ def supplemental_regions(raw, width, height, excluded):
                 ends = [m.end() for label in LABELS[key]
                     for m in re.finditer(re.escape(label), folded(text))]
                 start = max(ends, default=len(text))
+                translation = {"registered_birth_place": "place of birth",
+                               "permanent_address": "place of residence",
+                               "residence_address": "place of residence",
+                               "place_of_origin": "place of origin"}.get(key)
+                if translation:
+                    bilingual = re.search(re.escape(translation), folded(text))
+                    if bilingual:
+                        start = max(start, bilingual.end())
+                if not ends:
+                    match = resolve_label(text)
+                    if match["field"] == key:
+                        tokens = list(re.finditer(r"\w+", text))
+                        count = match["label_token_count"]
+                        if len(tokens) >= count:
+                            start = tokens[count - 1].end()
                 if key == "issue_place" and authority:
-                    start = folded(text).rfind("cuc canh sat")
+                    start = max(folded(text).rfind(label) for label in ("cuc canh sat", "bo cong an"))
                 stop = len(text)
                 if key == "sex":
                     stops = [m.start() for label in LABELS["nationality"]
@@ -111,7 +128,7 @@ def supplemental_regions(raw, width, height, excluded):
 
 
 def birth_date_box(raw, width, height):
-    """Use a birth heading to locate the date, then combine only overlapping boxes."""
+    """Use the birth heading to locate the printed date, including a clipped year."""
     passes = [raw] + [a for a in raw.get("attempts", []) if not a.get("source")]
     candidates, anchor = [], None
     for attempt in passes:
@@ -121,7 +138,7 @@ def birth_date_box(raw, width, height):
         sx,sy = width/size["width"],height/size["height"]
         for line in attempt.get("lines", []):
             for word in line.get("words", []):
-                if not re.fullmatch(r"\d{1,2}[/.-]\d{1,2}[/.-]\d{4}",word["text"]):
+                if not re.fullmatch(r"\d{1,2}[/.-]\d{1,2}[/.-]\d{1,4}",word["text"]):
                     continue
                 x,y,w,h = word["bbox"]
                 box=(x*sx,y*sy,(x+w)*sx,(y+h)*sy)
@@ -132,8 +149,12 @@ def birth_date_box(raw, width, height):
         return None
     x,y,r,b=anchor;h=max(1,b-y)
     same=[box for box in candidates if abs(box[0]-x)<h and abs(box[1]-y)<h/2]
-    return (min(box[0] for box in same)-5,min(box[1] for box in same)-5,
-            max(box[2] for box in same)+5,max(box[3] for box in same)+5)
+    left=min(box[0] for box in same); right=max(box[2] for box in same)
+    # Page OCR often stops its bbox after the first year digits even though
+    # the printed date continues. Extend only toward the remaining same row.
+    return (max(0,left-5),max(0,min(box[1] for box in same)-5),
+            min(width,right+max(20,round((right-left)*.4))),
+            min(height,max(box[3] for box in same)+5))
 
 
 def residence_detail_box(raw, width, height, *, pixels=None):
@@ -206,10 +227,20 @@ def residence_value_regions(raw, width, height):
         sx, sy = width/size["width"], height/size["height"]
         lines = attempt.get("lines", [])
         for index, heading in enumerate(lines):
-            if not has_label(heading["text"], "residence_address") or not heading.get("polygon"):
+            if not heading.get("polygon"):
                 continue
             words = heading.get("words", [])
             labels = [i for i,w in enumerate(words) if "residence" in folded(w["text"])]
+            # The Vietnamese heading can be unreadable while the English
+            # "of residence" survives with one damaged word. Only use that
+            # word as a crop anchor when its preceding "of" is still present.
+            if not labels:
+                labels = [i for i,w in enumerate(words) if i > 0
+                          and folded(words[i-1]["text"]).strip(" :/.-") == "of"
+                          and SequenceMatcher(None, folded(w["text"]).strip(" :/.-"),
+                                              "residence").ratio() >= .75]
+            if not has_label(heading["text"], "residence_address") and not labels:
+                continue
             if not labels:
                 continue
             values = [w for w in words[labels[-1]+1:] if w.get("bbox") and any(c.isalnum() for c in w["text"])]
@@ -315,12 +346,11 @@ def crop_regions(pixels, raw):
             bottom = b
             if field in {"full_name","nationality"}:
                 break
-    text = " ".join(folded(l["text"]) for a in attempts for l in a.get("lines",[]))
     if raw.get("side") == "front":
         box = birth_date_box(raw, pixels.width, pixels.height)
         if box:
             add("date_of_birth", box)
-    if raw.get("side") == "back" and "of issue" in text and "of expiry" in text:
+    if raw.get("side") == "back":
         anchored = residence_value_regions(raw, pixels.width, pixels.height)
         detail = anchored["detail"] if anchored else residence_detail_box(raw, pixels.width, pixels.height, pixels=pixels)
         if detail:
@@ -328,13 +358,12 @@ def crop_regions(pixels, raw):
             add("residence_address", detail, 0)
             for region in regions[first:]:
                 region["includes_inline_detail"] = True
-        for field, (left,top,right,bottom) in (
-            ("residence_address",(.055,.092,.47,.147)),
-            ("registered_birth_place",(.055,.235,.47,.29)),
-            ("issue_place",(.28,.48,.75,.56))):
-            box = anchored["suffix"] if field == "residence_address" and anchored else (left*pixels.width,top*pixels.height,right*pixels.width,bottom*pixels.height)
-            add(field,box,
-                1 if field == "residence_address" and detail else 0)
+        dynamic = supplemental_regions(raw, pixels.width, pixels.height, set())
+        for field in ("residence_address", "registered_birth_place", "issue_place"):
+            boxes = ([anchored["suffix"]] if field == "residence_address" and anchored
+                     else dynamic.get(field, []))
+            for index, box in enumerate(boxes):
+                add(field, box, index + int(field == "residence_address" and bool(detail)))
     excluded = {region["field"] for region in regions}
     # Address crops selected from sparse layout can contain only a label.
     # Keep a complete-line alternative as an independent reading, not append
@@ -371,15 +400,30 @@ def crop_regions(pixels, raw):
         or (has_origin_heading and len(old_layout_labels) >= 3)) and not new_layout_labels
     if raw.get("side") == "front" and old_layout and 1.45 <= pixels.width/pixels.height <= 1.7:
         available = {**parse_fields(raw), **parse_additional_fields(raw)}
+        # A value row can be cut off by Tesseract's short bbox. Replace its
+        # incomplete crops with a full printed row while keeping the card
+        # layout gate above; partial readings must not block this fallback.
+        incomplete_addresses = {field for field in ("place_of_origin", "permanent_address")
+            if len([part for part in (available.get(field) or "").split(",") if part.strip()]) < 3}
+        inline_residence = [match.group(1).split() for attempt in attempts
+            for line in attempt.get("lines", [])
+            if (match := re.search(r"place of residence\s*:\s*(.+)$", folded(line.get("text", ""))))]
+        if any(words and (len(words) <= 2 or len(words[-1].strip(" .,:;")) == 1)
+               for words in inline_residence):
+            incomplete_addresses.add("permanent_address")
+        replace_regions = incomplete_addresses | ({"nationality"} if not available.get("nationality") else set())
+        regions = [region for region in regions if region["field"] not in replace_regions]
+        excluded = {region["field"] for region in regions}
         templates = {
             "nationality": [(.81,.64,.995,.73)],
-            "place_of_origin": [(.30,.755,.995,.815)],
+            "place_of_origin": [(.29,.77,.97,.84)],
             # Include lower diacritics/descenders, not only the text baseline.
-            "permanent_address": [(.70,.825,.995,.88),(.30,.875,.995,.947)],
+            "permanent_address": [(.66,.84,.98,.905),(.29,.895,.97,.965)],
             "expiry_date": [(.14,.855,.30,.925)],
         }
         for field, boxes in templates.items():
-            if available.get(field) or field in excluded or len(regions)+len(boxes)>24:
+            if (field not in replace_regions and (available.get(field) or field in excluded)
+                    or len(regions)+len(boxes)>24):
                 continue
             first = len(regions)
             for order, box in enumerate(boxes):
@@ -432,6 +476,8 @@ def read_regions(pixels, raw, *, root, threads, deadline):
             if region.get("includes_inline_detail"):
                 detail_groups.add(group)
         attempts = []
+        registered_heading = any(resolve_label(line.get("text", ""))["field"] == "registered_birth_place"
+            for attempt in [raw] + raw.get("attempts", []) for line in attempt.get("lines", []))
         for (field,variant),values in groups.items():
             values.sort()
             if any(not text.strip() or score<.75 for _,text,score in values):
@@ -441,6 +487,8 @@ def read_regions(pixels, raw, *, root, threads, deadline):
             text = separator.join(value[1].strip() for value in values)
             if field == "residence_address":
                 text = format_residence_lines([value[1] for value in values])
+            if field == "registered_birth_place" and raw["side"] == "back" and registered_heading:
+                text = re.sub(r"^\s*place\s+of\s+birth\s*[:/.-]*\s*", "", text, flags=re.IGNORECASE)
             attempts.append({"side":raw["side"],"source":"vietocr_field","field":field,
                 "variant":variant,"model":"vgg_seq2seq","lines":[{"text":text,"confidence":min(value[2] for value in values)}]})
             if (field,variant) in detail_groups and len(values)>=2:

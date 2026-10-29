@@ -11,14 +11,19 @@ if str(SERVICE_ROOT) not in sys.path:
 @pytest.fixture(autouse=True)
 def settings_env(monkeypatch):
     """Cấu hình giả cho test, không đọc key thật trong .env."""
-    from app.core.config import get_settings
+    from app.core.config import Settings, get_settings
 
+    # Không nạp .env của máy dev: giá trị trong đó (timeout, key, LLM_BYPASS...) làm kết quả test khác nhau giữa các máy
+    monkeypatch.setitem(Settings.model_config, "env_file", None)
     monkeypatch.setenv("RAG_SERVICE_URL", "http://rag-test:8000")
     monkeypatch.setenv("DOCUMENT_SERVICE_URL", "http://document-test:8000")
     monkeypatch.setenv("INTERNAL_TOKEN", "test-internal-token")
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    # Test thử lại / timeout tính theo 15 giây và 1 lần thử lại, không theo mặc định thật trong config.py
+    monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "15")
+    monkeypatch.setenv("GEMINI_MAX_RETRIES", "1")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

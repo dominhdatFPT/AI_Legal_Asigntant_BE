@@ -1,16 +1,15 @@
 # README-RAG: rag-service
-Cập nhật: 23/10/2026 | Nhánh: `features/upload-file-backend` | Test: 123 đạt, 2 bỏ qua (pgvector cần DB thật)
+Cập nhật: 28/10/2026 | Nhánh: `develop` | Test: 104 đạt, 2 bỏ qua (pgvector cần DB thật)
 
 ## 1. Service này làm gì
 
-rag-service là **kho văn bản pháp luật có tìm kiếm**. Nó **không tự trả lời** người dùng; việc trả lời bằng AI nằm ở agent-service. Chỉ agent-service gọi 2 endpoint nội bộ, bằng header `X-Internal-Token`.
+rag-service là **kho văn bản pháp luật có tìm kiếm**. Nó **không tự trả lời** người dùng; việc trả lời bằng AI nằm ở agent-service. Chỉ agent-service gọi endpoint nội bộ `/internal/v1/rag/search`, bằng header `X-Internal-Token`. Endpoint tra nguyên văn `POST /internal/v1/rag/articles` đã bỏ ngày 28/10/2026.
 
 | Chức năng | Endpoint | File chính |
 |---|---|---|
 | Tìm đoạn luật theo ngữ nghĩa (vector) | `POST /internal/v1/rag/search` | `app/services/search.py` |
 | Đổi từ đời thường sang thuật ngữ luật (trong search) | | `app/services/query_expansion.py` |
 | Tách câu hỏi nhiều ý, tìm theo từng ý (trong search) | | `app/services/query_split.py` |
-| Tra cứu nguyên văn 1 Điều/Khoản, không dùng embedding | `POST /internal/v1/rag/articles` | `app/services/article_lookup.py` |
 | Nạp văn bản vào kho (script, chưa có API) | `scripts/ingest_file.py`, `scripts/ingest_batch.py` | `ingest.py`, `chunking.py`, `embedding.py`, `batch_ingest.py` |
 | Đo chất lượng tìm kiếm | `scripts/eval_retrieval.py` | `scripts/eval_questions.json` |
 | Health check | `GET /api/v1/rag/health` | `app/main.py` |
@@ -42,11 +41,6 @@ Tìm đoạn luật (`api/v1/internal.py:semantic_search`):
    7. `score = 1 - khoảng cách cosine`, kẹp 0 đến 1.
 3. Lỗi: `EmbeddingError` -> 503 `EMBEDDING_SERVICE_UNAVAILABLE`; `SQLAlchemyError` -> 503 `RAG_DATABASE_UNAVAILABLE`.
 
-Tra cứu nguyên văn (`internal.py:get_article` -> `services/article_lookup.py:find_article`):
-1. Tìm văn bản theo tên hoặc số hiệu (không phân biệt hoa thường/dấu; "năm 2024" = "2024"; nhiều bản khớp thì lấy bản `active`; vẫn nhiều thì 409 `DOCUMENT_AMBIGUOUS`). Có năm mà kho không có thì dùng bản đang có và ghi `note`.
-2. Cắt Điều/Khoản từ **toàn văn gốc** `legal_documents.content` bằng `chunking.py:_split_articles` và `_group_by` (đúng từng chữ, khác chunk). Cache theo (id văn bản, `updated_at`), tối đa 16 văn bản, riêng từng tiến trình.
-3. Lỗi: 404 `DOCUMENT_NOT_FOUND` / `ARTICLE_NOT_FOUND` / `KHOAN_NOT_FOUND`, 409 `DOCUMENT_AMBIGUOUS`.
-
 Khởi động: `main.py:warmup` mở sẵn kết nối Supabase và gọi thử 1 lần embedding (tắt bằng `WARMUP_ON_STARTUP=false`); lỗi chỉ ghi log `rag warmup lỗi (bỏ qua)`.
 
 Quy tắc tách câu (`query_split.py`): cắt ở `? ; !`, xuống dòng, dấu chấm và từ nối `và / rồi / sau đó / đồng thời / ngoài ra`; dấu phẩy chỉ cắt khi đứng sau từ để hỏi. Ý quá ngắn ghép vào ý bên cạnh. Ý thiếu từ chỉ lĩnh vực (đất, nhà ở, doanh nghiệp...) thì mượn từ lĩnh vực của câu gốc, tránh ra nhầm Luật Doanh nghiệp. Chi phí: mỗi ý thêm 1 lượt embedding và 1 truy vấn DB; một ý lỗi Gemini thì cả lần tìm báo 503.
@@ -56,19 +50,18 @@ Quy tắc tách câu (`query_split.py`): cắt ở `? ; !`, xuống dòng, dấu
 | File | Trách nhiệm |
 |---|---|
 | `app/main.py` | FastAPI app, `lifespan` + `warmup`, health, endpoint demo cũ, handler lỗi khung `{data,error,request_id}` |
-| `app/api/v1/internal.py` | `/internal/v1/rag/search` và `/articles` |
+| `app/api/v1/internal.py` | `/internal/v1/rag/search` |
 | `app/api/v1/documents.py` | Chỉ có TODO, **chưa gắn vào app** |
 | `app/api/deps.py` | `require_internal_token` (đang dùng); `get_current_user`, `require_admin` (chưa endpoint nào dùng) |
 | `app/services/search.py` | Luồng tìm kiếm, `_diversify`, `_interleave`, cache embedding |
 | `app/services/query_split.py` | Tách câu nhiều ý |
 | `app/services/query_expansion.py` | Bảng `SYNONYMS` (~30 nhóm đất đai + kinh doanh): từ đời thường -> thuật ngữ luật |
-| `app/services/article_lookup.py` | `find_article`, `ArticleLookupError` |
 | `app/services/chunking.py` | Cắt văn bản theo Điều/Khoản/Điểm, `embedding_text` |
 | `app/services/embedding.py` | `GeminiEmbedder`, `FakeEmbedder`, `get_embedder()`, `EmbeddingError` |
 | `app/services/ingest.py` | `ingest_document`, `reembed_document` (chưa có script gọi) |
 | `app/services/batch_ingest.py` | Nạp nhiều văn bản theo CSV |
 | `app/repositories/document.py` | Truy vấn DB: tạo văn bản, thay chunk, `semantic_search` |
-| `app/models/`, `app/schemas/` | `LegalDocument`, `DocumentChunk`; `SearchRequest`, `ChunkResult`, `ArticleRequest` |
+| `app/models/`, `app/schemas/` | `LegalDocument`, `DocumentChunk`; `SearchRequest`, `ChunkResult` |
 | `app/core/` | `config.py`, `database.py`, `auth.py` |
 | `database/001_rag_schema.sql`, `check_rag_db.sql` | Schema Supabase và script kiểm tra |
 | `scripts/` | `ingest_file`, `ingest_batch`, `search_cli`, `eval_retrieval`, `demo_embedding`, `eval_questions.json`, `eval_multi_questions.json`, `danh_sach_luat.mau.csv` |
@@ -130,8 +123,6 @@ rag-service không gọi service nội bộ nào khác.
 | 503 `EMBEDDING_SERVICE_UNAVAILABLE` | `Embedding câu hỏi thất bại` | hết quota / sai khóa Gemini |
 | Tìm ra Luật Doanh nghiệp cho câu về đất | `parts=` và query | `query_split.py` (`_domains`), `query_expansion.py` |
 | Tìm không ra gì / ít kết quả | | chunk `embedding_model` khác `EMBEDDING_MODEL`; văn bản `is_processed=false` hoặc `status!='active'` |
-| Tra cứu nguyên văn sai bản luật | | `article_lookup.py` (khớp tên/năm), cột `status` |
-| Điều trong kho cũ sau khi nạp lại | | cache theo `updated_at` của văn bản; restart nếu nghi ngờ |
 | Khởi động chậm / `rag warmup lỗi` | log khởi động | Supabase, `GEMINI_API_KEY` |
 
 ## 10. Chạy và test
@@ -142,6 +133,7 @@ rag-service không gọi service nội bộ nào khác.
 docker compose up -d --force-recreate rag-service
 docker compose logs -f rag-service
 python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --top-k 5
+python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --max-chars 0   # in đủ nội dung đoạn (mặc định chỉ in 300 ký tự đầu, chunk không bị cắt)
 ```
 Nạp và đo xem mục 13 và 14.
 
@@ -152,7 +144,7 @@ Nạp và đo xem mục 13 và 14.
 3. Bộ câu hỏi và bảng `SYNONYMS` cùng do một người soạn, 100% có thể cao hơn thực tế; nên thêm câu hỏi thật từ log vào `eval_questions.json`.
 4. Chưa có lọc theo số hiệu (`doc_numbers`); `doc_types` rag đã làm nhưng agent chưa truyền.
 5. Chưa có API quản lý văn bản (`documents.py` chỉ có TODO); `reembed_document()` chưa có script gọi.
-6. Cache embedding và cache cắt Điều riêng từng tiến trình, mất khi restart; chuyển Redis nếu chạy nhiều bản.
+6. Cache embedding riêng từng tiến trình, mất khi restart; chuyển Redis nếu chạy nhiều bản.
 7. Chưa có tìm theo từ khóa (hybrid); đã bỏ `min_score` vì điểm đúng/sai quá sát nhau (0.65 đến 0.79).
 8. Chữ "và" trong cụm danh từ cũng bị cắt thành 2 ý (tốn thêm 1 lần tìm, không làm kết quả kém đi). `query_split.py`.
 9. Comment cũ trong `search.py` và `embedding.py` ghi "agent chỉ chờ rag 10 giây"; hiện agent chờ 30 giây (`RAG_TIMEOUT_SECONDS`).

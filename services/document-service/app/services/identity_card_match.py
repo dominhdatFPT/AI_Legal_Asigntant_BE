@@ -39,6 +39,9 @@ def _parse_td1(rows):
 def mrz_candidates(raw):
     result = []
     for attempt in [raw] + raw.get("attempts", []):
+        # Independently cropped row reads do not constitute one MRZ reading.
+        if attempt.get("source") in {"mrz_local_rows", "mrz_rows_psm13", "mrz_dark_rows_psm13"}:
+            continue
         lines = [re.sub(r"\s+", "", line["text"]).upper() for line in attempt.get("lines", [])]
         lines = [line for line in lines if re.fullmatch(r"[A-Z0-9<]{30}", line)]
         for i in range(len(lines) - 2):

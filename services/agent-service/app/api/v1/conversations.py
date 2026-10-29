@@ -1,12 +1,14 @@
+import json
 import logging
 import math
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, raw_access_token
@@ -22,7 +24,7 @@ from app.schemas.conversation import (
     Pagination,
 )
 from app.schemas.message import MessageOut, SendMessageRequest, SendMessageResponse
-from app.services import agent, document_client, llm_client, rag_client
+from app.services import agent, document_client, llm_client, rag_client, responder
 
 logger = logging.getLogger(__name__)
 
@@ -190,3 +192,97 @@ async def send_message(
         assistant_message=MessageOut.model_validate(assistant_message),
     )
     return _ok(data, request_id)
+
+
+def _sse(event: str, data) -> str:
+    """Một sự kiện Server-Sent Events; JSON một dòng (ngắt dòng trong chữ đã được escape) nên không cần tách data."""
+    return f"event: {event}\ndata: {json.dumps(jsonable_encoder(data), ensure_ascii=False)}\n\n"
+
+
+async def _stream_events(
+    db: Session,
+    conversation: Conversation,
+    payload: SendMessageRequest,
+    request_id: str,
+    asked_at: datetime,
+    call: responder.LLMCall | None,
+    result: dict | None,
+) -> AsyncIterator[str]:
+    """delta (từng mẩu chữ) rồi done; lỗi giữa chừng thì error. Chỉ lưu DB sau khi stream xong đầy đủ: lỗi giữa chừng
+    hoặc client ngắt kết nối (generator bị đóng ngay tại `yield`, không chạy tới bước lưu) thì không lưu gì."""
+    try:
+        if call is not None:
+            parts: list[str] = []
+            info: dict = {}
+            async for text in llm_client.generate_stream(call.system_prompt, call.history, call.user_content, info=info):
+                parts.append(text)
+                yield _sse("delta", {"text": text})
+            result = call.result("".join(parts), info.get("tokens"), info.get("model"))
+        else:
+            # Xong luôn (câu vô nghĩa, ngoài phạm vi, LLM_BYPASS) hoặc rà soát tài liệu: phát cả câu một lần
+            yield _sse("delta", {"text": result["content"]})
+        metadata = result["metadata"]
+        if payload.document_ids:
+            metadata = {**metadata, "document_ids": [str(i) for i in payload.document_ids]}
+        user_message, assistant_message = await run_in_threadpool(
+            repo.add_message_pair, db, conversation,
+            payload.content, result["content"], metadata, asked_at,
+        )
+        yield _sse("done", SendMessageResponse(
+            user_message=MessageOut.model_validate(user_message),
+            assistant_message=MessageOut.model_validate(assistant_message),
+        ))
+    except llm_client.LLMError:
+        logger.exception("LLM lỗi khi stream, request_id=%s", request_id)
+        yield _sse("error", {"code": "AI_SERVICE_ERROR", "message": "Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau."})
+    except Exception:
+        logger.exception("Lỗi khi stream câu trả lời, request_id=%s", request_id)
+        yield _sse("error", {"code": "INTERNAL_ERROR", "message": "Hệ thống đang gặp lỗi, vui lòng thử lại sau."})
+
+
+@router.post("/{conversation_id}/messages/stream")
+async def send_message_stream(
+    conversation_id: uuid.UUID,
+    payload: SendMessageRequest,
+    user: TokenPayload = Depends(get_current_user),
+    token: str | None = Depends(raw_access_token),
+    db: Session = Depends(get_db),
+    x_request_id: str | None = Header(default=None),
+):
+    """
+    Như `send_message` nhưng trả lời dạng Server-Sent Events để chữ hiện dần.
+    Kiểm tra quyền, lấy lịch sử, đọc tài liệu và rag (cùng bước chấm liên quan) đều làm TRƯỚC khi mở stream, nên lỗi ở
+    các bước này trả JSON lỗi bình thường (401/403/404/409/503) như endpoint cũ. Sau đó mới phát sự kiện:
+    delta {"text"} (nhiều lần) -> done (SendMessageResponse đã lưu) hoặc error {"code", "message"}.
+    Cặp tin nhắn chỉ được lưu sau khi stream xong đầy đủ.
+    """
+    request_id = _request_id(x_request_id)
+    conversation, history = await run_in_threadpool(_load_for_chat, db, conversation_id, user)
+    documents = await _load_documents(payload, token, request_id)
+    asked_at = datetime.now(timezone.utc)
+
+    call: responder.LLMCall | None = None
+    result: dict | None = None
+    try:
+        if documents:
+            # Rà soát tài liệu không stream: chạy như cũ rồi phát cả câu trong một delta
+            result = await agent.process_message(payload.content, history, request_id=request_id, documents=documents)
+        else:
+            prepared = await agent.prepare(payload.content, history, request_id=request_id)
+            if isinstance(prepared, responder.LLMCall):
+                call = prepared
+            else:
+                result = prepared
+    except rag_client.RAGError:
+        logger.exception("RAG lỗi, request_id=%s", request_id)
+        raise _error(503, "RAG_SERVICE_ERROR", "Không thể truy xuất dữ liệu pháp luật lúc này, vui lòng thử lại.")
+    except llm_client.LLMError:
+        logger.exception("LLM lỗi, request_id=%s", request_id)
+        raise _error(503, "AI_SERVICE_ERROR", "Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.")
+
+    return StreamingResponse(
+        _stream_events(db, conversation, payload, request_id, asked_at, call, result),
+        media_type="text/event-stream",
+        # X-Accel-Buffering: nginx (gateway) không gom lại cả câu rồi mới gửi
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "X-Request-ID": request_id},
+    )

@@ -66,7 +66,7 @@ def collect_templates(root: Path = SERVICE_ROOT, preview_root: Path = PREVIEW_RO
             suffix = path.suffix.lower()
             name, procedure_name = split_name(path.stem)
             preview = preview_root / folder / f"{path.stem}.pdf"
-            data = path.read_bytes()
+            data = preview.read_bytes() if (suffix == ".pdf" and preview.is_file()) else path.read_bytes()
             rows.append({
                 "domain": domain,
                 "name": name,

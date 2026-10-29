@@ -24,6 +24,12 @@ def test_them_thuat_ngu_luat(query, term):
     assert any(term in t for t in legal_terms(query))
 
 
+def test_doi_ten_cong_ty_khong_dinh_dat_dai():
+    terms = legal_terms("Công ty tôi muốn đổi tên thì cần làm thủ tục gì?")
+    assert any("thay đổi tên doanh nghiệp" in t for t in terms)
+    assert not any("doanh nghiệp" in t for t in legal_terms("sang tên đổi tên chủ sổ đỏ"))
+
+
 def test_giu_nguyen_cau_goc_va_them_vao_cuoi():
     out = expand("mua đất cần gì")
     assert out.startswith("mua đất cần gì (") and out.endswith(")")

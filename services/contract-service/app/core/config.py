@@ -62,12 +62,15 @@ class DatabaseSettings:
     database_url: str = field(repr=False)
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls, *, default_tls=False):
         # No fallback to USER/DOCUMENT_DATABASE_URL, no connection/migration here.
         value = os.getenv("CONTRACT_DATABASE_URL", "")
         try:
             parsed = urlsplit(value)
             options = parse_qs(parsed.query, keep_blank_values=True)
+            if default_tls and parsed.hostname not in {'localhost', '127.0.0.1'} and 'sslmode' not in options:
+                value += ('&' if parsed.query else '?') + 'sslmode=require'
+                options['sslmode'] = ['require']
             if (parsed.scheme not in {"postgresql", "postgresql+psycopg"} or not parsed.hostname
                 or not parsed.username or not parsed.path.strip("/") or parsed.fragment
                 or any(ch.isspace() for ch in value) or set(options) - {"sslmode"}):

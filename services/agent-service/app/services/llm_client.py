@@ -1,5 +1,8 @@
 import asyncio
+import contextlib
+import inspect
 import logging
+from collections.abc import AsyncIterator
 from functools import lru_cache
 
 import httpx
@@ -57,11 +60,12 @@ def _openrouter_error_message(e: openai.APIStatusError) -> str:
     return f"OpenRouter lỗi {e.status_code}: {e.message}"
 
 
-def _gemini_thinking_config(model: str) -> types.ThinkingConfig:
+def _gemini_thinking_config(model: str) -> types.ThinkingConfig | None:
     """Tắt (hoặc giảm tối đa) phần "suy nghĩ" của Gemini: trả lời từ trích đoạn có sẵn không cần suy luận dài."""
-    if model.startswith("gemini-2"):
+    try:
         return types.ThinkingConfig(thinking_budget=0)
-    return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+    except Exception:
+        return None
 
 
 def _groq_reasoning_args(model: str) -> dict:
@@ -282,5 +286,158 @@ async def generate(
         except LLMError as e:
             logger.warning("Provider '%s' thất bại: %s — thử provider tiếp theo.", provider, e)
             last_error = e
+
+    raise LLMError(f"Tất cả provider thất bại. Lỗi cuối: {last_error}") from last_error
+
+
+# ── Stream: phát từng mẩu chữ ngay khi provider sinh ra, thay vì chờ đủ câu ──────────────────────────────────────
+
+
+async def _timed_stream(open_stream, timeout: float) -> AsyncIterator:
+    """Mở stream (coroutine `open_stream`) rồi lấy từng mẩu; mỗi bước chờ tối đa `timeout` giây. Mẩu đầu tiên
+    chia chung ngân sách với bước mở stream. Đóng stream khi dừng sớm (lỗi, client ngắt kết nối)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    stream = await asyncio.wait_for(open_stream, timeout)
+    try:
+        iterator = stream.__aiter__()
+        wait = max(deadline - loop.time(), 0.001)
+        while True:
+            try:
+                item = await asyncio.wait_for(iterator.__anext__(), wait)
+            except StopAsyncIteration:
+                return
+            wait = timeout
+            yield item
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            with contextlib.suppress(Exception):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+
+
+def _chat_messages(system_prompt: str, history: list[dict], user_content: str) -> list[dict]:
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend({"role": m["role"], "content": m["content"]} for m in history)
+    messages.append({"role": "user", "content": user_content})
+    return messages
+
+
+async def _stream_groq(system_prompt: str, history: list[dict], user_content: str, usage: dict) -> AsyncIterator[str]:
+    """Groq không stream: lấy cả câu rồi phát một lần. Không thử lại cùng provider."""
+    answer, tokens = await _generate_groq(system_prompt, history, user_content, max_retries=0)
+    usage["tokens"] = tokens
+    yield answer
+
+
+async def _stream_gemini(system_prompt: str, history: list[dict], user_content: str, usage: dict) -> AsyncIterator[str]:
+    settings = get_settings()
+    contents = [
+        types.Content(role="model" if m["role"] == "assistant" else "user", parts=[types.Part(text=m["content"])])
+        for m in history
+    ]
+    contents.append(types.Content(role="user", parts=[types.Part(text=user_content)]))
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        temperature=0.2,
+        max_output_tokens=settings.llm_max_output_tokens,
+        thinking_config=_gemini_thinking_config(settings.gemini_model),
+    )
+    emitted = False
+    try:
+        opened = _get_gemini_client().aio.models.generate_content_stream(
+            model=settings.gemini_model, contents=contents, config=config
+        )
+        async with contextlib.aclosing(_timed_stream(opened, settings.gemini_timeout_seconds)) as chunks:
+            async for chunk in chunks:
+                if chunk.usage_metadata and chunk.usage_metadata.total_token_count:
+                    usage["tokens"] = chunk.usage_metadata.total_token_count
+                if chunk.text:
+                    emitted = True
+                    yield chunk.text
+    except genai_errors.APIError as e:
+        raise LLMError(str(e)) from e
+    except (asyncio.TimeoutError, TimeoutError, httpx.TransportError) as e:
+        raise LLMError(f"Gemini quá thời gian chờ hoặc mất kết nối ({type(e).__name__})") from e
+    if not emitted:
+        raise LLMError("Gemini trả về rỗng")
+
+
+async def _stream_openrouter(
+    system_prompt: str, history: list[dict], user_content: str, usage: dict,
+) -> AsyncIterator[str]:
+    settings = get_settings()
+    if not settings.openrouter_api_key or not settings.openrouter_model:
+        raise LLMError("Chưa cấu hình OPENROUTER_API_KEY hoặc OPENROUTER_MODEL")
+    reasoning = max(0, settings.openrouter_reasoning_max_tokens)
+    reasoning_args = {"extra_body": {"reasoning": {"max_tokens": reasoning}}} if reasoning else {}
+    emitted = False
+    try:
+        opened = _get_openrouter_client().chat.completions.create(
+            model=settings.openrouter_model,
+            messages=_chat_messages(system_prompt, history, user_content),
+            temperature=0.2,
+            max_tokens=settings.llm_max_output_tokens + reasoning,
+            stream=True,
+            stream_options={"include_usage": True},  # mẩu cuối mang usage (không có choices)
+            **reasoning_args,
+        )
+        async with contextlib.aclosing(_timed_stream(opened, settings.openrouter_timeout_seconds)) as chunks:
+            async for chunk in chunks:
+                if getattr(chunk, "usage", None):
+                    usage["tokens"] = chunk.usage.total_tokens
+                text = chunk.choices[0].delta.content if chunk.choices else None
+                if text:
+                    emitted = True
+                    yield text
+    except openai.APIStatusError as e:
+        raise LLMError(_openrouter_error_message(e)) from e
+    except (openai.APIConnectionError, asyncio.TimeoutError, TimeoutError) as e:
+        raise LLMError(f"OpenRouter quá thời gian chờ hoặc mất kết nối ({type(e).__name__})") from e
+    if not emitted:
+        raise LLMError("OpenRouter trả về rỗng")
+
+
+async def generate_stream(
+    system_prompt: str,
+    history: list[dict],
+    user_content: str,
+    info: dict | None = None,
+) -> AsyncIterator[str]:
+    """Phát từng mẩu chữ của câu trả lời. Khi stream kết thúc, `info` (nếu truyền) được điền {"model", "tokens"}.
+    Đi theo thứ tự `llm_provider` như `generate`, nhưng chỉ chuyển sang provider kế tiếp khi provider đó CHƯA phát
+    mẩu chữ nào; đã phát rồi mà lỗi thì ném LLMError (người dùng đã thấy chữ nên không thể bắt đầu lại).
+    Mỗi mẩu chờ tối đa timeout của provider, không thử lại cùng provider."""
+    s = get_settings()
+    providers = [p.strip() for p in s.llm_provider.split(",") if p.strip()]
+    streams = {
+        "groq": (_stream_groq, s.groq_model),
+        "gemini": (_stream_gemini, s.gemini_model),
+        "openrouter": (_stream_openrouter, s.openrouter_model),
+    }
+
+    last_error: LLMError | None = None
+    for provider in providers:
+        emitted = False
+        usage: dict = {}
+        try:
+            if provider not in streams:
+                raise LLMError(f"Provider không hợp lệ: {provider}")
+            stream_fn, model_name = streams[provider]
+            async with contextlib.aclosing(stream_fn(system_prompt, history, user_content, usage)) as texts:
+                async for text in texts:
+                    emitted = True
+                    yield text
+        except LLMError as e:
+            if emitted:
+                raise LLMError(f"{provider} lỗi giữa chừng khi stream: {e}") from e
+            logger.warning("Provider '%s' thất bại: %s — thử provider tiếp theo.", provider, e)
+            last_error = e
+            continue
+        if info is not None:
+            info.update(model=model_name, tokens=usage.get("tokens"))
+        return
 
     raise LLMError(f"Tất cả provider thất bại. Lỗi cuối: {last_error}") from last_error

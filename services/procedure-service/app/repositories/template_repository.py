@@ -21,6 +21,9 @@ _session.mount("https://", _adapter)
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIZ_DIR = os.path.join(BASE_DIR, "Template các thủ tục kinh doanh")
 LAND_DIR = os.path.join(BASE_DIR, "Template các thủ tục đất đai")
+PREVIEW_DIR = os.path.join(BASE_DIR, "database", "form_templates_preview")
+PREVIEW_LAND_DIR = os.path.join(PREVIEW_DIR, "Template các thủ tục đất đai")
+PREVIEW_BIZ_DIR = os.path.join(PREVIEW_DIR, "Template các thủ tục kinh doanh")
 
 DOMAIN_LABELS = {
     "land": "Đất đai & Bất động sản",
@@ -208,19 +211,103 @@ class TemplateRepository:
         return _local_disk_fallback_list(clean_domain, clean_code, q)
 
     @staticmethod
+    def get_file(template_id: str, preview: bool = True) -> Optional[Dict[str, Any]]:
+        """Adapter cho endpoint tra cứu /templates/{id}/file."""
+        file_info = TemplateRepository.get_template_file(template_id)
+        if not file_info or not file_info.get("file_bytes"):
+            return None
+        return {
+            "content": file_info["file_bytes"],
+            "media_type": file_info["media_type"],
+            "file_name": file_info["file_name"],
+        }
+
+    @staticmethod
     def get_template_file(template_id: str) -> Optional[Dict[str, Any]]:
-        """Lấy nội dung binary của biểu mẫu theo ID (ưu tiên RAM Cache & đĩa cục bộ, sau đó DB)."""
+        """Lấy nội dung binary của biểu mẫu theo ID (ưu tiên Database đã chuẩn hóa, sau đó fallback đĩa cục bộ)."""
         clean_id = template_id.strip()
 
         # 0. Kiểm tra RAM cache
         if clean_id in _FILE_CACHE:
             return _FILE_CACHE[clean_id]
 
-        # 0.1 Fast-path: đọc từ đĩa cục bộ nếu đã biết metadata
+        # 1. Thử qua SQLAlchemy (Ưu tiên lấy nội dung đã chuẩn hóa lưu trong Database)
+        if not is_postgres_circuit_open():
+            engine = get_engine()
+            if engine:
+                try:
+                    from uuid import UUID
+                    try:
+                        clean_uuid = str(UUID(clean_id))
+                        where_tpl = "id = :id"
+                    except Exception:
+                        clean_uuid = clean_id
+                        where_tpl = "CAST(id AS TEXT) = :id"
+                    with db_connection() as conn:
+                        row = conn.execute(
+                            text(f"SELECT id, name, file_name, format, media_type, file_data, domain FROM public.form_templates WHERE {where_tpl} LIMIT 1"),
+                            {"id": clean_uuid},
+                        ).mappings().fetchone()
+                        if row and row["file_data"] is not None:
+                            raw_data = row["file_data"]
+                            if isinstance(raw_data, memoryview):
+                                raw_bytes = raw_data.tobytes()
+                            elif isinstance(raw_data, str) and raw_data.startswith("\\x"):
+                                raw_bytes = bytes.fromhex(raw_data[2:])
+                            elif isinstance(raw_data, bytes):
+                                raw_bytes = raw_data
+                            else:
+                                raw_bytes = b""
+
+                            if raw_bytes:
+                                res = {
+                                    "id": str(row["id"]),
+                                    "file_name": row["file_name"],
+                                    "media_type": row["media_type"],
+                                    "format": row["format"],
+                                    "file_bytes": raw_bytes,
+                                }
+                                _FILE_CACHE[clean_id] = res
+                                return res
+                except (OperationalError, DBAPIError, ProcedureDbUnavailable) as exc:
+                    logger.warning(f"Lỗi lấy file_data từ DB: {exc}. Chuyển sang PostgREST.")
+                    mark_postgres_failed(60.0)
+                except Exception as exc:
+                    logger.warning(f"Lỗi không xác định khi query get_template_file: {exc}")
+
+        # 2. Thử qua PostgREST (Supabase fallback)
+        supabase_url, _ = get_supabase_config()
+        if supabase_url:
+            try:
+                rest_url = f"{supabase_url}/rest/v1/form_templates?id=eq.{clean_id}&select=id,name,file_name,format,media_type,file_data,domain&limit=1"
+                res = _session.get(rest_url, headers=_supabase_headers(), timeout=10)
+                if res.status_code == 200 and res.json():
+                    row = res.json()[0]
+                    raw_data = row.get("file_data") or ""
+                    if raw_data.startswith("\\x"):
+                        raw_bytes = bytes.fromhex(raw_data[2:])
+                    else:
+                        raw_bytes = raw_data.encode("latin1") if isinstance(raw_data, str) else b""
+
+                    if raw_bytes:
+                        res = {
+                            "id": str(row["id"]),
+                            "file_name": row["file_name"],
+                            "media_type": row["media_type"],
+                            "format": row["format"],
+                            "file_bytes": raw_bytes,
+                        }
+                        _FILE_CACHE[clean_id] = res
+                        return res
+            except Exception as e:
+                logger.warning(f"Lỗi lấy file qua PostgREST: {e}")
+
+        # 3. Fallback tìm file trên đĩa (ưu tiên thư mục preview đã chuẩn hóa)
         meta = _METADATA_BY_ID.get(clean_id)
+        candidate_folders = [PREVIEW_LAND_DIR, PREVIEW_BIZ_DIR, LAND_DIR, BIZ_DIR]
         if meta and meta.get("file_name"):
             fname = meta["file_name"]
-            for folder in (LAND_DIR, BIZ_DIR):
+            for folder in candidate_folders:
                 if not os.path.exists(folder):
                     continue
                 p = os.path.join(folder, fname)
@@ -238,85 +325,16 @@ class TemplateRepository:
                         _FILE_CACHE[clean_id] = res
                         return res
                     except Exception as err:
-                        logger.warning(f"Lỗi đọc file nhanh từ đĩa {p}: {err}")
+                        logger.warning(f"Lỗi đọc file fallback từ đĩa {p}: {err}")
 
-        # 1. Thử qua SQLAlchemy
-        if not is_postgres_circuit_open():
-            engine = get_engine()
-            if engine:
-                try:
-                    from uuid import UUID
-                    try:
-                        clean_uuid = str(UUID(clean_id))
-                        where_tpl = "id = :id"
-                    except Exception:
-                        clean_uuid = clean_id
-                        where_tpl = "CAST(id AS TEXT) = :id"
-                    with db_connection() as conn:
-                        row = conn.execute(
-                            text(f"SELECT id, name, file_name, format, media_type, file_data, domain FROM public.form_templates WHERE {where_tpl} LIMIT 1"),
-                            {"id": clean_uuid},
-                        ).mappings().fetchone()
-                        if row:
-                            raw_data = row["file_data"]
-                            if isinstance(raw_data, memoryview):
-                                raw_bytes = raw_data.tobytes()
-                            elif isinstance(raw_data, str) and raw_data.startswith("\\x"):
-                                raw_bytes = bytes.fromhex(raw_data[2:])
-                            elif isinstance(raw_data, bytes):
-                                raw_bytes = raw_data
-                            else:
-                                raw_bytes = b""
-
-                            res = {
-                                "id": str(row["id"]),
-                                "file_name": row["file_name"],
-                                "media_type": row["media_type"],
-                                "format": row["format"],
-                                "file_bytes": raw_bytes,
-                            }
-                            _FILE_CACHE[clean_id] = res
-                            return res
-                except (OperationalError, DBAPIError, ProcedureDbUnavailable) as exc:
-                    logger.warning(f"Lỗi lấy file_data từ DB: {exc}. Chuyển sang PostgREST.")
-                    mark_postgres_failed(60.0)
-                except Exception as exc:
-                    logger.warning(f"Lỗi không xác định khi query get_template_file: {exc}")
-
-        # 2. Thử qua PostgREST
-        supabase_url, _ = get_supabase_config()
-        if supabase_url:
-            try:
-                rest_url = f"{supabase_url}/rest/v1/form_templates?id=eq.{clean_id}&select=id,name,file_name,format,media_type,file_data,domain&limit=1"
-                res = _session.get(rest_url, headers=_supabase_headers(), timeout=10)
-                if res.status_code == 200 and res.json():
-                    row = res.json()[0]
-                    raw_data = row.get("file_data") or ""
-                    if raw_data.startswith("\\x"):
-                        raw_bytes = bytes.fromhex(raw_data[2:])
-                    else:
-                        raw_bytes = raw_data.encode("latin1") if isinstance(raw_data, str) else b""
-
-                    res = {
-                        "id": str(row["id"]),
-                        "file_name": row["file_name"],
-                        "media_type": row["media_type"],
-                        "format": row["format"],
-                        "file_bytes": raw_bytes,
-                    }
-                    _FILE_CACHE[clean_id] = res
-                    return res
-            except Exception as e:
-                logger.warning(f"Lỗi lấy file qua PostgREST: {e}")
-
-        # 3. Fallback tìm file trên đĩa
+        # 4. Fallback quét theo token nếu không có metadata
         target_token = clean_id
         for prefix in ("local-land-", "local-business-", "local-"):
             if target_token.startswith(prefix):
                 target_token = target_token[len(prefix):]
                 break
 
-        for folder in (BIZ_DIR, LAND_DIR):
+        for folder in candidate_folders:
             if not os.path.exists(folder):
                 continue
             for fname in os.listdir(folder):

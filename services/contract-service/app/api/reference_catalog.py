@@ -16,10 +16,14 @@ from uuid import UUID
 import psycopg
 from psycopg.rows import dict_row
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response
+from starlette.concurrency import run_in_threadpool
 from app.core.config import DatabaseSettings
 from app.core.errors import ContractError, success
+from app.core.security import catalog_admin
+from app.repositories.reference_uploads import create_upload, get_uploaded_asset, list_uploads
+from app.services.reference_pdf import MAX_PDF_BYTES, prepare_reference_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +93,10 @@ def load_from_database():
                 ORDER BY number ASC
             """).fetchall()
 
-            if rows and len(rows) > 0:
+            uploads = list_uploads(conn)
+            rows = uploads + rows
+
+            if rows or classes:
                 asset_hashes = get_asset_hashes()
 
                 domains = [
@@ -154,6 +161,29 @@ def list_references(request: Request, domain: str | None = Query(None, max_lengt
         'asset_base_path': '/api/v1/contracts/reference-assets/'})
 
 
+@router.post('/reference-catalog', status_code=201)
+async def upload_reference(request: Request, file: UploadFile = File(...),
+                           name: str = Form(..., min_length=5, max_length=255),
+                           domain: Literal['land', 'business'] = Form(...),
+                           procedure: str = Form(..., min_length=1, max_length=100),
+                           user=Depends(catalog_admin)):
+    name = name.strip()
+    if len(name) < 5 or '\x00' in name:
+        raise ContractError('INVALID_NAME', 'Tên mẫu đơn phải có từ 5 đến 255 ký tự.', 422)
+    catalog = await run_in_threadpool(snapshot)
+    classification = next((entry for entry in catalog['classifications']
+                           if entry['key'] == procedure and entry['domain'] == domain), None)
+    if classification is None:
+        raise ContractError('INVALID_PROCEDURE', 'Chọn thủ tục thuộc đúng lĩnh vực của mẫu đơn.', 422)
+    data = await file.read(MAX_PDF_BYTES + 1)
+    if len(data) > MAX_PDF_BYTES:
+        raise ContractError('PDF_TOO_LARGE', 'Tệp PDF không được lớn hơn 10 MB.', 422)
+    item, images = await run_in_threadpool(prepare_reference_pdf, data, file.filename, name, domain, classification)
+    await run_in_threadpool(create_upload, item, data, images, user.id)
+    _CACHE.update(data=None, timestamp=0.0)
+    return success(request, item)
+
+
 @router.get('/reference-catalog/{template_id}')
 def get_reference(request: Request, template_id: UUID):
     item = next((i for i in snapshot()['items'] if str(i['id']) == str(template_id)), None)
@@ -166,8 +196,16 @@ def get_reference(request: Request, template_id: UUID):
 def get_asset(asset_name: str):
     # Manifest membership is required before any path is used. No user-supplied
     # Storage keys, path traversal, arbitrary filenames or private results.
-    if asset_name not in snapshot()['asset_hashes'] or Path(asset_name).name != asset_name:
+    if Path(asset_name).name != asset_name:
         raise ContractError('REFERENCE_NOT_FOUND', 'Không tìm thấy tài liệu.', 404)
+    if asset_name not in get_asset_hashes():
+        uploaded = get_uploaded_asset(asset_name)
+        if uploaded is None:
+            raise ContractError('REFERENCE_NOT_FOUND', 'Không tìm thấy tài liệu.', 404)
+        content, media_type = uploaded
+        return Response(content, media_type=media_type,
+                        headers={'Content-Disposition': f'inline; filename="{asset_name}"',
+                                 'X-Content-Type-Options': 'nosniff'})
     target = ROOT / asset_name
     if not target.is_file():
         raise ContractError('REFERENCE_ASSET_UNAVAILABLE', 'Trang tài liệu chưa sẵn sàng.')

@@ -75,7 +75,7 @@ def test_gioi_han_do_dai_va_tat_suy_nghi(gemini):
     _run()
     config = fake.calls[0]["config"]
     assert config.max_output_tokens == 800
-    assert config.thinking_config.thinking_level == "MINIMAL"
+    assert config.thinking_config.thinking_budget == 0
 
 
 def test_gemini_2_tat_suy_nghi_bang_budget():

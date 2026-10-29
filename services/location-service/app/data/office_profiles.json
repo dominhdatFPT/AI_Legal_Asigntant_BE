@@ -1,0 +1,101 @@
+{
+  "danang-public-service-08": {
+    "contact_phone": "02363730807",
+    "contact_label": "Đường dây thủ tục hành chính",
+    "contact_source_url": "https://hoakhanh.danang.gov.vn/",
+    "website_url": "https://hoakhanh.danang.gov.vn/",
+    "appointment_url": "https://xephangqrcode.web.app/VIXtogioqBHK9NFNLRf8/hen-gio-giao-dich/Cy49Nzo9YDSvl7taE6Sf",
+    "appointment_source_url": "https://hoakhanh.danang.gov.vn/",
+    "directions_name": "UBND Phường Hòa Khánh, 168 Nguyễn Sinh Sắc, Đà Nẵng",
+    "map_destination_name": "UBND Phường Hòa Khánh",
+    "google_place_id": "ChIJN5dxZQAZQjER70_vuqR-Ut0",
+    "maps_url": "https://www.google.com/maps/place/UBND+Ph%C6%B0%E1%BB%9Dng+H%C3%B2a+Kh%C3%A1nh/@16.0724872,108.1581356,18z/data=!4m5!3m4!1s0x3142190065719737:0xdd527ea4baef4fef!8m2!3d16.0724872!4d108.1581356",
+    "map_embed_url": "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d901.0576957989714!2d108.15766990184787!3d16.072586356498643!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3142190065719737%3A0xdd527ea4baef4fef!2zVUJORCBQaMaw4budbmcgSMOyYSBLaMOhbmg!5e1!3m2!1svi!2s!4v1792652054066!5m2!1svi!2s",
+    "photo": {
+      "url": "/images/offices/hoa-khanh.jpg",
+      "object_position": "85% 50%",
+      "alt": "Lối vào Trung tâm Phục vụ hành chính công phường Hòa Khánh",
+      "credit": "Thư Viện Pháp Luật",
+      "source_url": "https://thuvienphapluat.vn/hoi-dap-phap-luat/phuong-hoa-khanh-tp-da-nang-gom-nhung-phuong-nao-hinh-thanh-tu-172025-138061190.html"
+    },
+    "opening_hours": {
+      "text": "Thứ Hai–Thứ Sáu: 07:30–17:00 · Thứ Bảy, Chủ Nhật: đóng cửa",
+      "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJN5dxZQAZQjER70_vuqR-Ut0",
+      "source_type": "google_maps_reviewed",
+      "checked_at": "2026-10-25"
+    }
+  },
+  "danang-public-service-09": {
+    "contact_phone": "02363777998",
+    "contact_label": "Đường dây nóng UBND phường",
+    "contact_source_url": "https://lienchieu.danang.gov.vn/web/guest/gioi-thieu",
+    "website_url": "https://lienchieu.danang.gov.vn/",
+    "photo": {
+      "url": "/images/offices/lien-chieu.jpg",
+      "alt": "Hoạt động trả kết quả tại Trung tâm Phục vụ hành chính công phường Liên Chiểu",
+      "credit": "Báo Đà Nẵng",
+      "source_url": "https://baodanang.vn/nguoi-dan-nhan-so-do-nhanh-hon-thuan-loi-hon-3308779.html"
+    },
+    "map_destination_name": "UBND Phường Liên Chiểu",
+    "google_place_id": "ChIJR3N1XAAZQjERXyT442XL2Cc",
+    "map_review": {
+      "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJR3N1XAAZQjERXyT442XL2Cc",
+      "checked_at": "2026-10-25",
+      "basis": "Đối chiếu tên UBND phường Liên Chiểu và ảnh biển Trung tâm Phục vụ hành chính công trên địa điểm Maps. Google hiển thị địa chỉ Plus Code 34GW+J54; địa chỉ số 68 Lạc Long Quân giữ theo nguồn chính thức."
+    },
+    "opening_hours": {
+      "text": "Thứ Hai–Thứ Sáu: 07:30–17:00 · Thứ Bảy, Chủ Nhật: đóng cửa",
+      "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJR3N1XAAZQjERXyT442XL2Cc",
+      "source_type": "google_maps_reviewed",
+      "checked_at": "2026-10-25"
+    }
+  },
+  "danang-public-service-03": {
+    "contact_phone": "02363714922",
+    "contact_label": "Điện thoại UBND phường",
+    "contact_source_url": "https://thanhkhe.danang.gov.vn/",
+    "website_url": "https://thanhkhe.danang.gov.vn/",
+    "photo": {
+      "url": "/images/offices/thanh-khe.jpg",
+      "alt": "Các quầy phục vụ tại Trung tâm Phục vụ hành chính công phường Thanh Khê",
+      "credit": "Báo Chính phủ",
+      "source_url": "https://baochinhphu.vn/da-nang-van-hanh-thu-mo-hinh-chinh-quyen-hai-cap-tai-dia-phuong-10225062123170998.htm"
+    },
+    "map_destination_name": "UBND Phường Thanh Khê",
+    "google_place_id": "ChIJtcQGjlUYQjERXJP7YmtEGeU",
+    "opening_hours": {
+      "text": "Thứ Hai–Thứ Sáu: 08:00–12:00, 13:30–17:30 · Thứ Bảy: 08:00–11:00 · Chủ Nhật: đóng cửa",
+      "source_url": "https://www.google.com/maps/place/?q=place_id:ChIJtcQGjlUYQjERXJP7YmtEGeU",
+      "source_type": "google_maps_reviewed",
+      "checked_at": "2026-10-25"
+    }
+  },
+  "danang-public-service-04": {
+    "contact_phone": "02363683723",
+    "contact_label": "Điện thoại UBND phường",
+    "contact_source_url": "https://ankhe.danang.gov.vn/",
+    "website_url": "https://ankhe.danang.gov.vn/"
+  },
+  "danang-public-service-01": {
+    "contact_phone": "02363827970",
+    "contact_label": "Điện thoại UBND phường",
+    "contact_source_url": "https://haichau.danang.gov.vn/",
+    "website_url": "https://haichau.danang.gov.vn/",
+    "photo": {
+      "url": "/images/offices/hai-chau.jpg",
+      "alt": "Không gian tiếp nhận hồ sơ tại Trung tâm Phục vụ hành chính công phường Hải Châu",
+      "credit": "Vietnam.vn",
+      "source_url": "https://www.vietnam.vn/en/ngay-dau-van-hanh-chinh-quyen-dia-phuong-2-cap-o-tp-da-nang-thong-suot"
+    },
+    "opening_hours": {
+      "text": "Thứ Hai–Thứ Sáu · Sáng: 07:30–11:30 · Chiều: 13:30–17:00",
+      "source_url": "https://tinhthanhvn.com/ubnd/phuong-hai-chau-thanh-pho-da-nang",
+      "source_type": "reviewed_website",
+      "verification_status": "reference",
+      "source_label": "TinhThanhVN.com",
+      "checked_at": "2026-10-25",
+      "evidence": "Thứ Hai đến Thứ Sáu hàng tuần (Sáng: 07:30 – 11:30; Chiều: 13:30 – 17:00).",
+      "source_note": "Nguồn tra cứu độc lập, cùng tên phường và địa chỉ số 15 đường Lê Hồng Phong. Chưa xác nhận lịch này trên website chính thức; không dùng phần AI Overview làm nguồn."
+    }
+  }
+}

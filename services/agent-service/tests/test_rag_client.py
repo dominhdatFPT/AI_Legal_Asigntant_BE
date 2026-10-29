@@ -122,16 +122,6 @@ def test_breaker_opens_after_three_failures_and_skips_http(kind):
     assert rag.calls == 3  # lần thứ 4 không gửi HTTP
 
 
-def test_breaker_also_guards_get_article():
-    rag = CountingRag([down("5xx") for _ in range(3)])
-    for _ in range(3):
-        with pytest.raises(rag_client.RAGError):
-            asyncio.run(rag_client.get_article("Luật Đất đai", "45", transport=httpx.MockTransport(rag)))
-    with pytest.raises(rag_client.RAGError, match="tạm ngắt"):
-        run_search(rag)
-    assert rag.calls == 3
-
-
 def test_breaker_closes_again_after_open_seconds(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(rag_client.time, "monotonic", lambda: now[0])

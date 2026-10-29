@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir /libs/common_auth
 COPY services/procedure-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY services/procedure-service/app ./app
+COPY services/procedure-service/database ./database
 COPY ["services/procedure-service/Template các thủ tục kinh doanh", "./Template các thủ tục kinh doanh"]
 COPY ["services/procedure-service/Template các thủ tục đất đai", "./Template các thủ tục đất đai"]
 # Render cấp cổng qua biến PORT; chạy local không có PORT thì dùng 8000.

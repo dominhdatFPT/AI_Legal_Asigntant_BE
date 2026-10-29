@@ -23,14 +23,6 @@ class RAGError(Exception):
     pass
 
 
-class ArticleNotFound(Exception):
-    """rag-service trả 404/409 khi tra cứu điều luật: không có văn bản / Điều / Khoản, hoặc tên văn bản mơ hồ."""
-
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code, self.message = code, message
-
-
 def _record_failure() -> None:
     global _fails, _open_until
     _fails += 1
@@ -90,28 +82,3 @@ async def search(
     if not isinstance(chunks, list):
         raise RAGError("rag-service trả kết quả không hợp lệ")
     return chunks
-
-
-async def get_article(
-    law: str,
-    dieu: str,
-    khoan: str | None = None,
-    request_id: str | None = None,
-    transport: httpx.AsyncBaseTransport | None = None,
-) -> dict:
-    """Nguyên văn 1 Điều/Khoản (POST /internal/v1/rag/articles). Không có thì ném ArticleNotFound, lỗi khác RAGError.
-    Trả về {"document": {...}, "chuong", "dieu", "khoan", "content", "note"}."""
-    resp = await _post("/internal/v1/rag/articles", {"law": law[:200], "dieu": dieu, "khoan": khoan}, request_id, transport)
-    try:
-        if resp.status_code in (404, 409):
-            error = resp.json().get("error") or {}
-            raise ArticleNotFound(error.get("code", ""), error.get("message", "Không tìm thấy điều luật."))
-        resp.raise_for_status()
-        article = resp.json()["data"]
-    except httpx.HTTPStatusError as e:
-        raise RAGError(f"rag-service trả lỗi {e.response.status_code}") from e
-    except (ValueError, KeyError, TypeError, AttributeError) as e:
-        raise RAGError("rag-service trả kết quả không hợp lệ") from e
-    if not isinstance(article, dict) or "content" not in article:
-        raise RAGError("rag-service trả kết quả không hợp lệ")
-    return article

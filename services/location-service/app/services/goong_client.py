@@ -68,6 +68,9 @@ class PlaceDetail:
     address: str
     latitude: float
     longitude: float
+    province: str | None = None
+    compound: dict | None = None
+    deprecated_compound: dict | None = None
 
 
 class GoongClient:
@@ -175,10 +178,10 @@ class GoongClient:
         return candidates
 
     async def search_places(self, query: str, latitude: float, longitude: float,
-                            radius_meters: int, limit: int) -> list[PlaceCandidate]:
+                            limit: int) -> list[PlaceCandidate]:
         payload = await self._get("/v2/place/autocomplete", {
             "input": query, "location": f"{latitude},{longitude}",
-            "radius": radius_meters / 1000, "limit": limit,
+            "limit": limit,
         })
         predictions = payload.get("predictions", [])
         if not isinstance(predictions, list):
@@ -191,11 +194,20 @@ class GoongClient:
         return result
 
     async def place_detail(self, place_id: str) -> PlaceDetail:
-        payload = await self._get("/v2/place/detail", {"place_id": place_id})
+        payload = await self._get("/v2/place/detail", {
+            "place_id": place_id,
+            "has_deprecated_administrative_unit": "true",
+        })
         item = payload.get("result")
         if not isinstance(item, dict):
             _bad_response()
         lat, lng = _item_location(item)
         if any(not isinstance(item.get(key), str) or not item[key] for key in ("place_id", "name", "formatted_address")):
             _bad_response()
-        return PlaceDetail(item["place_id"], item["name"], item["formatted_address"], lat, lng)
+        compound = _optional_object(item.get("compound"))
+        deprecated_compound = _optional_object(item.get("deprecated_compound"))
+        province = compound.get("province")
+        if province is not None and (not isinstance(province, str) or not province.strip()):
+            _bad_response()
+        return PlaceDetail(item["place_id"], item["name"], item["formatted_address"], lat, lng,
+                           province, compound, deprecated_compound)

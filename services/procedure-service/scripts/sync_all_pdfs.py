@@ -5,6 +5,7 @@ import requests
 SERVICE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BIZ_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục kinh doanh")
 LAND_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục đất đai")
+PREVIEW_DIR = os.path.join(SERVICE_DIR, "database", "form_templates_preview")
 
 SUPABASE_URL = "https://qqwuhiymixomwrdunfkz.supabase.co"
 SUPABASE_ANON_KEY = (
@@ -92,8 +93,11 @@ def sync_all():
                 form_name = base_name
                 
             full_path = os.path.join(folder, fname)
-            file_size = os.path.getsize(full_path)
-            with open(full_path, "rb") as f:
+            preview_folder = os.path.join(PREVIEW_DIR, os.path.basename(folder))
+            preview_path = os.path.join(preview_folder, fname)
+            read_path = preview_path if (ext == "PDF" and os.path.exists(preview_path)) else full_path
+            file_size = os.path.getsize(read_path)
+            with open(read_path, "rb") as f:
                 raw_bytes = f.read()
             hex_data = "\\x" + raw_bytes.hex()
             

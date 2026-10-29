@@ -1,0 +1,952 @@
+{
+  "province": "Đà Nẵng",
+  "category": "public_service_center",
+  "source_url": "https://thangan.danang.gov.vn/chi-tiet-tin/group/156/nid/18559/dia-chi-tru-so-va-trung-tam-phuc-vu-hanh-chinh-cong-94-don-vi-cap-xa-cua-tp-da-nang-moi",
+  "source_published_at": "2025-07-14",
+  "source_checked_at": "2026-10-22",
+  "entries": [
+    {
+      "id": "danang-public-service-01",
+      "name": "Trung tâm Phục vụ hành chính công phường Hải Châu",
+      "unit_name": "Phường Hải Châu",
+      "address": "15 đường Lê Hồng Phong, phường Hải Châu, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.063828010000066,
+      "longitude": 108.22222025400004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "15 Lê Hồng Phong, Hải Châu, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0903570134",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-02",
+      "name": "Trung tâm Phục vụ hành chính công phường Hòa Cường",
+      "unit_name": "Phường Hòa Cường",
+      "address": "388 đường Núi Thành, phường Hòa Cường, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.03881836000005,
+      "longitude": 108.22202301000004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "388 Núi Thành, Hòa Cường, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905275908",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-03",
+      "name": "Trung tâm Phục vụ hành chính công phường Thanh Khê",
+      "unit_name": "Phường Thanh Khê",
+      "address": "503 đường Trần Cao Vân, phường Thanh Khê, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.071179,
+      "longitude": 108.191244,
+      "coordinate_provider": "goong",
+      "geocoded_address": "503 Đường Trần Cao Vân, Thanh Khê, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0989074161",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-04",
+      "name": "Trung tâm Phục vụ hành chính công phường An Khê",
+      "unit_name": "Phường An Khê",
+      "address": "916 đường Tôn Đản, phường An Khê, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.0257569,
+      "longitude": 108.1879,
+      "coordinate_provider": "goong",
+      "geocoded_address": "916 Tôn Đản, An Khê, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0903555480",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-05",
+      "name": "Trung tâm Phục vụ hành chính công phường An Hải",
+      "unit_name": "Phường An Hải",
+      "address": "289 đường Nguyễn Công Trứ, phường An Hải, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.064828275000025,
+      "longitude": 108.24241449600004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "289 Nguyễn Công Trứ, An Hải, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905607727",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-06",
+      "name": "Trung tâm Phục vụ hành chính công phường Sơn Trà",
+      "unit_name": "Phường Sơn Trà",
+      "address": "06 đường Nguyễn Phan Vinh, phường Sơn Trà, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0913415457",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-07",
+      "name": "Trung tâm Phục vụ hành chính công phường Ngũ Hành Sơn",
+      "unit_name": "Phường Ngũ Hành Sơn",
+      "address": "486 đường Lê Văn Hiến, phường Ngũ Hành Sơn, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.016220231000034,
+      "longitude": 108.25338271700008,
+      "coordinate_provider": "goong",
+      "geocoded_address": "486 Lê Văn Hiến, Ngũ Hành Sơn, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905058559",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-08",
+      "name": "Trung tâm Phục vụ hành chính công phường Hòa Khánh",
+      "unit_name": "Phường Hòa Khánh",
+      "address": "168 đường Nguyễn Sinh Sắc, phường Hòa Khánh, Đà Nẵng",
+      "coordinate_status": "office_poi_match",
+      "latitude": 16.0724872,
+      "longitude": 108.1581356,
+      "coordinate_provider": "goong_office_poi",
+      "coordinate_source_url": "https://www.google.com/maps/place/UBND+Ph%C6%B0%E1%BB%9Dng+H%C3%B2a+Kh%C3%A1nh/@16.0724872,108.1581356,18z/data=!4m5!3m4!1s0x3142190065719737:0xdd527ea4baef4fef!8m2!3d16.0724872!4d108.1581356",
+      "matched_poi_address": "UBND phường Hoà Khánh, 168 Nguyễn Sinh Sắc, Hòa Khánh, Đà Nẵng",
+      "coordinate_checked_at": "2026-10-22",
+      "contact_phone": "0905234569",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-09",
+      "name": "Trung tâm Phục vụ hành chính công phường Liên Chiểu",
+      "unit_name": "Phường Liên Chiểu",
+      "address": "68 đường Lạc Long Quân, phường Liên Chiểu, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.0753648,
+      "longitude": 108.1435487,
+      "coordinate_provider": "goong",
+      "geocoded_address": "68 Lạc Long Quân, Liên Chiểu, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905537609",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-10",
+      "name": "Trung tâm Phục vụ hành chính công phường Hải Vân",
+      "unit_name": "Phường Hải Vân",
+      "address": "20 đường Nguyễn Phúc Chu, phường Hải Vân, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0905885123",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-11",
+      "name": "Trung tâm Phục vụ hành chính công phường Cẩm Lệ",
+      "unit_name": "Phường Cẩm Lệ",
+      "address": "135 đường Ông Ích Đường, phường Cẩm Lệ, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 16.017591524000068,
+      "longitude": 108.20450004600008,
+      "coordinate_provider": "goong",
+      "geocoded_address": "135 Ông Ích Đường, Cẩm Lệ, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0913496249",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-12",
+      "name": "Trung tâm Phục vụ hành chính công phường Hòa Xuân",
+      "unit_name": "Phường Hòa Xuân",
+      "address": "111 đường Hoàng Ngân, phường Hòa Xuân, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.995673092000061,
+      "longitude": 108.21138153800007,
+      "coordinate_provider": "goong",
+      "geocoded_address": "111 Hoàng Ngân, Hòa Xuân, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905023357",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-13",
+      "name": "Trung tâm Phục vụ hành chính công phường Tam Kỳ",
+      "unit_name": "Phường Tam Kỳ",
+      "address": "159 đường Trưng Nữ Vương, phường Tam Kỳ, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.572017322000022,
+      "longitude": 108.47374888500008,
+      "coordinate_provider": "goong",
+      "geocoded_address": "159 Trưng Nữ Vương, Tam Kỳ, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905381177",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-14",
+      "name": "Trung tâm Phục vụ hành chính công phường Quảng Phú",
+      "unit_name": "Phường Quảng Phú",
+      "address": "khối phố Phú Thạnh, phường Quảng Phú, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0911197777",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-15",
+      "name": "Trung tâm Phục vụ hành chính công phường Hương Trà",
+      "unit_name": "Phường Hương Trà",
+      "address": "510 đường Hùng Vương, phường Hương Trà, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.556114889000071,
+      "longitude": 108.49346955500005,
+      "coordinate_provider": "goong",
+      "geocoded_address": "510 Hùng Vương, Hương Trà, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0901937789",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-16",
+      "name": "Trung tâm Phục vụ hành chính công phường Bàn Thạch",
+      "unit_name": "Phường Bàn Thạch",
+      "address": "06 đường Nguyễn Đình Hiến, phường Bàn Thạch, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.580777195000053,
+      "longitude": 108.47445619300004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "6 Nguyễn Đình Hiến, Bàn Thạch, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905285611",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-17",
+      "name": "Trung tâm Phục vụ hành chính công phường Điện Bàn",
+      "unit_name": "Phường Điện Bàn",
+      "address": "24 đường Hoàng Diệu, khối 3, phường Điện Bàn, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0917027555",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-18",
+      "name": "Trung tâm Phục vụ hành chính công phường Điện Bàn Đông",
+      "unit_name": "Phường Điện Bàn Đông",
+      "address": "845 đường Trần Thủ Độ, khối phố Quảng Lăng B, phường Điện Bàn Đông, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0935028629",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-19",
+      "name": "Trung tâm Phục vụ hành chính công phường An Thắng",
+      "unit_name": "Phường An Thắng",
+      "address": "khối phố Phong Nhị, phường An Thắng, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905661999",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-20",
+      "name": "Trung tâm Phục vụ hành chính công phường Điện Bàn Bắc",
+      "unit_name": "Phường Điện Bàn Bắc",
+      "address": "thôn Xóm Bùng, phường Điện Bàn Bắc, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0916521767",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-21",
+      "name": "Trung tâm Phục vụ hành chính công phường Hội An",
+      "unit_name": "Phường Hội An",
+      "address": "02 đường Hoàng Diệu, phường Hội An, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.879187953000041,
+      "longitude": 108.33209485900005,
+      "coordinate_provider": "goong",
+      "geocoded_address": "2 Hoàng Diệu, Hội An, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0948157868",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-22",
+      "name": "Trung tâm Phục vụ hành chính công phường Hội An Đông",
+      "unit_name": "Phường Hội An Đông",
+      "address": "456 đường Cửa Đại, phường Hội An Đông, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.880677684000034,
+      "longitude": 108.34249780100004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "456 Cửa Đại, Hội An Đông, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0989639724",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-23",
+      "name": "Trung tâm Phục vụ hành chính công phường Hội An Tây",
+      "unit_name": "Phường Hội An Tây",
+      "address": "544 đường Hai Bà Trưng, phường Hội An Tây, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0988620700",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-24",
+      "name": "Trung tâm Phục vụ hành chính công xã Hòa Vang",
+      "unit_name": "Xã Hòa Vang",
+      "address": "thôn Dương Lâm 1, xã Hòa Vang, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905323445",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-25",
+      "name": "Trung tâm Phục vụ hành chính công xã Hòa Tiến",
+      "unit_name": "Xã Hòa Tiến",
+      "address": "thôn Phú Sơn Tây (quốc lộ 14B), xã Hòa Tiến, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905006789",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-26",
+      "name": "Trung tâm Phục vụ hành chính công xã Bà Nà",
+      "unit_name": "Xã Bà Nà",
+      "address": "đường ĐH2, thôn Thạch Nham Tây, xã Bà Nà, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0946000234",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-27",
+      "name": "Trung tâm Phục vụ hành chính công xã Núi Thành",
+      "unit_name": "Xã Núi Thành",
+      "address": "khối 3, xã Núi Thành, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905981195",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-28",
+      "name": "Trung tâm Phục vụ hành chính công xã Tam Mỹ",
+      "unit_name": "Xã Tam Mỹ",
+      "address": "thôn Tịnh Sơn, xã Tam Mỹ, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0982090704",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-29",
+      "name": "Trung tâm Phục vụ hành chính công xã Tam Anh",
+      "unit_name": "Xã Tam Anh",
+      "address": "thôn Nam Định, xã Tam Anh, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0973551072",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-30",
+      "name": "Trung tâm Phục vụ hành chính công xã Đức Phú",
+      "unit_name": "Xã Đức Phú",
+      "address": "thôn Thuận Yên Đông, xã Đức Phú, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0914020538",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-31",
+      "name": "Trung tâm Phục vụ hành chính công xã Tam Xuân",
+      "unit_name": "Xã Tam Xuân",
+      "address": "thôn Phú Khê, xã Tam Xuân, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0988951776",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-32",
+      "name": "Trung tâm Phục vụ hành chính công xã Tam Hải",
+      "unit_name": "Xã Tam Hải",
+      "address": "thôn Tân Lập, xã Tam Hải, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0966604455",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-33",
+      "name": "Trung tâm Phục vụ hành chính công xã Tây Hồ",
+      "unit_name": "Xã Tây Hồ",
+      "address": "thôn Cẩm Khê, xã Tây Hồ, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0913430656",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-34",
+      "name": "Trung tâm Phục vụ hành chính công xã Chiên Đàn",
+      "unit_name": "Xã Chiên Đàn",
+      "address": "01 đường Hà Đông, xã Chiên Đàn, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0911323888",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-35",
+      "name": "Trung tâm Phục vụ hành chính công xã Phú Ninh",
+      "unit_name": "Xã Phú Ninh",
+      "address": "thôn Cây Sanh, xã Phú Ninh, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0918793754",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-36",
+      "name": "Trung tâm Phục vụ hành chính công xã Lãnh Ngọc",
+      "unit_name": "Xã Lãnh Ngọc",
+      "address": "thôn 4, xã Lãnh Ngọc, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0983716353",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-37",
+      "name": "Trung tâm Phục vụ hành chính công xã Tiên Phước",
+      "unit_name": "Xã Tiên Phước",
+      "address": "81 đường Huỳnh Thúc Kháng, xã Tiên Phước, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.488521245000072,
+      "longitude": 108.30717090200005,
+      "coordinate_provider": "goong",
+      "geocoded_address": "81 Huỳnh Thúc Kháng, Tiên Phước, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905444998",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-38",
+      "name": "Trung tâm Phục vụ hành chính công xã Thạnh Bình",
+      "unit_name": "Xã Thạnh Bình",
+      "address": "thôn 5, xã Thạnh Bình, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0935202065",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-39",
+      "name": "Trung tâm Phục vụ hành chính công xã Sơn Cẩm Hà",
+      "unit_name": "Xã Sơn Cẩm Hà",
+      "address": "thôn Cẩm Tây, xã Sơn Cẩm Hà, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0903426456",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-40",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Liên",
+      "unit_name": "Xã Trà Liên",
+      "address": "thôn Định Yên, xã Trà Liên, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0968078959",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-41",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Giáp",
+      "unit_name": "Xã Trà Giáp",
+      "address": "thôn 2, xã Trà Giáp, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0984673444",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-42",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Tân",
+      "unit_name": "Xã Trà Tân",
+      "address": "thôn 1, xã Trà Tân, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0985601388",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-43",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Đốc",
+      "unit_name": "Xã Trà Đốc",
+      "address": "thôn 2, xã Trà Đốc, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0914021921",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-44",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà My",
+      "unit_name": "Xã Trà My",
+      "address": "thôn Dương Hòa, xã Trà My, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0903086820",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-45",
+      "name": "Trung tâm Phục vụ hành chính công xã Nam Trà My",
+      "unit_name": "Xã Nam Trà My",
+      "address": "thôn 1, xã Nam Trà My, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0914083308",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-46",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Tập",
+      "unit_name": "Xã Trà Tập",
+      "address": "1, xã Trà Tập, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0914012509",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-47",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Vân",
+      "unit_name": "Xã Trà Vân",
+      "address": "thôn 2, xã Trà Vân, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0979889891",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-48",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Linh",
+      "unit_name": "Xã Trà Linh",
+      "address": "thôn 3, xã Trà Linh, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0987243565",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-49",
+      "name": "Trung tâm Phục vụ hành chính công xã Trà Leng",
+      "unit_name": "Xã Trà Leng",
+      "address": "thôn 2, xã Trà Leng, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0986100060",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-50",
+      "name": "Trung tâm Phục vụ hành chính công xã Thăng Bình",
+      "unit_name": "Xã Thăng Bình",
+      "address": "37 đường Nguyễn Thuật, xã Thăng Bình, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.7375688,
+      "longitude": 108.3518046,
+      "coordinate_provider": "goong",
+      "geocoded_address": "Công An Thị Trấn Hà Lan, 37 Nguyễn Thuật, Thăng Bình, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905766369",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-51",
+      "name": "Trung tâm Phục vụ hành chính công xã Thăng An",
+      "unit_name": "Xã Thăng An",
+      "address": "thôn Nam Hà, xã Thăng An, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905914740",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-52",
+      "name": "Trung tâm Phục vụ hành chính công xã Thăng Trường",
+      "unit_name": "Xã Thăng Trường",
+      "address": "thôn Bình Trúc, xã Thăng Trường, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905859579",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-53",
+      "name": "Trung tâm Phục vụ hành chính công xã Thăng Điền",
+      "unit_name": "Xã Thăng Điền",
+      "address": "thôn Kế Xuyên 2, xã Thăng Điền, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0983065282",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-54",
+      "name": "Trung tâm Phục vụ hành chính công xã Thăng Phú",
+      "unit_name": "Xã Thăng Phú",
+      "address": "thôn Tú Trà, xã Thăng Phú, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0974912555",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-55",
+      "name": "Trung tâm Phục vụ hành chính công xã Đồng Dương",
+      "unit_name": "Xã Đồng Dương",
+      "address": "thôn Châu Lâm, xã Đồng Dương, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0977034885",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-56",
+      "name": "Trung tâm Phục vụ hành chính công xã Quế Sơn Trung",
+      "unit_name": "Xã Quế Sơn Trung",
+      "address": "thôn Phước Dương, xã Quế Sơn Trung, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0977034442",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-57",
+      "name": "Trung tâm Phục vụ hành chính công xã Quế Sơn",
+      "unit_name": "Xã Quế Sơn",
+      "address": "02 đường Trưng Nữ Vương, xã Quế Sơn, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0961200097",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-58",
+      "name": "Trung tâm Phục vụ hành chính công xã Xuân Phú",
+      "unit_name": "Xã Xuân Phú",
+      "address": "thôn Mộc Bài, xã Xuân Phú, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0982100444",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-59",
+      "name": "Trung tâm Phục vụ hành chính công xã Nông Sơn",
+      "unit_name": "Xã Nông Sơn",
+      "address": "thôn Trung Hạ, xã Nông Sơn, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0912909121",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-60",
+      "name": "Trung tâm Phục vụ hành chính công xã Quế Phước",
+      "unit_name": "Xã Quế Phước",
+      "address": "thôn Bình Yên, xã Quế Phước, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0345779757",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-61",
+      "name": "Trung tâm Phục vụ hành chính công xã Duy Nghĩa",
+      "unit_name": "Xã Duy Nghĩa",
+      "address": "thôn Thuận An, xã Duy Nghĩa, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0985921513",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-62",
+      "name": "Trung tâm Phục vụ hành chính công xã Nam Phước",
+      "unit_name": "Xã Nam Phước",
+      "address": "468 đường Hùng Vương, xã Nam Phước, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.8278249,
+      "longitude": 108.2584057,
+      "coordinate_provider": "goong",
+      "geocoded_address": "468 Đường Hùng Vương, Nam Phước, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0905242458",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-63",
+      "name": "Trung tâm Phục vụ hành chính công xã Duy Xuyên",
+      "unit_name": "Xã Duy Xuyên",
+      "address": "thôn An Hòa, xã Duy Xuyên, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905629979",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-64",
+      "name": "Trung tâm Phục vụ hành chính công xã Thu Bồn",
+      "unit_name": "Xã Thu Bồn",
+      "address": "thôn Phú Lạc, xã Thu Bồn, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0935347778",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-65",
+      "name": "Trung tâm Phục vụ hành chính công xã Điện Bàn Tây",
+      "unit_name": "Xã Điện Bàn Tây",
+      "address": "thôn Phong Thử 1, xã Điện Bàn Tây, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0919800090",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-66",
+      "name": "Trung tâm Phục vụ hành chính công xã Gò Nổi",
+      "unit_name": "Xã Gò Nổi",
+      "address": "thôn Đông Lãnh, xã Gò Nổi, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905030703",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-67",
+      "name": "Trung tâm Phục vụ hành chính công xã Tân Hiệp",
+      "unit_name": "Xã Tân Hiệp",
+      "address": "thôn Bãi Làng, xã Tân Hiệp, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0981922029",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-68",
+      "name": "Trung tâm Phục vụ hành chính công xã Đại Lộc",
+      "unit_name": "Xã Đại Lộc",
+      "address": "11 Hùng Vương, xã Đại Lộc, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.882935344000032,
+      "longitude": 108.11446310900004,
+      "coordinate_provider": "goong",
+      "geocoded_address": "11 Hùng Vương, Đại Lộc, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0906422213",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-69",
+      "name": "Trung tâm Phục vụ hành chính công xã Hà Nha",
+      "unit_name": "Xã Hà Nha",
+      "address": "thôn Hà Nha, xã Hà Nha, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905234556",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-70",
+      "name": "Trung tâm Phục vụ hành chính công xã Thượng Đức",
+      "unit_name": "Xã Thượng Đức",
+      "address": "thôn Tân Hà, xã Thượng Đức, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0967465777",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-71",
+      "name": "Trung tâm Phục vụ hành chính công xã Vu Gia",
+      "unit_name": "Xã Vu Gia",
+      "address": "thôn Lâm Yên, xã Vu Gia, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0983408934",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-72",
+      "name": "Trung tâm Phục vụ hành chính công xã Phú Thuận",
+      "unit_name": "Xã Phú Thuận",
+      "address": "204 đường ĐH4.ĐL, xã Phú Thuận, Đà Nẵng",
+      "coordinate_status": "needs_review",
+      "contact_phone": "0905152182",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-73",
+      "name": "Trung tâm Phục vụ hành chính công xã Thạnh Mỹ",
+      "unit_name": "Xã Thạnh Mỹ",
+      "address": "thôn Mực, xã Thạnh Mỹ, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905344838",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-74",
+      "name": "Trung tâm Phục vụ hành chính công xã Bến Giằng",
+      "unit_name": "Xã Bến Giằng",
+      "address": "thôn Bến Giằng, xã Bến Giằng, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0919769272",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-75",
+      "name": "Trung tâm Phục vụ hành chính công xã Nam Giang",
+      "unit_name": "Xã Nam Giang",
+      "address": "thôn A Bát, xã Nam Giang, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0983519121",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-76",
+      "name": "Trung tâm Phục vụ hành chính công xã Đắc Pring",
+      "unit_name": "Xã Đắc Pring",
+      "address": "thôn 56B, xã Đắc Pring, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0976291920",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-77",
+      "name": "Trung tâm Phục vụ hành chính công xã La Dêê",
+      "unit_name": "Xã La Dêê",
+      "address": "thôn Đắc Ốc, xã La Dêê, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0396113007",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-78",
+      "name": "Trung tâm Phục vụ hành chính công xã La Êê",
+      "unit_name": "Xã La Êê",
+      "address": "thôn Pà Ooi, xã La Êê, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0965134135",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-79",
+      "name": "Trung tâm Phục vụ hành chính công xã Sông Vàng",
+      "unit_name": "Xã Sông Vàng",
+      "address": "thôn Ban Mai, xã Sông Vàng, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0374631376",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-80",
+      "name": "Trung tâm Phục vụ hành chính công xã Sông Kôn",
+      "unit_name": "Xã Sông Kôn",
+      "address": "thôn Ra Lang, xã Sông Kôn, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0915011323",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-81",
+      "name": "Trung tâm Phục vụ hành chính công xã Đông Giang",
+      "unit_name": "Xã Đông Giang",
+      "address": "thôn Ngã Ba, xã Đông Giang, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0976193685",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-82",
+      "name": "Trung tâm Phục vụ hành chính công xã Bến Hiên",
+      "unit_name": "Xã Bến Hiên",
+      "address": "thôn AXờ, xã Bến Hiên, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0987775619",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-83",
+      "name": "Trung tâm Phục vụ hành chính công xã Avương",
+      "unit_name": "Xã Avương",
+      "address": "thôn Azứt, xã Avương, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0876010009",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-84",
+      "name": "Trung tâm Phục vụ hành chính công xã Tây Giang",
+      "unit_name": "Xã Tây Giang",
+      "address": "thôn Agrồng, xã Tây Giang, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0979194199",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-85",
+      "name": "Trung tâm Phục vụ hành chính công xã Hùng Sơn",
+      "unit_name": "Xã Hùng Sơn",
+      "address": "thôn Arâng, xã Hùng Sơn, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0981461119",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-86",
+      "name": "Trung tâm Phục vụ hành chính công xã Hiệp Đức",
+      "unit_name": "Xã Hiệp Đức",
+      "address": "125, đường Hùng Vương, xã Hiệp Đức, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.582394431000068,
+      "longitude": 108.11445832800007,
+      "coordinate_provider": "goong",
+      "geocoded_address": "125 Hùng Vương, Hiệp Đức, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0983356922",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-87",
+      "name": "Trung tâm Phục vụ hành chính công xã Việt An",
+      "unit_name": "Xã Việt An",
+      "address": "thôn Việt An, xã Việt An, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0982777125",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-88",
+      "name": "Trung tâm Phục vụ hành chính công xã Phước Trà",
+      "unit_name": "Xã Phước Trà",
+      "address": "thôn Trà Sơn, xã Phước Trà, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0983747601",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-89",
+      "name": "Trung tâm Phục vụ hành chính công xã Khâm Đức",
+      "unit_name": "Xã Khâm Đức",
+      "address": "48 đường Hồ Chí Minh, xã Khâm Đức, Đà Nẵng",
+      "coordinate_status": "street_address_match",
+      "latitude": 15.4462322,
+      "longitude": 107.7931791,
+      "coordinate_provider": "goong",
+      "geocoded_address": "48 Đường Hồ Chí Minh, Khâm Đức, Đà Nẵng",
+      "geocoded_at": "2026-10-22",
+      "contact_phone": "0941818858",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-90",
+      "name": "Trung tâm Phục vụ hành chính công xã Phước Năng",
+      "unit_name": "Xã Phước Năng",
+      "address": "thôn 2, xã Phước Năng, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0977440405",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-91",
+      "name": "Trung tâm Phục vụ hành chính công xã Phước Chánh",
+      "unit_name": "Xã Phước Chánh",
+      "address": "thôn 3, xã Phước Chánh, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905234313",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-92",
+      "name": "Trung tâm Phục vụ hành chính công xã Phước Thành",
+      "unit_name": "Xã Phước Thành",
+      "address": "thôn 2, xã Phước Thành, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0914009933",
+      "contact_label": "Liên hệ địa phương"
+    },
+    {
+      "id": "danang-public-service-93",
+      "name": "Trung tâm Phục vụ hành chính công xã Phước Hiệp",
+      "unit_name": "Xã Phước Hiệp",
+      "address": "thôn 1, xã Phước Hiệp, Đà Nẵng",
+      "coordinate_status": "needs_verified_office_pin",
+      "contact_phone": "0905495229",
+      "contact_label": "Liên hệ địa phương"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "entries": [
+    {
+      "name": "Văn phòng công chứng Nguyễn Thị Hạnh",
+      "province": "Đà Nẵng",
+      "provider_address": "285 Nguyễn Sinh Sắc, Hòa Khánh, Đà Nẵng",
+      "google_address": "283 Nguyễn Sinh Sắc, Hòa Khánh, Đà Nẵng",
+      "source_url": "https://www.google.com/maps/place/Van+phong+cong+chung+Nguyen+Thi+Hanh/data=!4m5!3m4!1s0x3142196a283eaef3:0xe302ecf8b11cab5e!8m2!3d16.0701924!4d108.1589457",
+      "checked_at": "2026-10-25",
+      "status": "withheld_pending_address_review"
+    }
+  ]
+}

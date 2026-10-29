@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from app.services import agent, contract_review, query_filter, rag_client
+from app.services import agent, contract_review, prompts, query_filter, rag_client, responder
 from tests.test_agent import doc, fake_services  # noqa: F401  (fixture dùng chung với test_agent)
 
 CONTRACT_TEXT = "HỢP ĐỒNG CHUYỂN NHƯỢNG QUYỀN SỬ DỤNG ĐẤT\nBên A chuyển nhượng cho bên B thửa đất số 12."
@@ -22,7 +22,7 @@ def test_review_uses_review_prompt_not_the_short_answer_prompt(fake_services):
     assert "(chưa có căn cứ trong kho văn bản)" in prompt and "luật sư hoặc công chứng viên" in prompt
     assert "hỏi lại đúng 1 câu" not in prompt and "dưới 200 chữ" not in prompt  # quy tắc của SYSTEM_PROMPT cũ
     # khối chống prompt injection và cảnh báo OCR giữ nguyên
-    assert agent.INJECTION_RULE in prompt and agent.OCR_RULE in prompt
+    assert prompts.INJECTION_RULE in prompt and prompts.OCR_RULE in prompt
     assert "<<<TÀI LIỆU 1 (Word DOCX)>>>" in prompt
 
 
@@ -164,3 +164,23 @@ def test_without_documents_behaviour_is_unchanged(fake_services):
     prompt = fake_services["generate"]["system_prompt"]
     assert "Câu đầu tiên trả lời thẳng câu hỏi" in prompt and "KHÔNG hỏi lại người dùng" not in prompt
     assert "mode" not in result["metadata"] and "contract_type" not in result["metadata"]
+
+
+def test_bypass_review_shows_queries_and_mode(monkeypatch, fake_services):
+    from app.core.config import get_settings
+    from app.services import llm_client
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("llm_client.generate không được gọi khi LLM_BYPASS bật")
+
+    monkeypatch.setenv("LLM_BYPASS", "true")
+    get_settings.cache_clear()
+    monkeypatch.setattr(llm_client, "generate", forbidden)
+
+    result = review()
+
+    meta = result["metadata"]
+    assert result["content"].startswith(responder.BYPASS_HEADER)
+    assert meta["queries"] == ASPECTS
+    assert meta["mode"] == "contract_review" and meta["contract_type"] == "chuyen_nhuong_dat"
+    assert meta["model"] == "no-llm" and "KHÔNG hỏi lại người dùng" in meta["system_prompt"]
