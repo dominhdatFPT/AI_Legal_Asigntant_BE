@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.database import get_engine
+from sqlalchemy.exc import SQLAlchemyError
 from app.api.procedures import router as procedures_router
 from app.api.templates import router as templates_router
 from app.api.dynamic_form_templates import (
@@ -221,6 +222,23 @@ async def template_invalid_status_handler(request: Request, exc: TemplateInvalid
     )
 
 
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
+    logger.error(f"SQLAlchemy database error: {exc}")
+    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    return JSONResponse(
+        status_code=503,
+        content={
+            "data": None,
+            "error": {
+                "code": "DATABASE_UNAVAILABLE",
+                "message": "Không kết nối được cơ sở dữ liệu, vui lòng thử lại sau giây lát.",
+            },
+            "request_id": req_id,
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def internal_error_handler(request: Request, exc: Exception):
     logger.error(f"Internal server error: {exc}", exc_info=True)
@@ -250,6 +268,68 @@ app.include_router(dft_citizen_router, prefix="/api/procedures", tags=["DFT Citi
 
 # Kho mẫu đơn tham khảo file PDF/DOCX (templates_router)
 app.include_router(templates_router, prefix="/api/v1/procedures", tags=["Form templates"])
+app.include_router(templates_router, prefix="/api/procedures", tags=["Form templates Alias"], include_in_schema=False)
 # Thủ tục hành chính (procedures_router)
 app.include_router(procedures_router, prefix="/api/v1/procedures", tags=["Procedures"])
 app.include_router(procedures_router, prefix="/api/procedures", tags=["Procedures-Alias"], include_in_schema=False)
+
+# Mock Auth cho môi trường dev local độc lập (đáp ứng protectPage của FE khi chạy không có NGINX gateway)
+if True:
+    from fastapi import APIRouter
+    dev_router = APIRouter(prefix="/api/users", tags=["Dev Mock Auth"])
+
+    @dev_router.get("/me")
+    async def dev_me(request: Request):
+        role = request.cookies.get("dev_role") or request.headers.get("X-Dev-Role") or "admin"
+        return {
+            "data": {
+                "id": "dev-user-01",
+                "role": role,
+                "full_name": "Quản Trị Viên Hệ Thống" if role == "admin" else "Nguyễn Văn Công Dân",
+                "username": role,
+                "email": f"{role}@dichvucong.gov.vn",
+            }
+        }
+
+    @dev_router.post("/auth/login")
+    async def dev_login(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        username = body.get("username", "admin")
+        role = "admin" if "admin" in username else "citizen"
+        return {
+            "data": {
+                "token": "dev-mock-jwt-token",
+                "user": {
+                    "id": "dev-user-01",
+                    "role": role,
+                    "full_name": "Quản Trị Viên" if role == "admin" else "Nguyễn Văn Công Dân",
+                    "username": username,
+                    "email": f"{username}@dichvucong.gov.vn",
+                }
+            }
+        }
+
+    @dev_router.get("/me/citizen-profile")
+    async def dev_citizen_profile():
+        return {
+            "data": {
+                "full_name": "Nguyễn Văn Công Dân",
+                "identity_number": "001200000001",
+                "date_of_birth": "1990-01-01",
+                "issue_date": "2021-01-01",
+                "issue_place": "Cục CS QLHC về TTXH",
+                "permanent_address": "Số 1 Tràng Tiền, Hoàn Kiếm, Hà Nội",
+                "phone": "0912345678",
+                "email": "congdan@example.com",
+            }
+        }
+
+    @dev_router.put("/me/citizen-profile")
+    async def dev_put_citizen_profile():
+        return {"data": {"success": True}}
+
+    app.include_router(dev_router)
+

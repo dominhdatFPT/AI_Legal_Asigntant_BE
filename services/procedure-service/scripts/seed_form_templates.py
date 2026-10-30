@@ -3,21 +3,19 @@
 Đọc file ở hai thư mục "Template các thủ tục ..." (chỉ file nằm trực tiếp, bỏ thư mục con trùng lặp)
 và bản PDF xem trước cùng tên trong database/form_templates_preview/. Chạy lại không bị nhân đôi:
 mẫu đã có (cùng domain + tên file) được cập nhật nội dung.
-
-Chạy trong thư mục services/procedure-service, cần PROCEDURE_DATABASE_URL trong .env của BE:
-    python scripts/seed_form_templates.py
-Hoặc qua Docker (từ thư mục gốc BE, PowerShell):
-    docker compose run --rm -v "${PWD}/services/procedure-service:/app" procedure-service python scripts/seed_form_templates.py
 """
 import sys
 from pathlib import Path
 
-from sqlalchemy import text
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+from sqlalchemy import text, create_engine
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SERVICE_ROOT))
 
-from app.database import get_engine  # noqa: E402
+from app.database import database_url  # noqa: E402
 
 # Thư mục mẫu -> mã lĩnh vực (khớp procedure_domains.code).
 TEMPLATE_FOLDERS = {
@@ -48,7 +46,6 @@ ON CONFLICT (domain, file_name) DO UPDATE SET
 
 
 def split_name(stem: str) -> tuple[str, str]:
-    """'Thủ tục X - Đơn Y' -> ('X - Đơn Y', 'X'): tên hiển thị bỏ tiền tố, kèm tên thủ tục."""
     title = stem[len(PROCEDURE_PREFIX):] if stem.startswith(PROCEDURE_PREFIX) else stem
     title = title[:1].upper() + title[1:]
     return title, title.partition(" - ")[0].strip()
@@ -83,9 +80,13 @@ def collect_templates(root: Path = SERVICE_ROOT, preview_root: Path = PREVIEW_RO
 
 
 def main() -> None:
-    engine = get_engine()
-    if engine is None:
+    db_url = database_url()
+    if not db_url:
         sys.exit("Thiếu PROCEDURE_DATABASE_URL trong .env, không biết nạp vào database nào.")
+    engine = create_engine(
+        db_url,
+        connect_args={"prepare_threshold": None}
+    )
     rows = collect_templates()
     if not rows:
         sys.exit(f"Không thấy file mẫu nào trong {SERVICE_ROOT}.")
@@ -93,7 +94,7 @@ def main() -> None:
         for row in rows:
             conn.execute(UPSERT, row)
     previews = sum(r["preview_pdf"] is not None for r in rows)
-    print(f"Đã nạp {len(rows)} mẫu đơn ({previews} mẫu Word có bản PDF xem trước) vào form_templates.")
+    print(f"Đã nạp thành công {len(rows)} mẫu đơn ({previews} mẫu Word có bản PDF xem trước) vào form_templates.")
 
 
 if __name__ == "__main__":

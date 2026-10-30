@@ -52,7 +52,7 @@ def test_required_checkbox_must_be_ticked():
 
 
 def test_optional_field_may_be_empty(auth):
-    assert submit(auth(), land_use_term="", certificate_issue_date=None).status_code == 200
+    assert submit(auth(), code="DD-002", land_use_term="", certificate_issue_date=None).status_code == 200
 
 
 @pytest.mark.parametrize("code", list(PROCEDURE_FIELD_DISPATCHER))

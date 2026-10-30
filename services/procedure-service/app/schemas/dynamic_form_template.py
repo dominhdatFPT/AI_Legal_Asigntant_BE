@@ -30,6 +30,8 @@ class FieldTypeEnum(str, Enum):
     phone = "phone"
     email = "email"
     select = "select"
+    static_text = "static_text"
+    table = "table"
 
 
 class BlockKeyEnum(str, Enum):
@@ -48,19 +50,21 @@ class BlockKeyEnum(str, Enum):
 
 
 class FieldIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
     key: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     # Nháp cho phép trường tự do chưa có tiêu đề; validate_for_publish chặn khi xuất bản.
     label: str = Field(default="", max_length=255)
     type: FieldTypeEnum
     required: bool = True
+    width: Optional[str] = None
+    table_config: Optional[Dict[str, Any]] = None
     autofill: Optional[str] = Field(default=None, pattern=r"^profile\.[a-z_]+$")
     options: Optional[List[str]] = None
 
 
 class BlockIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
     instance_id: str = Field(pattern=r"^[a-z_]+_[0-9]+$")
     block_key: BlockKeyEnum
@@ -69,7 +73,7 @@ class BlockIn(BaseModel):
 
 
 class SectionIn(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
     id: str = Field(pattern=r"^sec_[0-9]+$")
     title: str = Field(default="", max_length=255)
@@ -81,7 +85,7 @@ class ContentIn(BaseModel):
     """Body nhận từ Admin khi POST (tạo mới) hoặc PUT (sửa nháp).
     Validate mềm: cho phép sections rỗng, title rỗng, blocks rỗng khi admin đang soạn dở.
     """
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="allow")
 
     schema_version: Literal[1] = 1
     name: str = Field(min_length=1, max_length=255)
@@ -117,9 +121,6 @@ def validate_for_publish(content: ContentIn) -> List[Dict[str, str]]:
         if sec.id in seen_sec_ids:
             errors.append({"field": f"{prefix}.id", "message": f"Mã mục '{sec.id}' bị trùng lặp."})
         seen_sec_ids.add(sec.id)
-
-        if not sec.title or not sec.title.strip():
-            errors.append({"field": f"{prefix}.title", "message": "Tiêu đề mục không được để trống."})
 
         if not sec.blocks or len(sec.blocks) == 0:
             errors.append({"field": f"{prefix}.blocks", "message": "Mỗi mục phải có ít nhất 1 thẻ."})

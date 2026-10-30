@@ -73,6 +73,18 @@ def db_connection(write: bool = False):
         raise ProcedureDbUnavailable(type(exc).__name__) from exc
 
 
+def _normalize_domain(domain: str | None) -> str | None:
+    if not domain:
+        return domain
+    d = domain.strip().lower()
+    mapping = {
+        "dat_dai": "land",
+        "ho_kinh_doanh": "business",
+        "doanh_nghiep": "business",
+    }
+    return mapping.get(d, d)
+
+
 def remove_accents(input_str: str) -> str:
     """Loại bỏ dấu tiếng Việt để tìm kiếm không dấu"""
     if not input_str:
@@ -556,6 +568,7 @@ class ProcedureRepository:
     @staticmethod
     def get_procedures(domain: str | None = None, offset: int = 0, limit: int = 20, search: str | None = None) -> tuple[list[dict], int]:
         """Lấy danh sách thủ tục có phân trang và lọc."""
+        domain = _normalize_domain(domain)
         where_clauses = ["status = 'active'"]
         params: dict = {"limit": limit, "offset": offset}
         if domain:
@@ -672,7 +685,7 @@ class ProcedureRepository:
     @staticmethod
     def get_procedures_by_domain(domain: str, limit: int = 100, include_details: bool = True) -> list[dict]:
         """Danh sách thủ tục theo lĩnh vực ('all' = mọi lĩnh vực), có In-Memory cache và PostgREST fallback."""
-        clean_domain = domain.strip().lower()
+        clean_domain = _normalize_domain(domain) or "all"
         cache_key = f"proc_domain:{clean_domain}:{limit}:{include_details}"
         now = time.time()
         if cache_key in _proc_cache:
@@ -739,7 +752,7 @@ class ProcedureRepository:
     @staticmethod
     def get_procedure_names_by_domain(domain: str) -> list[dict]:
         """Tên và mã thủ tục gọn nhẹ theo lĩnh vực (cho dropdown)."""
-        clean_domain = domain.strip().lower()
+        clean_domain = _normalize_domain(domain) or "all"
         params: dict = {}
         where_sql = ""
         if clean_domain != "all":
@@ -750,3 +763,53 @@ class ProcedureRepository:
         for item in items:
             item["fee_formatted"] = _fee_formatted(item.get("fee"))
         return items
+
+    @staticmethod
+    def create_or_ensure_procedure(
+        code: str,
+        name: str,
+        domain: str,
+        description: str = "",
+        processing_days: int = 3,
+        fee: int = 0,
+        submission_channels: list[str] | None = None,
+    ) -> dict:
+        """Tạo thủ tục hành chính mới nếu chưa có, hoặc trả về thủ tục hiện tại."""
+        import uuid
+        clean_code = code.strip().upper()
+        norm_domain = "land" if domain in ("land", "dat_dai") else "business"
+        channels = submission_channels or ["online", "in_person"]
+
+        with db_connection(write=True) as conn:
+            existing = _rows(conn, "SELECT * FROM public.procedures WHERE UPPER(code) = :code LIMIT 1", {"code": clean_code})
+            if existing:
+                return existing[0]
+
+            new_id = str(uuid.uuid4())
+            conn.execute(
+                text("""
+                    INSERT INTO public.procedures (
+                        id, code, name, domain, description, processing_days,
+                        submission_channels, receiving_agency_level, fee, status,
+                        created_at, updated_at
+                    ) VALUES (
+                        :id, :code, :name, :domain, :description, :processing_days,
+                        :channels, 'district', :fee, 'active',
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
+                """),
+                {
+                    "id": new_id,
+                    "code": clean_code,
+                    "name": name.strip(),
+                    "domain": norm_domain,
+                    "description": description or f"Thủ tục {name.strip()}",
+                    "processing_days": processing_days,
+                    "channels": channels,
+                    "fee": fee,
+                }
+            )
+            created = _rows(conn, "SELECT * FROM public.procedures WHERE id = :id", {"id": new_id})
+            _proc_cache.clear()
+            return created[0] if created else {}
+

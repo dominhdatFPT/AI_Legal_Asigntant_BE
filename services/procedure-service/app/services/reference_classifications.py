@@ -1,8 +1,7 @@
 """Classification catalogue for source documents, querying directly from PostgreSQL with fallback."""
 import logging
 import time
-import psycopg
-from psycopg.rows import dict_row
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -52,17 +51,15 @@ def load_classifications_from_db():
         return _CACHE["data"]
 
     try:
-        from app.core.config import settings
-        db_url = settings.PROCEDURE_DATABASE_URL
-        if not db_url:
+        from app.repositories.procedure_repository import db_connection, is_postgres_circuit_open
+        if is_postgres_circuit_open():
             return None
-        with psycopg.connect(db_url, connect_timeout=4, prepare_threshold=None,
-                             row_factory=dict_row, options="-c statement_timeout=5000") as conn:
-            rows = conn.execute("""
+        with db_connection(write=False) as conn:
+            rows = [dict(r) for r in conn.execute(text("""
                 SELECT key, code, name, domain, kind, procedure_id::text
                 FROM public.reference_classifications
                 ORDER BY code, name
-            """).fetchall()
+            """)).mappings().all()]
             if rows and len(rows) > 0:
                 result = {
                     "domains": DEFAULT_DOMAINS,

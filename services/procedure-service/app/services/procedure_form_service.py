@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -9,6 +10,8 @@ from app.schemas.form_schema import (
     FormSection,
     ProcedureFormSchema,
 )
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # REUSABLE BLOCKS (CÁC KHỐI TRƯỜNG DÙNG CHUNG)
@@ -1491,13 +1494,169 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
 }
 
 
+def convert_dynamic_template_to_schema(row_dict: dict, content: dict, code_upper: str) -> ProcedureFormSchema:
+    domain_val = row_dict.get("domain") or content.get("domain") or "dat_dai"
+    domain = "land" if domain_val in ("land", "dat_dai") else "business"
+    target_table = "land_procedure_records" if domain == "land" else "business_procedure_records"
+    name = row_dict.get("name") or content.get("name") or f"Thủ tục {code_upper}"
+
+    sections_data = content.get("sections") or []
+    final_sections: List[FormSection] = []
+    final_fields: List[FormField] = []
+
+    for s_idx, sec in enumerate(sections_data):
+        sec_id = str(sec.get("id") or f"sec_{s_idx + 1}")
+        sec_title = sec.get("title") or f"Mục {s_idx + 1}"
+        final_sections.append(
+            FormSection(
+                key=sec_id,
+                title=sec_title,
+                order=s_idx + 1,
+            )
+        )
+
+        blocks = sec.get("blocks") or []
+        for b_idx, blk in enumerate(blocks):
+            inst_id = blk.get("instance_id") or f"blk_{b_idx + 1}"
+            b_key = blk.get("block_key", "")
+            f_list = blk.get("fields") or []
+
+            if b_key == "free_field" and not f_list:
+                f_list = [{
+                    "key": "value",
+                    "label": blk.get("label") or "Trường tự do",
+                    "type": blk.get("type", "text"),
+                    "required": blk.get("required", False)
+                }]
+
+            for f_idx, fld in enumerate(f_list):
+                raw_key = fld.get("key") or fld.get("name") or f"field_{f_idx + 1}"
+                field_name = f"{inst_id}.{raw_key}" if (inst_id and "." not in raw_key) else raw_key
+                label = fld.get("label") or raw_key
+                f_type_str = str(fld.get("type", "text")).lower()
+
+                if f_type_str == "textarea":
+                    field_type = FieldType.textarea
+                elif f_type_str in ("date", "dob", "issue_date", "past_date"):
+                    field_type = FieldType.date
+                elif f_type_str == "number":
+                    field_type = FieldType.number
+                elif f_type_str == "select":
+                    field_type = FieldType.select
+                elif f_type_str == "checkbox":
+                    field_type = FieldType.checkbox
+                elif f_type_str == "radio":
+                    field_type = FieldType.radio
+                else:
+                    field_type = FieldType.text
+
+                options = None
+                if fld.get("options") and isinstance(fld["options"], list):
+                    options = [FormFieldOption(value=str(o), label=str(o)) for o in fld["options"]]
+
+                required = bool(fld.get("required", False))
+                placeholder = fld.get("placeholder")
+
+                final_fields.append(
+                    FormField(
+                        name=field_name,
+                        label=label,
+                        field_type=field_type,
+                        required=required,
+                        placeholder=placeholder,
+                        options=options,
+                        section=sec_id,
+                    )
+                )
+
+    return ProcedureFormSchema(
+        procedure_code=code_upper,
+        procedure_name=name,
+        domain=domain,
+        target_table=target_table,
+        template_filename=None,
+        sections=final_sections,
+        fields=final_fields,
+    )
+
+
+def get_dynamic_form_schema(procedure_code: str) -> Optional[ProcedureFormSchema]:
+    """
+    Kiểm tra xem thủ tục có mẫu đơn dùng chung (Dynamic Form Template)
+    đã được Admin xuất bản (published) hay không.
+    Nếu có, chuyển đổi cấu trúc sections & blocks của mẫu đơn thành ProcedureFormSchema
+    để ưu tiên trả về cho người dân điền đơn.
+    """
+    try:
+        from app.database import get_engine
+        from sqlalchemy import text
+        import json
+        engine = get_engine()
+        if not engine:
+            return None
+
+        code_upper = procedure_code.strip().upper()
+        with engine.connect() as conn:
+            proc_id_str = None
+            try:
+                proc_row = conn.execute(
+                    text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
+                    {"code": code_upper}
+                ).fetchone()
+                if proc_row:
+                    proc_id_str = str(proc_row[0])
+            except Exception:
+                pass
+
+            params = {"code": code_upper}
+            where_proc = "(UPPER(procedure_id) = :code OR UPPER(code) = :code"
+            if proc_id_str:
+                params["proc_id"] = proc_id_str
+                where_proc += " OR procedure_id = :proc_id"
+            where_proc += ")"
+
+            sql = f"""
+                SELECT * FROM public.dynamic_form_templates
+                WHERE {where_proc}
+                  AND status = 'published'
+                  AND deleted_at IS NULL
+                ORDER BY version DESC, updated_at DESC
+                LIMIT 1
+            """
+            row = conn.execute(text(sql), params).fetchone()
+            if not row:
+                return None
+
+            m = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
+            content = m.get("content")
+            if isinstance(content, str):
+                try:
+                    content = json.loads(content)
+                except Exception:
+                    content = {}
+            if not isinstance(content, dict) or not content.get("sections"):
+                return None
+
+            return convert_dynamic_template_to_schema(m, content, code_upper)
+    except Exception as e:
+        logger.warning(f"Không thể tải dynamic form schema cho thủ tục {procedure_code}: {e}")
+        return None
+
+
 def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
     """
-    Hàm trung gian (Dispatcher): Nhận vào mã thủ tục (ví dụ: DD-001 hoặc HKD-001),
-    gọi đến đúng hàm tương ứng trong 26 hàm chi tiết để trả về schema các cột/biến
-    cho Frontend render form.
+    Hàm trung gian (Dispatcher): Nhận vào mã thủ tục (ví dụ: DD-001 hoặc HKD-001).
+    Ưu tiên 1: Lấy schema từ Mẫu đơn dùng chung (Dynamic Form Template) do Admin tùy chỉnh & xuất bản.
+    Ưu tiên 2: Fallback về schema mặc định ban đầu từ 26 hàm thủ tục cố định.
     """
     code_upper = procedure_code.strip().upper()
+
+    # 1. Thử lấy schema từ mẫu đơn động đã xuất bản của Admin
+    dynamic_schema = get_dynamic_form_schema(code_upper)
+    if dynamic_schema and len(dynamic_schema.fields) > 0:
+        return dynamic_schema
+
+    # 2. Fallback về cấu hình tĩnh mặc định
     handler = PROCEDURE_FIELD_DISPATCHER.get(code_upper)
     if not handler:
         raise ValueError(f"Không tìm thấy cấu hình biểu mẫu cho mã thủ tục: '{procedure_code}'")

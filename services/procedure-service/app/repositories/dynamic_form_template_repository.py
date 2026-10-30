@@ -3,23 +3,14 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import text
-from app.database import get_engine as _get_engine
+from app.repositories.procedure_repository import db_connection
 from app.core.exceptions import (
     TemplateNotFoundError,
     TemplateNotDraftError,
     TemplateInvalidStatusError,
 )
-from app.repositories.procedure_repository import ProcedureDbUnavailable
 
 logger = logging.getLogger(__name__)
-
-
-def get_engine():
-    # Lỗi truy vấn (SQLAlchemyError) được main.py đổi thành 503; ở đây chỉ chặn trường hợp chưa cấu hình DB.
-    engine = _get_engine()
-    if engine is None:
-        raise ProcedureDbUnavailable("PROCEDURE_DATABASE_URL chưa cấu hình")
-    return engine
 
 
 def _extract_domain(val: Any) -> str:
@@ -60,11 +51,31 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def create(content_dict: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
-        engine = get_engine()
+        # Tự động tạo thủ tục hành chính mới nếu có yêu cầu
+        if content_dict.get("new_procedure") and isinstance(content_dict["new_procedure"], dict):
+            np = content_dict["new_procedure"]
+            np_code = (np.get("code") or "").strip().upper()
+            np_name = (np.get("name") or "").strip()
+            if np_code and np_name:
+                from app.repositories.procedure_repository import ProcedureRepository
+                existing_proc = ProcedureRepository.get_procedure_by_id_or_code(np_code)
+                if existing_proc:
+                    from fastapi import HTTPException
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Mã thủ tục '{np_code}' đã tồn tại trên hệ thống ('{existing_proc.get('name')}'). Vui lòng nhập mã khác hoặc chuyển sang chế độ 'Chọn thủ tục đã có'."
+                    )
+                ProcedureRepository.create_or_ensure_procedure(
+                    code=np_code,
+                    name=np_name,
+                    domain=content_dict.get("domain", "dat_dai")
+                )
+                content_dict["procedure_id"] = np_code
+
         new_id = str(uuid.uuid4())
         new_group_id = str(uuid.uuid4())
         domain_str = _extract_domain(content_dict.get("domain"))
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             stmt = text("""
                 INSERT INTO public.dynamic_form_templates (
                     id, template_group_id, version, status, name, code, domain, procedure_id, content, created_by, updated_by
@@ -89,8 +100,7 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def get_by_id(template_id: str, include_deleted: bool = False) -> Dict[str, Any]:
-        engine = get_engine()
-        with engine.connect() as conn:
+        with db_connection(write=False) as conn:
             query = "SELECT * FROM public.dynamic_form_templates WHERE id = :id"
             if not include_deleted:
                 query += " AND deleted_at IS NULL"
@@ -101,9 +111,28 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def update(template_id: str, content_dict: Dict[str, Any], user_id: Optional[str] = None) -> Dict[str, Any]:
-        engine = get_engine()
+        if content_dict.get("new_procedure") and isinstance(content_dict["new_procedure"], dict):
+            np = content_dict["new_procedure"]
+            np_code = (np.get("code") or "").strip().upper()
+            np_name = (np.get("name") or "").strip()
+            if np_code and np_name:
+                from app.repositories.procedure_repository import ProcedureRepository
+                existing_proc = ProcedureRepository.get_procedure_by_id_or_code(np_code)
+                if existing_proc:
+                    from fastapi import HTTPException
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Mã thủ tục '{np_code}' đã tồn tại trên hệ thống ('{existing_proc.get('name')}'). Vui lòng nhập mã khác hoặc chuyển sang chế độ 'Chọn thủ tục đã có'."
+                    )
+                ProcedureRepository.create_or_ensure_procedure(
+                    code=np_code,
+                    name=np_name,
+                    domain=content_dict.get("domain", "dat_dai")
+                )
+                content_dict["procedure_id"] = np_code
+
         domain_str = _extract_domain(content_dict.get("domain"))
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             check_row = conn.execute(
                 text("SELECT * FROM public.dynamic_form_templates WHERE id = :id AND deleted_at IS NULL"),
                 {"id": template_id},
@@ -147,8 +176,7 @@ class DynamicFormTemplateRepository:
         status: Optional[str] = None,
         include_deleted: bool = False,
     ) -> Tuple[List[Dict[str, Any]], int]:
-        engine = get_engine()
-        with engine.connect() as conn:
+        with db_connection(write=False) as conn:
             where_clauses = []
             params: Dict[str, Any] = {}
 
@@ -176,8 +204,7 @@ class DynamicFormTemplateRepository:
         domain: Optional[str] = None,
         procedure_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
-        engine = get_engine()
-        with engine.connect() as conn:
+        with db_connection(write=False) as conn:
             where_clauses = ["status = 'published'", "deleted_at IS NULL"]
             params: Dict[str, Any] = {}
 
@@ -211,8 +238,7 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def publish(template_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-        engine = get_engine()
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             row = conn.execute(
                 text("SELECT * FROM public.dynamic_form_templates WHERE id = :id AND deleted_at IS NULL"),
                 {"id": template_id},
@@ -255,8 +281,7 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def hide(template_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-        engine = get_engine()
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             row = conn.execute(
                 text("SELECT * FROM public.dynamic_form_templates WHERE id = :id AND deleted_at IS NULL"),
                 {"id": template_id},
@@ -286,8 +311,7 @@ class DynamicFormTemplateRepository:
         """Tạo bản draft mới cùng nhóm.
         Nếu nhóm đã có bản nháp chưa xóa, trả lại bản nháp đó (already_existed=True).
         """
-        engine = get_engine()
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             row = conn.execute(
                 text("SELECT * FROM public.dynamic_form_templates WHERE id = :id AND deleted_at IS NULL"),
                 {"id": template_id},
@@ -297,6 +321,13 @@ class DynamicFormTemplateRepository:
 
             m = row._mapping if hasattr(row, "_mapping") else row
             group_id = m["template_group_id"]
+
+            # Xóa sạch mọi bản nháp cũ đã bị xóa mềm của nhóm này để tránh rác và xung đột constraint
+            conn.execute(
+                text("DELETE FROM public.dynamic_form_templates WHERE template_group_id = :gid AND status = 'draft' AND deleted_at IS NOT NULL"),
+                {"gid": group_id},
+            )
+
             existing_draft = conn.execute(
                 text("""
                     SELECT * FROM public.dynamic_form_templates
@@ -313,13 +344,19 @@ class DynamicFormTemplateRepository:
                 return _row_to_dict(existing_draft), True
 
             max_ver_row = conn.execute(
-                text("SELECT COALESCE(MAX(version), 0) AS max_v FROM public.dynamic_form_templates WHERE template_group_id = :gid"),
+                text("SELECT COALESCE(MAX(version), 0) AS max_v FROM public.dynamic_form_templates WHERE template_group_id = :gid AND deleted_at IS NULL"),
                 {"gid": group_id},
             ).fetchone()
             max_m = max_ver_row._mapping if hasattr(max_ver_row, "_mapping") else max_ver_row
             next_ver = (max_m["max_v"] or 0) + 1
-            new_id = str(uuid.uuid4())
 
+            # Đảm bảo không bị trùng unique constraint uq_dft_group_version với các bản đã xóa
+            conn.execute(
+                text("DELETE FROM public.dynamic_form_templates WHERE template_group_id = :gid AND version >= :next_ver AND deleted_at IS NOT NULL"),
+                {"gid": group_id, "next_ver": next_ver},
+            )
+
+            new_id = str(uuid.uuid4())
             new_row = conn.execute(
                 text("""
                     INSERT INTO public.dynamic_form_templates (
@@ -344,19 +381,30 @@ class DynamicFormTemplateRepository:
 
     @staticmethod
     def soft_delete(template_id: str) -> None:
-        engine = get_engine()
-        with engine.begin() as conn:
-            res = conn.execute(
-                text("UPDATE public.dynamic_form_templates SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id AND deleted_at IS NULL RETURNING id"),
+        with db_connection(write=True) as conn:
+            row = conn.execute(
+                text("SELECT id, status, deleted_at FROM public.dynamic_form_templates WHERE id = :id"),
                 {"id": template_id},
             ).fetchone()
-            if not res:
+            if not row:
                 raise TemplateNotFoundError("Không tìm thấy mẫu đơn.")
+            m = row._mapping if hasattr(row, "_mapping") else row
+
+            # Nếu là bản nháp (draft) hoặc đã bị xóa mềm trước đó: XÓA CỨNG VĨNH VIỄN KHỎI DATABASE!
+            if m["status"] == "draft" or m["deleted_at"] is not None:
+                conn.execute(
+                    text("DELETE FROM public.dynamic_form_templates WHERE id = :id"),
+                    {"id": template_id},
+                )
+            else:
+                conn.execute(
+                    text("UPDATE public.dynamic_form_templates SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                    {"id": template_id},
+                )
 
     @staticmethod
     def restore(template_id: str) -> Dict[str, Any]:
-        engine = get_engine()
-        with engine.begin() as conn:
+        with db_connection(write=True) as conn:
             row = conn.execute(
                 text("SELECT * FROM public.dynamic_form_templates WHERE id = :id"),
                 {"id": template_id},

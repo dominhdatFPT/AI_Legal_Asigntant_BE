@@ -137,3 +137,4 @@ def get_supabase_config() -> tuple[str, str]:
             "SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA"
         )
     return url, anon_key
+
