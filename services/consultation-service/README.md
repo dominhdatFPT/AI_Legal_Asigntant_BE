@@ -1,5 +1,9 @@
 # Consultation Service
 
-Dịch vụ quản lý yêu cầu tư vấn và chat text 1-1 giữa citizen với luật sư: tạo yêu cầu, nhận/từ chối, tin nhắn, report và soft delete.
+Dịch vụ hàng chờ tư vấn và chat text 1-1 giữa người dùng (`citizen` hoặc `lawyer`) với luật sư: gửi yêu cầu vào hàng chờ,
+luật sư nhận, nhắn lại luật sư cũ, tin nhắn, đóng/hủy, report và đồng ý điều khoản. Thông báo realtime qua WebSocket.
 
-`warning` là cờ cảnh báo độc lập; không dùng thay cho trạng thái vòng đời của cuộc tư vấn. WebSocket chat sẽ được bổ sung sau khi API REST và xác thực hoàn chỉnh.
+Thiết kế, sơ đồ trạng thái, chống tranh chấp và job dọn dữ liệu: [docs/api/CONSULTATION_DESIGN.md](../../docs/api/CONSULTATION_DESIGN.md).
+Contract: `openapi.yaml`. Schema: `database/001_consultation_schema.sql`.
+
+Để sau demo: upload file, AI đánh giá report, cờ `warning` đánh dấu toxic, Agent tự đề xuất luật sư, nối Notification Service.

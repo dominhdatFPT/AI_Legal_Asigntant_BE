@@ -12,6 +12,7 @@ Lưu API contract, quy ước endpoint, error response và hướng dẫn gọi 
 - [Mẫu hợp đồng riêng của user](USER_CONTRACT_TEMPLATES.md): ERD/OpenAPI mở rộng DOCX, PDF có chữ và PDF scan, vị trí điền và xem trước.
 - [Document nối Contract](DOCUMENT_CONTRACT_INTEGRATION.md): upload/processing/OCR, API lấy metadata/file/kết quả, quyền sở hữu và snapshot; mọi API mới planned.
 - [CCCD lưu một lần, chỉ điền thông tin CCCD](IDENTITY_PROFILE_FILLING.md): detail user → profile Document → Contract suggestions; mục khác hướng dẫn tự nhập.
+- [Thiết kế Consultation: chat user – luật sư](CONSULTATION_DESIGN.md): hàng chờ, nhắn lại luật sư cũ, sơ đồ trạng thái/bảng, chống tranh chấp, job dọn 10 ngày, mã lỗi và phụ thuộc; mọi API planned.
 - [JWT và Docker cho Contract/Notification](JWT_DOCKER_CONTRACT_NOTIFICATION.md): phần đã gắn vào code, cấu hình key và ví dụ Postman.
 - OpenAPI chi tiết: `../../services/procedure-service/openapi.yaml`, `../../services/contract-service/openapi.yaml`, `../../services/notification-service/openapi.yaml`.
 

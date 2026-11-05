@@ -33,7 +33,7 @@ Những điểm dưới đây ảnh hưởng nhiều service. **Chưa chốt th�
 | rag | FastAPI | 8000 | `/api/v1/rag` | `/api/rag` | `RAG_DATABASE_URL` | Tài liệu kiến thức, trạng thái index, tìm kiếm, nguồn trích dẫn |
 | location | FastAPI | 8000 | `/api/v1/locations` | `/api/locations` | `LOCATION_DATABASE_URL` | Cơ quan tiếp nhận, địa chỉ, tọa độ, tìm nơi nộp |
 | agent | FastAPI | 8000 | `/api/v1/agent` | `/api/agent` | `AGENT_DATABASE_URL` | Điều phối các service để trả lời; `agent_runs` và lịch sử chat AI |
-| consultation | FastAPI | 8000 | `/api/v1/consultations` | `/api/consultations` | `CONSULTATION_DATABASE_URL` | Yêu cầu tư vấn, box chat citizen – luật sư, report, soft delete và cờ warning |
+| consultation | FastAPI | 8000 | `/api/v1/consultations` | `/api/consultations` | `CONSULTATION_DATABASE_URL` | Hàng chờ tư vấn, box chat 1-1 user – luật sư, report, đồng ý điều khoản ([thiết kế](api/CONSULTATION_DESIGN.md)) |
 | notification | FastAPI | 8000 | `/api/v1/notifications` | `/api/notifications` | `NOTIFICATION_DATABASE_URL` | Thông báo trong web, read/unread, mute/suppress và nhận event từ service khác |
 
 Quy tắc:
@@ -235,14 +235,17 @@ Danh sách (có phân trang):
 
 - Đường dẫn: FE kết nối `ws://localhost:8080/ws/consultations/...`, Gateway chuyển tới `/ws/v1/consultations/...` của consultation-service. Gateway cần cấu hình thêm header `Upgrade` / `Connection` cho WebSocket.
 - Kênh:
-  - `/ws/consultations/lobby`: phòng chờ, chỉ luật sư đã duyệt; nhận câu hỏi mới và câu hỏi đã có người nhận.
+  - `/ws/consultations/lobby`: phòng chờ, chỉ luật sư được hành nghề; nhận câu hỏi mới, câu hỏi đã có người nhận và câu hỏi bị xóa.
+  - `/ws/consultations/me`: mọi user đã đăng nhập; nhận sự kiện của các cuộc tư vấn của mình để hiện chấm đỏ.
   - `/ws/consultations/{id}`: box chat riêng, chỉ 2 người trong cuộc.
 - **Xác thực:** trình duyệt không gắn được header cho WebSocket, nên tin nhắn **đầu tiên** sau khi kết nối phải là:
   ```json
   { "type": "auth", "data": { "token": "<JWT>" } }
   ```
   Không gửi trong 5 giây thì server đóng kết nối.
-- Format mọi tin nhắn: `{ "type": "...", "data": { ... } }`. Ví dụ `type`: `consultation.created`, `consultation.accepted`, `message.created`, `error`.
+- Format mọi tin nhắn: `{ "type": "...", "data": { ... } }`. Ví dụ `type`: `consultation.created`, `consultation.accepted`, `consultation.removed`, `consultation.closed`, `message.created`, `error`.
+  - `consultation.removed` (kênh `lobby`, `data: {consultation_ids}`): yêu cầu chờ bị xóa khỏi hàng chờ.
+  - `consultation.accepted`, `consultation.closed`, `message.created` cũng gửi tới kênh `me` của người liên quan; `consultation.closed` có `close_reason`.
 - Mã đóng kết nối: `4401` chưa xác thực / token sai, `4403` không có quyền vào kênh, `4404` không tìm thấy cuộc trò chuyện.
 - **Gửi tin nhắn bằng REST** (`POST /api/consultations/{id}/messages`) để có validation và format lỗi chuẩn. WebSocket chỉ dùng để **nhận** tin realtime.
 - Mất kết nối thì FE tự kết nối lại (chờ 1, 2, 4… tối đa 30 giây), sau đó gọi REST lấy tin nhắn bị lỡ: `GET /api/consultations/{id}/messages?after=<id tin cuối>`.
