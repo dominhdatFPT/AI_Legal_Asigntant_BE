@@ -20,7 +20,7 @@ COPY app ./app
 COPY database ./database
 COPY ["Template các thủ tục kinh doanh", "./Template các thủ tục kinh doanh"]
 COPY ["Template các thủ tục đất đai", "./Template các thủ tục đất đai"]
-RUN chown -R appuser:appuser /app
+RUN mkdir -p /app/office-backups && chown -R appuser:appuser /app
 
 USER appuser
 

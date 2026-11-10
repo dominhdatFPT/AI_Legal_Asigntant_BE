@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị hòa giải tranh chấp đất đai",
+  "code": "",
+  "procedure_code": "DD-014",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người đề nghị",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người làm đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "birth_year",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.birth_year",
+              "help_text": "Tự lấy từ ngày sinh trong hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": true,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Tự lấy từ hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Tự lấy từ hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "current_address",
+              "label": "Nơi ở hiện nay",
+              "word_key": "current_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.current_address",
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này."
+            },
+            {
+              "key": "permanent_address",
+              "label": "Nơi đăng ký thường trú",
+              "word_key": "permanent_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy địa chỉ thường trú từ hồ sơ CCCD và khóa không cho sửa."
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email liên hệ",
+              "word_key": "email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recipient",
+      "title": "Cơ quan tiếp nhận và ngày lập đơn",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "recipient_info",
+          "instance_id": "recipient_info",
+          "block_key": "free_field",
+          "title": "Thông tin tiếp nhận",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Xã / phường / thị trấn tiếp nhận",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dispute",
+      "title": "Thông tin tranh chấp",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "dispute_info",
+          "instance_id": "dispute_info",
+          "block_key": "free_field",
+          "title": "Bên tranh chấp và nội dung",
+          "order": 1,
+          "fields": [
+            {
+              "key": "other_party",
+              "label": "Người / gia đình có tranh chấp",
+              "word_key": "other_party_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "other_party_address",
+              "label": "Nơi ở của bên có tranh chấp",
+              "word_key": "other_party_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "land_location",
+              "label": "Vị trí thửa đất đang tranh chấp",
+              "word_key": "land_location",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "disputed_area",
+              "label": "Diện tích đất đang tranh chấp (nếu biết)",
+              "word_key": "disputed_area",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "statement",
+              "label": "Trình bày sự việc và quá trình tranh chấp",
+              "word_key": "dispute_statement",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi rõ mốc thời gian, nguồn gốc đất, diễn biến và đề nghị hòa giải."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "attachments",
+      "title": "Tài liệu kèm theo và người ký",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Tài liệu",
+          "order": 1,
+          "fields": [
+            {
+              "key": "attachments",
+              "label": "Tài liệu gửi kèm",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người viết đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD và khóa không cho sửa."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

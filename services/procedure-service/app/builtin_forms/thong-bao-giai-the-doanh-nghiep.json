@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "name": "Thông báo về việc giải thể doanh nghiệp",
+  "code": "",
+  "procedure_code": "DN-009",
+  "domain": "doanh_nghiep",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Thông báo về việc giải thể doanh nghiệp"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "notice",
+      "title": "Thông báo giải thể",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "notice_info",
+          "instance_id": "notice_info",
+          "block_key": "free_field",
+          "title": "Thông tin doanh nghiệp",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Cơ quan đăng ký kinh doanh cấp tỉnh",
+              "word_key": "recipient",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "notice_number",
+              "label": "Số thông báo",
+              "word_key": "notice_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "company_name",
+              "label": "Tên doanh nghiệp (viết bằng chữ in hoa)",
+              "word_key": "company_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "company_code",
+              "label": "Mã số doanh nghiệp / mã số thuế",
+              "word_key": "company_code",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_number",
+              "label": "Số giấy chứng nhận đăng ký kinh doanh (nếu chưa có mã số)",
+              "word_key": "certificate_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_date",
+              "label": "Ngày cấp giấy chứng nhận (nếu có)",
+              "word_key": "certificate_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "certificate_place",
+              "label": "Nơi cấp giấy chứng nhận (nếu có)",
+              "word_key": "certificate_place",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "settlement_confirmed",
+              "label": "Xác nhận đã thanh toán hết nợ, nghĩa vụ tài sản và không có tranh chấp",
+              "word_key": "settlement_confirmed",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Xác nhận"
+              ]
+            },
+            {
+              "key": "signer_name",
+              "label": "Người đại diện theo pháp luật",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "signer_identity",
+              "label": "Số định danh / CCCD người ký",
+              "word_key": "signer_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "signer_position",
+              "label": "Chức danh người ký",
+              "word_key": "signer_position",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày lập",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

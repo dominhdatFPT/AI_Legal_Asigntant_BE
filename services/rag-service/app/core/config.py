@@ -11,6 +11,14 @@ class Settings(BaseSettings):
 
     # Database (Supabase PostgreSQL + pgvector)
     rag_database_url: str = ""
+    # Chống treo khi kết nối DB chết ngầm (Supabase pooler): không có giới hạn thì truy vấn trên kết nối chết chờ mãi.
+    # Giá trị <= 0 = bỏ giới hạn (hành vi cũ). Xem app/core/database.py
+    # Chờ tối đa khi mở kết nối mới (giây)
+    db_connect_timeout_seconds: int = 10
+    # Chờ tối đa cho MỘT truy vấn (giây, đặt statement_timeout phía server); quá giờ thì truy vấn báo lỗi -> 503
+    db_command_timeout_seconds: int = 20
+    # Kết nối trong pool quá tuổi này (giây) thì bỏ và tạo lại
+    db_pool_recycle_seconds: int = 300
 
     # Embedding
     # "gemini": gọi Gemini API (cần GEMINI_API_KEY, gói free đủ dùng khi phát triển)

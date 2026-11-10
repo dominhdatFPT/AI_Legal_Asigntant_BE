@@ -46,6 +46,8 @@ class ProcedureApplicationService:
                     return None
             raise FormDataInvalid([{"field": "procedure_code", "message": "Thủ tục này chưa có biểu mẫu nên chưa nhận hồ sơ."}])
 
+        from app.services.profile_binding import bind_application_profile
+        form_data = bind_application_profile(schema, form_data, user_id)
         errors = procedure_form_service.validate_form_data(schema, form_data)
         if errors:
             raise FormDataInvalid(errors)

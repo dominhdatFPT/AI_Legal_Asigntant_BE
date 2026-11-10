@@ -3,12 +3,13 @@ import logging
 import math
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, raw_access_token
@@ -24,6 +25,7 @@ from app.schemas.conversation import (
     Pagination,
 )
 from app.schemas.message import MessageOut, SendMessageRequest, SendMessageResponse
+from app.schemas.transcript import Transcript, TranscriptMessage, TranscriptTurn
 from app.services import agent, document_client, llm_client, rag_client, responder
 
 logger = logging.getLogger(__name__)
@@ -111,6 +113,82 @@ def get_conversation(
     return _ok(data, _request_id(x_request_id))
 
 
+VN_TZ = timezone(timedelta(hours=7))  # giờ Việt Nam, không có giờ mùa hè
+
+
+def _group_turns(messages: list) -> list[TranscriptTurn]:
+    """Gom tin thành lượt: tin user rồi tin assistant liền sau. User cuối chưa có trả lời vẫn thành một lượt (assistant
+    None); tin assistant không có user đứng trước cũng thành một lượt riêng (user None) để không mất tin."""
+    turns: list[TranscriptTurn] = []
+    pending: TranscriptMessage | None = None
+    for m in messages:
+        item = TranscriptMessage(content=m.content, created_at=m.created_at)
+        if m.role == "user":
+            if pending is not None:
+                turns.append(TranscriptTurn(turn=len(turns) + 1, user=pending, assistant=None))
+            pending = item
+        else:
+            turns.append(TranscriptTurn(turn=len(turns) + 1, user=pending, assistant=item))
+            pending = None
+    if pending is not None:
+        turns.append(TranscriptTurn(turn=len(turns) + 1, user=pending, assistant=None))
+    return turns
+
+
+def _vn_time(value: datetime) -> str:
+    if value.tzinfo is None:  # SQLite (test) trả datetime không múi giờ; giá trị lưu luôn là UTC
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(VN_TZ).strftime("%d/%m/%Y %H:%M")
+
+
+def _transcript_text(transcript: Transcript) -> str:
+    """Văn bản thuần: giữ nguyên xuống dòng bên trong nội dung tin (không thụt thêm cho các dòng sau)."""
+    lines = [
+        f"Hội thoại: {transcript.title or '(chưa có tiêu đề)'}",
+        f"Bắt đầu: {_vn_time(transcript.created_at)}",
+    ]
+    for t in transcript.turns:
+        lines += ["", f"Lượt {t.turn}"]
+        if t.user is not None:
+            lines.append(f"  Người dùng: {t.user.content}")
+        lines.append(f"  Trợ lý: {t.assistant.content}" if t.assistant is not None else "  Trợ lý:")
+    return "\n".join(lines) + "\n"
+
+
+@router.get("/{conversation_id}/transcript")
+def get_transcript(
+    conversation_id: uuid.UUID,
+    fmt: Literal["json", "text"] = Query(default="json", alias="format"),
+    download: bool = Query(default=False),
+    user: TokenPayload = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    x_request_id: str | None = Header(default=None),
+):
+    """
+    Cả cuộc hội thoại như một bản kịch bản (chỉ đọc), gom theo lượt hỏi-đáp, không áp HISTORY_LIMIT.
+    Tối đa 500 tin đầu (`truncated` = true nếu dài hơn). `format=text` trả văn bản thuần; kèm `download=true` thì
+    thêm Content-Disposition để trình duyệt tải về `kich-ban-<8 ký tự đầu của id>.txt`.
+    """
+    request_id = _request_id(x_request_id)
+    conversation = _owned_conversation(db, conversation_id, user)
+    messages, total = repo.get_messages_for_transcript(db, conversation.id)
+    transcript = Transcript(
+        conversation_id=conversation.id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        updated_at=conversation.updated_at,
+        total_messages=total,
+        truncated=total > len(messages),
+        turns=_group_turns(messages),
+    )
+    if fmt == "json":
+        return _ok(transcript, request_id)
+    headers = {"X-Request-ID": request_id}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="kich-ban-{str(conversation.id)[:8]}.txt"'
+    return Response(_transcript_text(transcript), media_type="text/plain; charset=utf-8", headers=headers)
+
+
 @router.delete("/{conversation_id}")
 def delete_conversation(
     conversation_id: uuid.UUID,
@@ -129,6 +207,8 @@ def _load_for_chat(db: Session, conversation_id: uuid.UUID, user: TokenPayload):
         {"role": m.role, "content": m.content}
         for m in repo.get_messages(db, conversation.id, limit=HISTORY_LIMIT)
     ]
+    # Trả kết nối DB về pool ngay sau khi đọc xong lịch sử, tránh giữ kết nối suốt 15-45s chờ RAG/LLM/SSE
+    db.close()
     return conversation, history
 
 

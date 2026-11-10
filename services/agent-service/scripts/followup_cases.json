@@ -1,0 +1,5 @@
+[
+  {"q": "thế còn đổi địa chỉ sang quận khác thì sao", "doc": "59/2020/QH14", "dieu": ["30"], "history": [{"role": "user", "content": "công ty tôi muốn đổi tên thì làm thủ tục gì"}, {"role": "assistant", "content": "Bạn cần đăng ký thay đổi nội dung đăng ký doanh nghiệp."}]},
+  {"q": "vậy tặng cho con thì có được không", "doc": "31/2024/QH15", "dieu": ["45"], "history": [{"role": "user", "content": "đất chưa có sổ đỏ thì có bán được không"}, {"role": "assistant", "content": "Chưa có Giấy chứng nhận thì chưa đủ điều kiện chuyển nhượng."}]},
+  {"q": "cần ít nhất mấy người", "doc": "17/2023/QH15", "dieu": ["4"], "history": [{"role": "user", "content": "mấy hộ trong xóm muốn lập hợp tác xã nuôi tôm"}, {"role": "assistant", "content": "Bạn cần chuẩn bị hồ sơ đăng ký hợp tác xã."}]}
+]

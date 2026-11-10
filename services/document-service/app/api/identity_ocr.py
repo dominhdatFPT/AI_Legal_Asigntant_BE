@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request
@@ -17,6 +18,7 @@ from app.services.local_ocr import LocalOcr
 from app.services.ekyc_ocr import build_provider
 
 router = APIRouter()
+_OCR_SEMAPHORE = asyncio.Semaphore(3)
 
 
 def get_identity_ocr():
@@ -76,5 +78,6 @@ async def create_identity_ocr(request: Request, user=Depends(document_writer), s
         if received > MAX_MULTIPART:
             raise DocumentError("FILE_TOO_LARGE", "Multipart vượt giới hạn 10 MiB.", 413) from None
         raise
-    row = await run_in_threadpool(service.create, user.id, key, pair)
+    async with _OCR_SEMAPHORE:
+        row = await run_in_threadpool(service.create, user.id, key, pair)
     return success(request, row)

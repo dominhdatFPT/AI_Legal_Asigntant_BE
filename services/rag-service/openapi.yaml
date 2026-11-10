@@ -47,11 +47,13 @@ paths:
     post:
       tags: [Documents]
       operationId: createDocument
-      summary: Thêm văn bản pháp luật mới
+      summary: Lưu văn bản pháp luật mới ở trạng thái nháp
       description: |
-        Chỉ `admin`. Nhận metadata và nội dung văn bản, tự động cắt chunk và tạo embedding.
-        Quá trình embedding có thể mất vài giây đến vài phút tuỳ kích thước văn bản.
-      x-status: planned
+        Chỉ `admin`. Lưu văn bản với `status=draft`, `ingest_status=pending`, `chunk_count=0`.
+        **Chưa cắt chunk, chưa tạo embedding, không gọi Gemini**; văn bản nháp không bao giờ xuất hiện trong kết quả tìm kiếm.
+        Muốn đưa vào kho tìm kiếm thì gọi `POST /rag/documents/{document_id}/approve`.
+        Lỗi 422 khi `content` rỗng sau khi chuẩn hóa, không cắt được đoạn nào, hoặc chứa ký tự NUL (mã 0).
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -68,21 +70,20 @@ paths:
               issuing_body: Quốc hội
               issued_date: "2024-01-18"
               effective_date: "2025-01-01"
-              status: active
               source_url: https://thuvienphapluat.vn/van-ban/Bat-dong-san/Luat-Dat-dai-2024-31-2024-QH15-600636.aspx
               content: "Chương I. QUY ĐỊNH CHUNG\nĐiều 1. Phạm vi điều chỉnh..."
       responses:
         "201":
-          description: Văn bản đã được tạo, đang xử lý embedding
+          description: Bản nháp đã được lưu
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DocumentResponse" }
+              schema: { $ref: "#/components/schemas/DocumentDetailResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409":
-          description: Văn bản với số hiệu này đã tồn tại
+          description: Văn bản với số hiệu này đã tồn tại (kể cả khi hai người lưu cùng lúc)
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
@@ -91,8 +92,8 @@ paths:
               example:
                 data: null
                 error:
-                  code: DOCUMENT_ALREADY_EXISTS
-                  message: Văn bản với số hiệu này đã tồn tại trong hệ thống.
+                  code: DOCUMENT_EXISTS
+                  message: "Số hiệu 31/2024/QH15 đã có trong hệ thống (văn bản: Luật Đất đai 2024)."
                 request_id: req-123
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
@@ -101,24 +102,22 @@ paths:
       tags: [Documents]
       operationId: listDocuments
       summary: Danh sách văn bản pháp luật
-      description: Chỉ `admin`. Lọc theo loại và trạng thái; có phân trang.
-      x-status: planned
+      description: |
+        Chỉ `admin`. Lọc theo loại và trạng thái; có phân trang; mới tạo trước.
+        Mỗi dòng **không có** `content` (toàn văn) và có `ingest_status`. Chưa có tìm theo tiêu đề/số hiệu.
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: doc_type
           in: query
-          description: Lọc theo loại văn bản. Bỏ trống = tất cả.
+          description: Lọc theo loại văn bản. Bỏ trống = tất cả. Giá trị sai = 422.
           schema: { $ref: "#/components/schemas/DocType" }
         - name: status
           in: query
-          description: Lọc theo trạng thái. Bỏ trống = tất cả.
+          description: Lọc theo trạng thái. Bỏ trống = tất cả. Giá trị sai = 422.
           schema: { $ref: "#/components/schemas/DocStatus" }
-        - name: q
-          in: query
-          description: Tìm theo tiêu đề hoặc số hiệu (không phân biệt hoa thường).
-          schema: { type: string, maxLength: 100 }
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
       responses:
@@ -134,12 +133,123 @@ paths:
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  /rag/documents/preview:
+    post:
+      tags: [Documents]
+      operationId: previewDocument
+      summary: Xem trước cách hệ thống cắt văn bản
+      description: |
+        Chỉ `admin`. Nhận nội dung văn bản (JSON, không upload file), cắt chunk đúng như lúc nạp thật
+        rồi thống kê. **Không ghi database, không gọi embedding.** Chỉ đọc DB để kiểm tra trùng số hiệu.
+        Cảnh báo (`warnings`, tiếng Việt) gồm: không có dòng "Điều N." (cắt theo đoạn văn), số Điều nhảy cóc,
+        số Điều lặp ở nhiều vị trí không liền kề, có đoạn dài hơn 2500 ký tự, có ký tự lạ U+FFFD.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentPreviewRequest" }
+            example:
+              title: Luật Đất đai 2024
+              doc_type: luat
+              doc_number: 31/2024/QH15
+              content: "Chương I. QUY ĐỊNH CHUNG\nĐiều 1. Phạm vi điều chỉnh..."
+      responses:
+        "200":
+          description: Kết quả phân tích
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentPreviewResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: |
+            Dữ liệu gửi lên không hợp lệ, hoặc `content` rỗng sau khi chuẩn hóa
+            (`VALIDATION_ERROR`, `details[0].field` = `content`).
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /rag/documents/logs:
+    get:
+      tags: [Documents]
+      operationId: listIngestLogs
+      summary: Nhật ký nạp (ai làm gì, lúc nào, kết quả)
+      description: |
+        Chỉ `admin`. Mỗi dòng là một thao tác thành công của luồng nạp luật: `create_draft` (tạo nháp), `delete_draft`
+        (xóa nháp), `approve_requested` (yêu cầu duyệt được chấp nhận), `approve_done` (duyệt xong, có `chunk_count`
+        và `duration_ms`), `approve_failed` (duyệt lỗi, `detail` là thông báo lỗi đã che khóa và chuỗi kết nối, có
+        `duration_ms`), và ba thao tác thay nội dung văn bản active: `replace_requested`, `replace_done`, `replace_failed`
+        (xem `replaceDocument`). Thao tác bị từ chối (404, 409, 422) và thao tác chỉ đọc **không** ghi nhật ký. Không có nội dung văn bản.
+        Mới nhất trước. `document_id` không có khóa ngoại nên dòng nhật ký còn nguyên khi văn bản đã bị xóa.
+
+        Ghi nhật ký là việc phụ: lỗi khi ghi chỉ có cảnh báo trong log, không làm hỏng việc chính.
+        Cần chạy `database/003_ingest_log.sql` trên Supabase trước khi build lại; chưa có bảng thì endpoint này trả 500.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: document_id
+          in: query
+          description: Chỉ lấy nhật ký của văn bản này. Không phải UUID = 422.
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          description: Chỉ lấy một loại thao tác. Giá trị sai = 422.
+          schema: { $ref: "#/components/schemas/IngestAction" }
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Danh sách nhật ký (rỗng thì `items` = `[]`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestLogListResponse" }
+              example:
+                data:
+                  items:
+                    - id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                      created_at: "2026-11-02T09:15:42.123456Z"
+                      actor_user_id: 3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b
+                      actor_role: admin
+                      action: approve_done
+                      document_id: 0b1c2d3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e
+                      doc_number: 31/2024/QH15
+                      title: Luật Đất đai 2024
+                      detail: null
+                      chunk_count: 142
+                      duration_ms: 95210
+                  total: 1
+                  page: 1
+                  page_size: 20
+                error: null
+                request_id: req-123
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
   /rag/documents/{document_id}:
     get:
       tags: [Documents]
       operationId: getDocument
       summary: Chi tiết một văn bản
-      x-status: planned
+      description: |
+        Chỉ `admin`. Không trả `content` (toàn văn), chỉ có `content_length` (số ký tự).
+        `document_id` sai định dạng UUID thì 422.
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -152,10 +262,11 @@ paths:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/DocumentResponse" }
+              schema: { $ref: "#/components/schemas/DocumentDetailResponse" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/DocumentNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
     patch:
@@ -196,9 +307,12 @@ paths:
     delete:
       tags: [Documents]
       operationId: deleteDocument
-      summary: Xóa văn bản và toàn bộ chunks
-      description: Chỉ `admin`. Xóa vĩnh viễn văn bản và tất cả chunks liên quan (CASCADE).
-      x-status: planned
+      summary: Xóa bản nháp
+      description: |
+        Chỉ `admin`. Chỉ xóa được văn bản `status=draft` và `ingest_status` khác `processing`
+        (xóa vĩnh viễn, chunk còn sót của lần duyệt lỗi xóa theo bằng CASCADE).
+        Văn bản `active` hoặc `superseded` trả 409 `INVALID_STATE`; chưa có cách xóa chúng qua API.
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -219,6 +333,139 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/DocumentNotFound" }
+        "409": { $ref: "#/components/responses/InvalidState" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /rag/documents/{document_id}/approve:
+    post:
+      tags: [Documents]
+      operationId: approveDocument
+      summary: Duyệt bản nháp (cắt chunk + embedding ở nền)
+      description: |
+        Chỉ `admin`. Chỉ duyệt được văn bản `status=draft` có `ingest_status` là `pending` hoặc `failed`
+        (`failed` = bấm lại để thử lại). Trả **202** ngay với `ingest_status=processing`; phần nặng chạy ở nền:
+        cắt chunk, tạo embedding (Gemini), rồi đặt `status=active`, `ingest_status=done`, `is_processed=true`.
+        Lỗi giữa chừng thì không để dữ liệu dở: `status` giữ `draft`, `ingest_status=failed`, `ingest_error` ghi lý do
+        (tối đa 500 ký tự). Theo dõi bằng `GET /rag/documents/{document_id}`.
+        Bấm duyệt hai lần liền thì lần hai trả 409 (không chạy embedding hai lần).
+        Service khởi động lại giữa lúc đang xử lý thì văn bản được đặt thành `failed`
+        ("Bị ngắt do service khởi động lại, hãy bấm duyệt lại").
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "202":
+          description: Đã nhận, đang xử lý ở nền
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentDetailResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DocumentNotFound" }
+        "409": { $ref: "#/components/responses/InvalidState" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /rag/documents/{document_id}/replace/preview:
+    post:
+      tags: [Documents]
+      operationId: previewReplaceDocument
+      summary: Xem trước việc thay nội dung văn bản đã active
+      description: |
+        Chỉ `admin`. Nhận toàn văn mới (chỉ có `content`, cùng giới hạn và cùng kiểm tra NUL, rỗng như `createDocument`), cắt
+        chunk đúng như lúc nạp thật rồi **so với chunk hiện có** của văn bản. **Chỉ đọc DB, không gọi embedding, không tốn quota
+        Gemini, không ghi gì.**
+
+        Cách khớp: hai chunk dùng lại được vector khi **cùng** chuỗi `embedding_text` (tên văn bản + chương + nội dung) và chunk cũ
+        **cùng** `embedding_model` với model đang cấu hình (`EMBEDDING_MODEL`); khớp theo đa tập (một chunk cũ chỉ khớp một chunk mới).
+
+        Phản hồi gồm toàn bộ kết quả của `previewDocument` cho nội dung mới (số Điều, `warnings` cắt, ước tính embedding cho CẢ văn bản...),
+        cộng `comparison` (so chunk, chi phí embedding chỉ cho phần phải embed) và `replace_warnings` (cảnh báo riêng cho việc thay:
+        số Điều mới ít hơn số Điều cũ; độ dài chênh quá 30%; không chunk nào dùng lại được; nội dung giống hệt bản hiện tại).
+
+        Lỗi: 404 không có văn bản; 409 `INVALID_STATE` khi `status` không phải `active` hoặc `ingest_status=processing`;
+        422 khi `content` rỗng sau chuẩn hóa, có ký tự NUL hoặc quá dài.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentReplaceRequest" }
+            example:
+              content: "Chương I. QUY ĐỊNH CHUNG\nĐiều 1. Phạm vi điều chỉnh..."
+      responses:
+        "200":
+          description: Kết quả phân tích và so sánh
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentReplacePreviewResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DocumentNotFound" }
+        "409": { $ref: "#/components/responses/InvalidState" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /rag/documents/{document_id}/replace:
+    post:
+      tags: [Documents]
+      operationId: replaceDocument
+      summary: Thay nội dung văn bản đã active bằng bản mới (chỉ embed chunk khác)
+      description: |
+        Chỉ `admin`. Chỉ thay được văn bản `status=active` có `ingest_status` là `done` hoặc `failed` (`failed` = bấm lại để thử lại).
+        Body giống `previewReplaceDocument`. Trả **202** ngay với `ingest_status=processing` (`status` vẫn `active`); phần nặng chạy ở nền:
+        chunk khớp bản cũ thì dùng lại vector cũ, chỉ phần khác gọi embedding (Gemini).
+
+        Trong lúc xử lý văn bản **vẫn active** và tìm kiếm vẫn dùng bản cũ. Khi bản mới sẵn sàng, MỘT giao dịch: lưu toàn văn CŨ vào
+        bảng `document_versions`, thay chunk, đổi `content`, `ingest_status=done`. Lỗi giữa chừng (hết quota, nội dung bị người khác đổi
+        trong lúc xử lý...) thì nội dung, chunk và `status` giữ nguyên bản cũ, `ingest_status=failed`, `ingest_error` ghi lý do (tối đa
+        500 ký tự, đã che khóa); bấm lại để thử lại. Theo dõi bằng `GET /rag/documents/{document_id}`, nhật ký bằng
+        `GET /rag/documents/logs` (`replace_requested`, rồi `replace_done` hoặc `replace_failed`).
+
+        Lưu ý: `id` của các chunk đổi sau khi thay (chunk được tạo lại, kể cả chunk dùng lại vector), nên trích dẫn cũ lưu `id` chunk cũ
+        sẽ không còn khớp. Chưa có API đọc hay khôi phục từ `document_versions`.
+
+        409 `INVALID_STATE` khi: `status` không phải `active`; `ingest_status=processing` (kể cả hai lần bấm liền nhau);
+        nội dung mới giống hệt nội dung hiện tại (sau chuẩn hóa, "không có thay đổi"); vừa có người khác chiếm chỗ.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocumentReplaceRequest" }
+            example:
+              content: "Chương I. QUY ĐỊNH CHUNG\nĐiều 1. Phạm vi điều chỉnh..."
+      responses:
+        "202":
+          description: Đã nhận, đang xử lý ở nền
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocumentDetailResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/DocumentNotFound" }
+        "409": { $ref: "#/components/responses/InvalidState" }
+        "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /rag/documents/{document_id}/reprocess:
@@ -457,8 +704,21 @@ components:
           example:
             data: null
             error:
-              code: DOCUMENT_NOT_FOUND
+              code: NOT_FOUND
               message: Không tìm thấy văn bản pháp luật.
+            request_id: req-123
+    InvalidState:
+      description: Văn bản đang ở trạng thái không cho phép thao tác này
+      headers:
+        X-Request-ID: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            data: null
+            error:
+              code: INVALID_STATE
+              message: Chỉ duyệt được văn bản nháp.
             request_id: req-123
     InternalError:
       description: Lỗi backend không lường trước
@@ -604,6 +864,7 @@ components:
     # ---------- Body gửi lên ----------
     CreateDocumentRequest:
       type: object
+      description: Body của `POST /rag/documents` (lưu bản nháp). Chuỗi được cắt khoảng trắng đầu cuối; chuỗi rỗng ở `doc_number` coi như không có.
       required: [title, doc_type, content]
       properties:
         title:
@@ -629,18 +890,14 @@ components:
           type: string
           format: date
           nullable: true
-        status:
-          type: string
-          enum: [active, superseded, draft]
-          default: active
         source_url:
           type: string
-          format: uri
+          maxLength: 2000
           nullable: true
         content:
           type: string
-          minLength: 1
-          description: Toàn bộ nội dung văn bản dạng plain text
+          maxLength: 3000000
+          description: Toàn bộ nội dung văn bản dạng plain text. Rỗng sau khi chuẩn hóa hoặc có ký tự NUL (mã 0) thì 422.
 
     UpdateDocumentRequest:
       type: object
@@ -718,12 +975,231 @@ components:
       properties:
         data:
           type: object
-          required: [items, pagination]
+          required: [items, total, page, page_size]
           properties:
             items:
               type: array
-              items: { $ref: "#/components/schemas/LegalDocument" }
-            pagination: { $ref: "#/components/schemas/Pagination" }
+              items: { $ref: "#/components/schemas/DocumentListItem" }
+            total:     { type: integer, minimum: 0, description: Tổng số văn bản khớp bộ lọc, example: 6 }
+            page:      { type: integer, minimum: 1, example: 1 }
+            page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    DocumentListItem:
+      type: object
+      description: Một dòng trong danh sách văn bản. Không có `content` (toàn văn).
+      required: [id, title, doc_type, doc_number, issuing_body, effective_date, status, chunk_count, is_processed, ingest_status, created_at, updated_at]
+      properties:
+        id:             { type: string, format: uuid }
+        title:          { type: string, example: "Luật Đất đai 2024" }
+        doc_type:       { $ref: "#/components/schemas/DocType" }
+        doc_number:     { type: string, nullable: true, example: "31/2024/QH15" }
+        issuing_body:   { type: string, nullable: true, example: "Quốc hội" }
+        effective_date: { type: string, format: date, nullable: true }
+        status:         { $ref: "#/components/schemas/DocStatus" }
+        chunk_count:    { type: integer, example: 142 }
+        is_processed:   { type: boolean }
+        ingest_status:  { $ref: "#/components/schemas/IngestStatus" }
+        created_at:     { type: string, format: date-time }
+        updated_at:     { type: string, format: date-time }
+
+    IngestStatus:
+      type: string
+      description: |
+        Trạng thái nạp: `pending` = bản nháp chưa duyệt, `processing` = đang cắt chunk + embedding ở nền,
+        `done` = đã xong (văn bản có sẵn và nạp bằng script đều là `done`), `failed` = lần duyệt gần nhất lỗi (xem `ingest_error`).
+      enum: [pending, processing, done, failed]
+
+    DocumentReplaceRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          maxLength: 3000000
+          description: Toàn văn MỚI dạng plain text. Rỗng sau khi chuẩn hóa hoặc có ký tự NUL = 422.
+
+    DocumentReplacePreviewResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          description: |
+            Toàn bộ trường của `DocumentPreviewResponse.data` (kết quả cắt bản mới) CỘNG `comparison` và `replace_warnings`.
+            Không có `existing_document`.
+          type: object
+          required: [comparison, replace_warnings]
+          additionalProperties: true
+          properties:
+            comparison:
+              type: object
+              required: [old_chunk_count, new_chunk_count, reused_chunk_count, embed_chunk_count, removed_chunk_count, changed_articles, changed_article_count, changed_articles_truncated, embed_estimate]
+              properties:
+                old_chunk_count:    { type: integer, description: Số chunk hiện có }
+                new_chunk_count:    { type: integer, description: Số chunk sau khi cắt bản mới }
+                reused_chunk_count: { type: integer, description: Số chunk mới dùng lại được vector cũ (không tốn quota) }
+                embed_chunk_count:  { type: integer, description: Số chunk mới phải gọi embedding }
+                removed_chunk_count: { type: integer, description: Số chunk cũ không còn khớp chunk mới nào (bị bỏ) }
+                changed_articles:
+                  type: array
+                  maxItems: 50
+                  description: Số Điều có thay đổi (Điều của chunk mới không dùng lại được hoặc của chunk cũ bị bỏ), sắp theo số, tối đa 50
+                  items: { type: string, example: "252" }
+                changed_article_count: { type: integer, description: Tổng số Điều đổi (có thể lớn hơn độ dài `changed_articles`) }
+                changed_articles_truncated: { type: boolean, description: "`true` khi `changed_articles` bị cắt ở 50" }
+                embed_estimate:
+                  type: object
+                  description: Ước tính embedding CHỈ cho phần phải embed
+                  properties:
+                    total_chars: { type: integer }
+                    batch_size:  { type: integer }
+                    batch_count: { type: integer }
+            replace_warnings:
+              type: array
+              description: Cảnh báo riêng cho việc thay (tiếng Việt ngắn). Rỗng = không có gì đáng lo
+              items: { type: string }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    IngestAction:
+      type: string
+      description: |
+        Loại thao tác trong nhật ký nạp: `create_draft` = tạo nháp, `delete_draft` = xóa nháp, `approve_requested` = yêu cầu
+        duyệt được chấp nhận (trả 202), `approve_done` = việc nền duyệt xong, `approve_failed` = việc nền duyệt lỗi,
+        `replace_requested` = yêu cầu thay nội dung được chấp nhận (trả 202), `replace_done` = thay xong (`chunk_count` là số chunk
+        mới, `detail` dạng "dùng lại N, embed M"), `replace_failed` = thay lỗi (bản cũ còn nguyên).
+      enum: [create_draft, delete_draft, approve_requested, approve_done, approve_failed, replace_requested, replace_done, replace_failed]
+
+    IngestLogItem:
+      type: object
+      description: Một dòng nhật ký nạp. Không có nội dung văn bản.
+      required: [id, created_at, actor_user_id, actor_role, action, document_id, doc_number, title, detail, chunk_count, duration_ms]
+      properties:
+        id:            { type: string, format: uuid }
+        created_at:    { type: string, format: date-time }
+        actor_user_id: { type: string, nullable: true, maxLength: 64, description: "`sub` của token người gọi" }
+        actor_role:    { type: string, nullable: true, maxLength: 20, example: admin }
+        action:        { $ref: "#/components/schemas/IngestAction" }
+        document_id:   { type: string, format: uuid, nullable: true, description: Không có khóa ngoại, còn nguyên khi văn bản đã xóa }
+        doc_number:    { type: string, nullable: true, maxLength: 100 }
+        title:         { type: string, nullable: true, maxLength: 500 }
+        detail:        { type: string, nullable: true, maxLength: 500, description: Chỉ `approve_failed` có; đã che khóa API, token và chuỗi kết nối }
+        chunk_count:   { type: integer, nullable: true, description: Chỉ `approve_done` có }
+        duration_ms:   { type: integer, nullable: true, minimum: 0, description: Chỉ `approve_done` và `approve_failed` có }
+
+    IngestLogListResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, total, page, page_size]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/IngestLogItem" }
+            total:     { type: integer, minimum: 0, description: Tổng số dòng khớp bộ lọc, example: 12 }
+            page:      { type: integer, minimum: 1, example: 1 }
+            page_size: { type: integer, minimum: 1, maximum: 100, example: 20 }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    DocumentDetail:
+      description: Chi tiết một văn bản. Không có `content`.
+      allOf:
+        - $ref: "#/components/schemas/DocumentListItem"
+        - type: object
+          required: [issued_date, source_url, ingest_error, content_length]
+          properties:
+            issued_date:    { type: string, format: date, nullable: true }
+            source_url:     { type: string, nullable: true }
+            ingest_error:   { type: string, nullable: true, maxLength: 500, description: Lý do lỗi của lần duyệt thất bại gần nhất }
+            content_length: { type: integer, description: Số ký tự của toàn văn }
+
+    DocumentDetailResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:       { $ref: "#/components/schemas/DocumentDetail" }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    DocumentPreviewRequest:
+      type: object
+      required: [title, doc_type, content]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        doc_type:
+          $ref: "#/components/schemas/DocType"
+        doc_number:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Có thì kiểm tra trùng số hiệu trong DB (trả `existing_document`).
+        content:
+          type: string
+          maxLength: 3000000
+          description: Toàn văn dạng plain text. Rỗng sau khi chuẩn hóa = 422.
+
+    DocumentPreviewResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [total_chars, chunk_count, article_count, chunks_by_level, first_article, last_article, split_articles, warnings, embedding_estimate, sample_chunks, existing_document]
+          properties:
+            total_chars:   { type: integer, description: Số ký tự sau khi chuẩn hóa }
+            chunk_count:   { type: integer }
+            article_count: { type: integer, description: Số Điều khác nhau tìm được }
+            chunks_by_level:
+              type: object
+              description: Số chunk theo cấp cắt
+              properties:
+                dieu:     { type: integer }
+                khoan:    { type: integer }
+                diem:     { type: integer }
+                doan_van: { type: integer }
+            first_article: { type: string, nullable: true, example: "1" }
+            last_article:  { type: string, nullable: true, example: "6" }
+            split_articles:
+              type: array
+              description: Các Điều bị tách thành nhiều chunk
+              items:
+                type: object
+                properties:
+                  dieu:        { type: string }
+                  chunk_count: { type: integer }
+            warnings:
+              type: array
+              items: { type: string }
+            embedding_estimate:
+              type: object
+              properties:
+                total_chars: { type: integer, description: Tổng ký tự của chuỗi gửi đi embedding }
+                batch_size:  { type: integer, description: "`EMBEDDING_BATCH_SIZE`" }
+                batch_count: { type: integer }
+            sample_chunks:
+              type: array
+              description: Tối đa 3 chunk đầu, mỗi chunk cắt 300 ký tự đầu
+              items:
+                type: object
+                properties:
+                  chunk_index:  { type: integer }
+                  section_info: { type: object }
+                  content:      { type: string }
+            existing_document:
+              type: object
+              nullable: true
+              description: Văn bản đã có trùng `doc_number`, `null` nếu không trùng
+              properties:
+                id:     { type: string, format: uuid }
+                title:  { type: string }
+                status: { $ref: "#/components/schemas/DocStatus" }
         error:      { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 

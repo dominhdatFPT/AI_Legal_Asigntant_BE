@@ -1,0 +1,300 @@
+{
+  "schema_version": 1,
+  "name": "Văn bản thỏa thuận phân chia di sản thừa kế quyền sử dụng đất",
+  "code": "",
+  "procedure_code": "DD-006",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Văn bản thỏa thuận phân chia di sản thừa kế (tình huống hai người, phần di sản 1/2)",
+    "Văn bản thỏa thuận phân chia di sản thừa kế quyền sử dụng đất"
+  ],
+  "review_notice": "Bản nguồn mô tả phần di sản là 1/2 quyền sử dụng đất và tài sản gắn liền với đất. Kiểm tra tỷ lệ sở hữu thực tế, người thừa kế và điều khoản trước khi ký.",
+  "sections": [
+    {
+      "id": "heirs",
+      "title": "Những người thừa kế",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "heirs",
+          "instance_id": "heirs",
+          "block_key": "repeat_group",
+          "title": "Thêm từng người thừa kế",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên người thừa kế",
+              "word_key": "heirs_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "heirs_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD",
+              "word_key": "heirs_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "heirs_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "heirs_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "heirs_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "relation",
+              "label": "Quan hệ với người để lại di sản",
+              "word_key": "heirs_relation",
+              "type": "text",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "estate",
+      "title": "Di sản và nội dung thống nhất",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "estate_info",
+          "instance_id": "estate_info",
+          "block_key": "free_field",
+          "title": "Thông tin người mất và tài sản",
+          "order": 1,
+          "fields": [
+            {
+              "key": "deceased",
+              "label": "Người để lại di sản",
+              "word_key": "deceased_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "deceased_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "death_date",
+              "label": "Ngày mất",
+              "word_key": "death_date",
+              "type": "past_date",
+              "required": true
+            },
+            {
+              "key": "death_extract",
+              "label": "Số trích lục khai tử",
+              "word_key": "death_extract",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "death_authority",
+              "label": "Cơ quan cấp trích lục",
+              "word_key": "death_authority",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "death_issue_date",
+              "label": "Ngày cấp trích lục",
+              "word_key": "death_issue_date",
+              "type": "past_date",
+              "required": true
+            },
+            {
+              "key": "property_address",
+              "label": "Địa chỉ tài sản",
+              "word_key": "property_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "parcel",
+              "label": "Số thửa đất",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ số",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate",
+              "label": "Số Giấy chứng nhận",
+              "word_key": "certificate_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_issuer",
+              "label": "Cơ quan cấp Giấy chứng nhận",
+              "word_key": "certificate_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_date",
+              "label": "Ngày cấp Giấy chứng nhận",
+              "word_key": "certificate_date",
+              "type": "past_date",
+              "required": false
+            },
+            {
+              "key": "surviving_owner",
+              "label": "Người sở hữu phần tài sản còn lại (nếu có)",
+              "word_key": "surviving_owner",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "distribution_receiver",
+              "label": "Người được nhận toàn bộ phần di sản",
+              "word_key": "distribution_receiver",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ kèm theo",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm ký",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "copies",
+              "label": "Số bản chính",
+              "word_key": "contract_copies",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "authority",
+              "label": "Cơ quan / địa điểm lưu văn bản",
+              "word_key": "receiving_authority",
+              "type": "text",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "heirs",
+      "title": "Người thừa kế tham gia thỏa thuận",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ và tên người thừa kế",
+          "word_key": "heirs_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh",
+          "word_key": "heirs_birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD",
+          "word_key": "heirs_identity",
+          "type": "cccd",
+          "required": true
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp CCCD",
+          "word_key": "heirs_issue_date",
+          "type": "issue_date",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "heirs_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thường trú",
+          "word_key": "heirs_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "relation",
+          "label": "Quan hệ với người để lại di sản",
+          "word_key": "heirs_relation",
+          "type": "text",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

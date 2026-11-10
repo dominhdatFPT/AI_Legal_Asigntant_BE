@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị cấp lại Giấy chứng nhận quyền sử dụng đất bị mất",
+  "code": "",
+  "procedure_code": "DD-005",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đề nghị cấp lại Giấy chứng nhận quyền sử dụng đất bị mất (Mẫu 10/ĐK)"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người làm đơn",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người đề nghị cấp lại",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên người làm đơn",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "birth_year",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.birth_year",
+              "help_text": "Tự lấy từ ngày sinh trong hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity_issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": true,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity_issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "applicant_phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone",
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recipient",
+      "title": "Cơ quan tiếp nhận và ngày lập đơn",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "recipient_info",
+          "instance_id": "recipient_info",
+          "block_key": "free_field",
+          "title": "Nơi nhận đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Chi nhánh Văn phòng Đăng ký đất đai tiếp nhận",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "land",
+      "title": "Thông tin thửa đất và Giấy chứng nhận",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "land_info",
+          "instance_id": "land_info",
+          "block_key": "free_field",
+          "title": "Thửa đất đề nghị cấp lại",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel_number",
+              "label": "Số thửa đất",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet_number",
+              "label": "Số tờ bản đồ",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "land_address",
+              "label": "Địa chỉ thửa đất",
+              "word_key": "land_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "land_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "land_purpose",
+              "label": "Mục đích sử dụng đất",
+              "word_key": "land_purpose",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_serial",
+              "label": "Số phát hành Giấy chứng nhận",
+              "word_key": "certificate_serial",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_book_number",
+              "label": "Số vào sổ cấp Giấy chứng nhận",
+              "word_key": "certificate_book_number",
+              "type": "text",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "loss",
+      "title": "Thông tin về việc mất Giấy chứng nhận",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "loss_info",
+          "instance_id": "loss_info",
+          "block_key": "free_field",
+          "title": "Lý do và việc niêm yết",
+          "order": 1,
+          "fields": [
+            {
+              "key": "loss_details",
+              "label": "Thời gian, địa điểm, hoàn cảnh mất",
+              "word_key": "loss_details",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi rõ thời gian, địa điểm và hoàn cảnh làm mất Giấy chứng nhận."
+            },
+            {
+              "key": "public_notice",
+              "label": "Thông tin niêm yết công khai tại UBND cấp xã",
+              "word_key": "public_notice",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi thời điểm, địa điểm niêm yết hoặc tình trạng thực hiện niêm yết."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Cam đoan và người ký",
+      "order": 5,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Cam đoan",
+          "order": 1,
+          "fields": [
+            {
+              "key": "signer",
+              "label": "Họ tên người ký đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

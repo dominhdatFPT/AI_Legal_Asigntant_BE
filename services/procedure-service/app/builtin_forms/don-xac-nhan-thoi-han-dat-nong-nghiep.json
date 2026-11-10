@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "name": "Đơn xin xác nhận lại thời hạn sử dụng đất nông nghiệp",
+  "code": "",
+  "procedure_code": "DD-009",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn xin xác nhận tiếp tục sử dụng đất nông nghiệp của hộ gia đình, cá nhân"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người sử dụng đất",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người sử dụng đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người sử dụng đất",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú / trụ sở",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy địa chỉ thường trú; không thể sửa trong đơn."
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email liên hệ",
+              "word_key": "email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "land",
+      "title": "Thông tin thửa đất",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "land_info",
+          "instance_id": "land_info",
+          "block_key": "free_field",
+          "title": "Thửa đất / khu đất đang sử dụng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel_number",
+              "label": "Số thửa đất",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet_number",
+              "label": "Số tờ bản đồ",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích đất (m²)",
+              "word_key": "land_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng đất",
+              "word_key": "land_purpose",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "current_term",
+              "label": "Thời hạn sử dụng đất hiện tại",
+              "word_key": "current_term",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "attached_property",
+              "label": "Tài sản gắn liền với đất hiện có",
+              "word_key": "attached_property",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "location",
+              "label": "Địa điểm thửa đất / khu đất",
+              "word_key": "land_location",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "certificate_serial",
+              "label": "Số phát hành Giấy chứng nhận",
+              "word_key": "certificate_serial",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_book_number",
+              "label": "Số vào sổ cấp Giấy chứng nhận",
+              "word_key": "certificate_book_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_issue_date",
+              "label": "Ngày cấp Giấy chứng nhận",
+              "word_key": "certificate_issue_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "confirmation",
+      "title": "Nội dung xin xác nhận",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "confirmation_info",
+          "instance_id": "confirmation_info",
+          "block_key": "free_field",
+          "title": "Thời hạn tiếp tục sử dụng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "requested_until",
+              "label": "Đề nghị xác nhận thời hạn sử dụng đất đến ngày",
+              "word_key": "requested_until",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ kèm theo",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Theo mẫu nguồn, kèm Giấy chứng nhận quyền sử dụng đất đã cấp."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Ngày lập đơn và người ký",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Thông tin lập đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Văn phòng / Chi nhánh Văn phòng Đăng ký đất đai",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người làm đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

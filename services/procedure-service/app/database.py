@@ -12,12 +12,15 @@ logger = logging.getLogger(__name__)
 # Tải cấu hình: ưu tiên .env nội bộ của procedure-service, sau đó mới bổ sung từ BE/.env
 _service_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
 _be_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.env"))
+_keys_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.keys/onlyoffice.env"))
 _root_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../.env"))
 
 if os.path.exists(_service_env):
     load_dotenv(_service_env, override=True)
 if os.path.exists(_be_env):
     load_dotenv(_be_env, override=False)
+if os.path.exists(_keys_env):
+    load_dotenv(_keys_env, override=False)
 if os.path.exists(_root_env):
     load_dotenv(_root_env, override=False)
 load_dotenv()
@@ -78,10 +81,13 @@ def get_engine() -> Engine | None:
                     _engine = create_engine(
                         db_url,
                         pool_pre_ping=True,
-                        pool_size=5,
-                        max_overflow=10,
+                        pool_size=3,
+                        max_overflow=2,
                         pool_recycle=300,
                         connect_args={
+                            # Transaction poolers may reuse server connections across clients.
+                            # Disable automatic preparation to avoid statement-name collisions.
+                            "prepare_threshold": None,
                             "connect_timeout": 3,
                             "keepalives": 1,
                             "keepalives_idle": 30,
@@ -137,4 +143,3 @@ def get_supabase_config() -> tuple[str, str]:
             "SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA"
         )
     return url, anon_key
-

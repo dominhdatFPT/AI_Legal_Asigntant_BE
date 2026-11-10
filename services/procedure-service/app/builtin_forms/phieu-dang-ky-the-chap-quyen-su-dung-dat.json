@@ -1,0 +1,802 @@
+{
+  "schema_version": 1,
+  "name": "Phiếu yêu cầu đăng ký biện pháp bảo đảm bằng quyền sử dụng đất, tài sản gắn liền với đất",
+  "code": "DD-010",
+  "procedure_code": "DD-010",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Phiếu yêu cầu đăng ký biện pháp bảo đảm bằng quyền sử dụng đất",
+    "Phiếu yêu cầu đăng ký biện pháp bảo đảm bằng quyền sử dụng đất, tài sản gắn liền với đất (01a)"
+  ],
+  "sections": [
+    {
+      "id": "registration",
+      "title": "Kê khai đăng ký thế chấp",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant",
+          "instance_id": "applicant",
+          "block_key": "free_field",
+          "title": "Người yêu cầu đăng ký",
+          "order": 1,
+          "fields": [
+            {
+              "key": "role_lender",
+              "label": "Bên nhận bảo đảm",
+              "word_key": "requester_role_lender",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_borrower",
+              "label": "Bên bảo đảm",
+              "word_key": "requester_role_borrower",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_trustee",
+              "label": "Quản tài viên / doanh nghiệp quản lý, thanh lý tài sản",
+              "word_key": "requester_role_trustee",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_branch",
+              "label": "Chi nhánh pháp nhân / người đại diện",
+              "word_key": "requester_role_branch",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "name",
+              "label": "Họ tên người yêu cầu",
+              "word_key": "requester_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "requester_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "requester_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "contact_name",
+              "label": "Người liên hệ",
+              "word_key": "contact_name",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "contact_phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "contact_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "contact_fax",
+              "label": "Fax liên hệ",
+              "word_key": "contact_fax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "contact_email",
+              "label": "Email liên hệ",
+              "word_key": "contact_email",
+              "type": "email",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "contract",
+          "instance_id": "contract",
+          "block_key": "free_field",
+          "title": "Hợp đồng bảo đảm",
+          "order": 2,
+          "fields": [
+            {
+              "key": "contract_type",
+              "label": "Loại hợp đồng bảo đảm",
+              "word_key": "contract_type",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "contract_number",
+              "label": "Số hợp đồng (nếu có)",
+              "word_key": "contract_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "effective_date",
+              "label": "Ngày có hiệu lực",
+              "word_key": "contract_effective_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "debtors",
+          "instance_id": "debtors",
+          "block_key": "repeat_group",
+          "title": "Bên bảo đảm (thêm từng bên)",
+          "order": 3,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên / tên tổ chức",
+              "word_key": "party_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "party_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "identity_type",
+              "label": "Loại giấy tờ pháp lý",
+              "word_key": "party_identity_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "CCCD / số định danh",
+                "Hộ chiếu",
+                "Thẻ thường trú",
+                "Mã số thuế tổ chức",
+                "Giấy tờ khác"
+              ]
+            },
+            {
+              "key": "identity_number",
+              "label": "Số giấy tờ",
+              "word_key": "party_identity_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "party_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp",
+              "word_key": "party_issue_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "party_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "fax",
+              "label": "Fax",
+              "word_key": "party_fax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "party_email",
+              "type": "email",
+              "required": false
+            },
+            {
+              "key": "fee_exempt",
+              "label": "Không phải nộp phí đăng ký",
+              "word_key": "party_fee_exempt",
+              "type": "checkbox",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "creditors",
+          "instance_id": "creditors",
+          "block_key": "repeat_group",
+          "title": "Bên nhận bảo đảm (thêm từng bên)",
+          "order": 4,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên / tên tổ chức",
+              "word_key": "party_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "party_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "identity_type",
+              "label": "Loại giấy tờ pháp lý",
+              "word_key": "party_identity_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "CCCD / số định danh",
+                "Hộ chiếu",
+                "Thẻ thường trú",
+                "Mã số thuế tổ chức",
+                "Giấy tờ khác"
+              ]
+            },
+            {
+              "key": "identity_number",
+              "label": "Số giấy tờ",
+              "word_key": "party_identity_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "party_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp",
+              "word_key": "party_issue_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "party_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "fax",
+              "label": "Fax",
+              "word_key": "party_fax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "party_email",
+              "type": "email",
+              "required": false
+            },
+            {
+              "key": "fee_exempt",
+              "label": "Không phải nộp phí đăng ký",
+              "word_key": "party_fee_exempt",
+              "type": "checkbox",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "assets",
+          "instance_id": "secured_assets",
+          "block_key": "repeat_group",
+          "title": "Tài sản bảo đảm (thêm từng tài sản / dự án)",
+          "order": 5,
+          "fields": [
+            {
+              "key": "asset_type",
+              "label": "Loại tài sản bảo đảm",
+              "word_key": "asset_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Quyền sử dụng đất",
+                "Tài sản đã được chứng nhận quyền sở hữu",
+                "Dự án đầu tư có sử dụng đất",
+                "Nhà / tài sản hình thành trong tương lai",
+                "Tài sản gắn liền với đất chưa đăng ký quyền sở hữu"
+              ]
+            },
+            {
+              "key": "parcel_number",
+              "label": "Số thửa đất",
+              "word_key": "asset_parcel_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ",
+              "word_key": "asset_map_sheet",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "land_purpose",
+              "label": "Mục đích sử dụng đất",
+              "word_key": "asset_land_purpose",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "land_term",
+              "label": "Thời hạn sử dụng đất",
+              "word_key": "asset_land_term",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ tài sản / thửa đất",
+              "word_key": "asset_address",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "certificate_name",
+              "label": "Tên Giấy chứng nhận",
+              "word_key": "asset_certificate_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_serial",
+              "label": "Số phát hành",
+              "word_key": "asset_certificate_serial",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_register",
+              "label": "Số vào sổ cấp giấy",
+              "word_key": "asset_certificate_register",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "asset_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp",
+              "word_key": "asset_issue_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "project_name",
+              "label": "Tên dự án (nếu có)",
+              "word_key": "asset_project_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "project_basis",
+              "label": "Căn cứ pháp lý xác lập dự án",
+              "word_key": "asset_project_basis",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "description",
+              "label": "Mô tả chi tiết tài sản / tài sản hình thành trong tương lai",
+              "word_key": "asset_description",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "closing",
+          "instance_id": "closing",
+          "block_key": "free_field",
+          "title": "Giấy tờ, cách nhận kết quả và ngày lập",
+          "order": 6,
+          "fields": [
+            {
+              "key": "receiving_agency",
+              "label": "Cơ quan đăng ký có thẩm quyền",
+              "word_key": "receiving_agency",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ kèm theo",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "result_method",
+              "label": "Cách nhận kết quả",
+              "word_key": "result_method",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Nhận trực tiếp",
+                "Qua bưu chính",
+                "Điện tử nếu được phép",
+                "Cách thức khác được cơ quan đồng ý"
+              ]
+            },
+            {
+              "key": "result_address",
+              "label": "Tên / địa chỉ nhận bưu chính hoặc điện tử",
+              "word_key": "result_address",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập phiếu",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "debtor_signer",
+              "label": "Người đại diện bên bảo đảm ký",
+              "word_key": "debtor_signer",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "creditor_signer",
+              "label": "Người đại diện bên nhận bảo đảm ký",
+              "word_key": "creditor_signer",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "trustee_signer",
+              "label": "Quản tài viên / người đại diện khác ký (nếu có)",
+              "word_key": "trustee_signer",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "debtors",
+      "title": "Bên bảo đảm",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên / tên tổ chức",
+          "word_key": "party_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "party_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "identity_type",
+          "label": "Loại giấy tờ pháp lý",
+          "word_key": "party_identity_type",
+          "type": "select",
+          "required": true,
+          "options": [
+            "CCCD / số định danh",
+            "Hộ chiếu",
+            "Thẻ thường trú",
+            "Mã số thuế tổ chức",
+            "Giấy tờ khác"
+          ]
+        },
+        {
+          "key": "identity_number",
+          "label": "Số giấy tờ",
+          "word_key": "party_identity_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "party_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp",
+          "word_key": "party_issue_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "party_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "fax",
+          "label": "Fax",
+          "word_key": "party_fax",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "email",
+          "label": "Email",
+          "word_key": "party_email",
+          "type": "email",
+          "required": false
+        },
+        {
+          "key": "fee_exempt",
+          "label": "Không phải nộp phí đăng ký",
+          "word_key": "party_fee_exempt",
+          "type": "checkbox",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "creditors",
+      "title": "Bên nhận bảo đảm",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên / tên tổ chức",
+          "word_key": "party_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "party_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "identity_type",
+          "label": "Loại giấy tờ pháp lý",
+          "word_key": "party_identity_type",
+          "type": "select",
+          "required": true,
+          "options": [
+            "CCCD / số định danh",
+            "Hộ chiếu",
+            "Thẻ thường trú",
+            "Mã số thuế tổ chức",
+            "Giấy tờ khác"
+          ]
+        },
+        {
+          "key": "identity_number",
+          "label": "Số giấy tờ",
+          "word_key": "party_identity_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "party_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp",
+          "word_key": "party_issue_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "party_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "fax",
+          "label": "Fax",
+          "word_key": "party_fax",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "email",
+          "label": "Email",
+          "word_key": "party_email",
+          "type": "email",
+          "required": false
+        },
+        {
+          "key": "fee_exempt",
+          "label": "Không phải nộp phí đăng ký",
+          "word_key": "party_fee_exempt",
+          "type": "checkbox",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "secured_assets",
+      "title": "Tài sản bảo đảm",
+      "fields": [
+        {
+          "key": "asset_type",
+          "label": "Loại tài sản bảo đảm",
+          "word_key": "asset_type",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Quyền sử dụng đất",
+            "Tài sản đã được chứng nhận quyền sở hữu",
+            "Dự án đầu tư có sử dụng đất",
+            "Nhà / tài sản hình thành trong tương lai",
+            "Tài sản gắn liền với đất chưa đăng ký quyền sở hữu"
+          ]
+        },
+        {
+          "key": "parcel_number",
+          "label": "Số thửa đất",
+          "word_key": "asset_parcel_number",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "map_sheet",
+          "label": "Tờ bản đồ",
+          "word_key": "asset_map_sheet",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "land_purpose",
+          "label": "Mục đích sử dụng đất",
+          "word_key": "asset_land_purpose",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "land_term",
+          "label": "Thời hạn sử dụng đất",
+          "word_key": "asset_land_term",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ tài sản / thửa đất",
+          "word_key": "asset_address",
+          "type": "textarea",
+          "required": false
+        },
+        {
+          "key": "certificate_name",
+          "label": "Tên Giấy chứng nhận",
+          "word_key": "asset_certificate_name",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "certificate_serial",
+          "label": "Số phát hành",
+          "word_key": "asset_certificate_serial",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "certificate_register",
+          "label": "Số vào sổ cấp giấy",
+          "word_key": "asset_certificate_register",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "asset_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp",
+          "word_key": "asset_issue_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "key": "project_name",
+          "label": "Tên dự án (nếu có)",
+          "word_key": "asset_project_name",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "project_basis",
+          "label": "Căn cứ pháp lý xác lập dự án",
+          "word_key": "asset_project_basis",
+          "type": "textarea",
+          "required": false
+        },
+        {
+          "key": "description",
+          "label": "Mô tả chi tiết tài sản / tài sản hình thành trong tương lai",
+          "word_key": "asset_description",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

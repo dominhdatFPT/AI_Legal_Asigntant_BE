@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 import requests
 from requests.adapters import HTTPAdapter
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.exc import DataError, SQLAlchemyError
 
 from app.database import (
@@ -74,15 +74,15 @@ def db_connection(write: bool = False):
 
 
 def _normalize_domain(domain: str | None) -> str | None:
+    """Chuẩn hóa mã lĩnh vực từ form động và API về domain nội bộ."""
     if not domain:
         return domain
-    d = domain.strip().lower()
     mapping = {
         "dat_dai": "land",
         "ho_kinh_doanh": "business",
         "doanh_nghiep": "business",
     }
-    return mapping.get(d, d)
+    return mapping.get(domain.strip().lower(), domain.strip().lower())
 
 
 def remove_accents(input_str: str) -> str:
@@ -103,10 +103,12 @@ def _rows(conn, sql: str, params: dict | None = None) -> list[dict]:
     for item in items:
         if item.get("id") is not None:
             item["id"] = str(item["id"])
+        if item.get("form_template_id") is not None:
+            item["form_template_id"] = str(item["form_template_id"])
     return items
 
 
-SUMMARY_COLUMNS = "id, code, name, domain, description, fee, processing_days"
+SUMMARY_COLUMNS = "id, code, name, domain, description, fee, processing_days, form_template_id"
 
 
 MOCK_PROCEDURES = [
@@ -705,18 +707,57 @@ class ProcedureRepository:
                     items = _rows(conn, f"SELECT * FROM public.procedures {where_sql} ORDER BY code LIMIT :limit", params)
                     for proc in items:
                         proc["fee_formatted"] = _fee_formatted(proc.get("fee"))
-                        if not include_details:
-                            continue
-                        p = {"p_id": proc["id"]}
-                        proc["requirements"] = _rows(conn, "SELECT id, name, is_required, copies, document_form, form_code, note "
-                                                           "FROM public.procedure_requirements WHERE procedure_id = :p_id ORDER BY order_index", p)
-                        proc["conditions"] = _rows(conn, "SELECT id, condition_code, title, description, is_mandatory "
-                                                         "FROM public.procedure_conditions WHERE procedure_id = :p_id ORDER BY order_index", p)
-                        proc["legal_bases"] = _rows(conn, "SELECT id, doc_number, title, article_ref, source_url "
-                                                          "FROM public.procedure_legal_bases WHERE procedure_id = :p_id ORDER BY order_index", p)
-                        proc["requirements_count"] = len(proc["requirements"])
-                        proc["conditions_count"] = len(proc["conditions"])
-                        proc["legal_bases_count"] = len(proc["legal_bases"])
+                    if include_details and items:
+                        proc_ids = [proc["id"] for proc in items if proc.get("id")]
+                        req_stmt = text(
+                            "SELECT id, procedure_id, name, is_required, copies, document_form, form_code, note "
+                            "FROM public.procedure_requirements WHERE CAST(procedure_id AS TEXT) IN :pids ORDER BY order_index"
+                        ).bindparams(bindparam("pids", expanding=True))
+                        cond_stmt = text(
+                            "SELECT id, procedure_id, condition_code, title, description, is_mandatory "
+                            "FROM public.procedure_conditions WHERE CAST(procedure_id AS TEXT) IN :pids ORDER BY order_index"
+                        ).bindparams(bindparam("pids", expanding=True))
+                        lb_stmt = text(
+                            "SELECT id, procedure_id, doc_number, title, article_ref, source_url "
+                            "FROM public.procedure_legal_bases WHERE CAST(procedure_id AS TEXT) IN :pids ORDER BY order_index"
+                        ).bindparams(bindparam("pids", expanding=True))
+
+                        reqs_by_proc: dict[str, list[dict]] = {pid: [] for pid in proc_ids}
+                        conds_by_proc: dict[str, list[dict]] = {pid: [] for pid in proc_ids}
+                        lbs_by_proc: dict[str, list[dict]] = {pid: [] for pid in proc_ids}
+
+                        for r in conn.execute(req_stmt, {"pids": proc_ids}).mappings().all():
+                            row = dict(r)
+                            pid = str(row.pop("procedure_id", ""))
+                            if row.get("id") is not None:
+                                row["id"] = str(row["id"])
+                            if pid in reqs_by_proc:
+                                reqs_by_proc[pid].append(row)
+
+                        for r in conn.execute(cond_stmt, {"pids": proc_ids}).mappings().all():
+                            row = dict(r)
+                            pid = str(row.pop("procedure_id", ""))
+                            if row.get("id") is not None:
+                                row["id"] = str(row["id"])
+                            if pid in conds_by_proc:
+                                conds_by_proc[pid].append(row)
+
+                        for r in conn.execute(lb_stmt, {"pids": proc_ids}).mappings().all():
+                            row = dict(r)
+                            pid = str(row.pop("procedure_id", ""))
+                            if row.get("id") is not None:
+                                row["id"] = str(row["id"])
+                            if pid in lbs_by_proc:
+                                lbs_by_proc[pid].append(row)
+
+                        for proc in items:
+                            pid = proc["id"]
+                            proc["requirements"] = reqs_by_proc.get(pid, [])
+                            proc["conditions"] = conds_by_proc.get(pid, [])
+                            proc["legal_bases"] = lbs_by_proc.get(pid, [])
+                            proc["requirements_count"] = len(proc["requirements"])
+                            proc["conditions_count"] = len(proc["conditions"])
+                            proc["legal_bases_count"] = len(proc["legal_bases"])
             except Exception as e:
                 logger.warning(f"Lỗi SQL get_procedures_by_domain: {e}. Thử fallback PostgREST...")
                 mark_postgres_failed(60.0)
@@ -753,6 +794,14 @@ class ProcedureRepository:
     def get_procedure_names_by_domain(domain: str) -> list[dict]:
         """Tên và mã thủ tục gọn nhẹ theo lĩnh vực (cho dropdown)."""
         clean_domain = _normalize_domain(domain) or "all"
+        cache_key = f"proc_names:{clean_domain}"
+        now = time.time()
+        use_cache = database_url().startswith("postgresql")
+        if use_cache and cache_key in _proc_cache:
+            c_time, c_data = _proc_cache[cache_key]
+            if now - c_time < CACHE_TTL:
+                return copy.deepcopy(c_data)
+
         params: dict = {}
         where_sql = ""
         if clean_domain != "all":
@@ -762,7 +811,9 @@ class ProcedureRepository:
             items = _rows(conn, f"SELECT id, code, name, domain, fee, processing_days FROM public.procedures {where_sql} ORDER BY code", params)
         for item in items:
             item["fee_formatted"] = _fee_formatted(item.get("fee"))
-        return items
+        if use_cache:
+            _proc_cache[cache_key] = (now, items)
+        return copy.deepcopy(items) if use_cache else items
 
     @staticmethod
     def create_or_ensure_procedure(
@@ -774,14 +825,19 @@ class ProcedureRepository:
         fee: int = 0,
         submission_channels: list[str] | None = None,
     ) -> dict:
-        """Tạo thủ tục hành chính mới nếu chưa có, hoặc trả về thủ tục hiện tại."""
+        """Maak een procedure aan wanneer een dynamic template een nieuwe code gebruikt."""
         import uuid
+
         clean_code = code.strip().upper()
-        norm_domain = "land" if domain in ("land", "dat_dai") else "business"
+        norm_domain = _normalize_domain(domain) or "business"
         channels = submission_channels or ["online", "in_person"]
 
         with db_connection(write=True) as conn:
-            existing = _rows(conn, "SELECT * FROM public.procedures WHERE UPPER(code) = :code LIMIT 1", {"code": clean_code})
+            existing = _rows(
+                conn,
+                "SELECT * FROM public.procedures WHERE UPPER(code) = :code LIMIT 1",
+                {"code": clean_code},
+            )
             if existing:
                 return existing[0]
 
@@ -807,9 +863,8 @@ class ProcedureRepository:
                     "processing_days": processing_days,
                     "channels": channels,
                     "fee": fee,
-                }
+                },
             )
             created = _rows(conn, "SELECT * FROM public.procedures WHERE id = :id", {"id": new_id})
             _proc_cache.clear()
             return created[0] if created else {}
-

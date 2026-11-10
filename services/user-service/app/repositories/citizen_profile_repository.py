@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.models import CitizenProfile
 
-
 def get_by_user_id(db: Session, user_id: uuid.UUID) -> CitizenProfile | None:
     return db.get(CitizenProfile, user_id)
 

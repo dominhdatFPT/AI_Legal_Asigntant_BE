@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "name": "Tờ khai thuế giá trị gia tăng theo phương pháp khấu trừ (01/GTGT)",
+  "code": "",
+  "procedure_code": null,
+  "domain": "doanh_nghiep",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Tờ khai thuế giá trị gia tăng theo phương pháp khấu trừ (01/GTGT)"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp. Các chỉ tiêu thuế được nhập riêng, hệ thống không tự tính và không tự kiểm tra số học.",
+  "sections": [
+    {
+      "id": "tax_identity",
+      "title": "Thông tin người nộp thuế và kỳ tính thuế",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "tax_identity",
+          "instance_id": "tax_identity",
+          "block_key": "free_field",
+          "title": "Tờ khai thuế GTGT",
+          "order": 1,
+          "fields": [
+            {
+              "key": "activity",
+              "label": "Hoạt động sản xuất kinh doanh",
+              "word_key": "activity",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Sản xuất kinh doanh thông thường",
+                "Xổ số kiến thiết / xổ số điện toán",
+                "Thăm dò, khai thác dầu khí",
+                "Dự án đầu tư hạ tầng, nhà để chuyển nhượng khác tỉnh",
+                "Nhà máy sản xuất điện khác tỉnh"
+              ]
+            },
+            {
+              "key": "tax_period_type",
+              "label": "Kỳ khai thuế",
+              "word_key": "tax_period_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Tháng",
+                "Quý"
+              ]
+            },
+            {
+              "key": "tax_period",
+              "label": "Tháng / quý và năm",
+              "word_key": "tax_period",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "declaration_type",
+              "label": "Loại tờ khai",
+              "word_key": "declaration_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Lần đầu",
+                "Bổ sung"
+              ]
+            },
+            {
+              "key": "supplement_number",
+              "label": "Lần bổ sung thứ",
+              "word_key": "supplement_number",
+              "type": "number",
+              "required": true,
+              "condition": {
+                "field": "tax_identity.declaration_type",
+                "equals": "Bổ sung"
+              }
+            },
+            {
+              "key": "taxpayer_name",
+              "label": "Tên người nộp thuế",
+              "word_key": "taxpayer_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "taxpayer_code",
+              "label": "Mã số thuế",
+              "word_key": "taxpayer_code",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "tax_agent_name",
+              "label": "Tên đại lý thuế (nếu có)",
+              "word_key": "tax_agent_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "tax_agent_code",
+              "label": "Mã số thuế đại lý (nếu có)",
+              "word_key": "tax_agent_code",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "tax_agent_contract",
+              "label": "Số hợp đồng đại lý thuế (nếu có)",
+              "word_key": "tax_agent_contract",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "tax_agent_contract_date",
+              "label": "Ngày hợp đồng đại lý thuế (nếu có)",
+              "word_key": "tax_agent_contract_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "has_other_province_branch",
+              "label": "Có đơn vị / địa điểm kinh doanh khác tỉnh thuộc trường hợp phải kê khai chỉ tiêu này?",
+              "word_key": "has_other_province_branch",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Không",
+                "Có"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "branches",
+      "title": "Đơn vị phụ thuộc khác tỉnh (nếu có)",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "branches",
+          "instance_id": "branches",
+          "block_key": "repeat_group",
+          "title": "Thêm địa điểm thuộc diện kê khai",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Tên đơn vị phụ thuộc / địa điểm kinh doanh",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "tax_code",
+              "label": "Mã số thuế đơn vị / mã địa điểm",
+              "word_key": "tax_code",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ tại tỉnh khác",
+              "word_key": "address",
+              "type": "textarea",
+              "required": true
+            }
+          ],
+          "condition": {
+            "field": "tax_identity.has_other_province_branch",
+            "equals": "Có"
+          }
+        }
+      ]
+    },
+    {
+      "id": "tax_amounts",
+      "title": "Các chỉ tiêu trên tờ khai",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "tax_amounts",
+          "instance_id": "tax_amounts",
+          "block_key": "free_field",
+          "title": "Nhập giá trị theo từng chỉ tiêu của bản kê khai",
+          "order": 1,
+          "fields": [
+            {
+              "key": "item_22",
+              "label": "Chỉ tiêu [22] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_22",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_23",
+              "label": "Chỉ tiêu [23] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_23",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_24",
+              "label": "Chỉ tiêu [24] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_24",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_23a",
+              "label": "Chỉ tiêu [23a] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_23a",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_24a",
+              "label": "Chỉ tiêu [24a] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_24a",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_25",
+              "label": "Chỉ tiêu [25] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_25",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_26",
+              "label": "Chỉ tiêu [26] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_26",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_27",
+              "label": "Chỉ tiêu [27] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_27",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_28",
+              "label": "Chỉ tiêu [28] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_28",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_29",
+              "label": "Chỉ tiêu [29] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_29",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_30",
+              "label": "Chỉ tiêu [30] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_30",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_31",
+              "label": "Chỉ tiêu [31] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_31",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_32",
+              "label": "Chỉ tiêu [32] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_32",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_33",
+              "label": "Chỉ tiêu [33] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_33",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_32a",
+              "label": "Chỉ tiêu [32a] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_32a",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_34",
+              "label": "Chỉ tiêu [34] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_34",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_35",
+              "label": "Chỉ tiêu [35] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_35",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_36",
+              "label": "Chỉ tiêu [36] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_36",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_37",
+              "label": "Chỉ tiêu [37] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_37",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_38",
+              "label": "Chỉ tiêu [38] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_38",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_39a",
+              "label": "Chỉ tiêu [39a] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_39a",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_40a",
+              "label": "Chỉ tiêu [40a] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_40a",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_40b",
+              "label": "Chỉ tiêu [40b] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_40b",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_40",
+              "label": "Chỉ tiêu [40] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_40",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_41",
+              "label": "Chỉ tiêu [41] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_41",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_42",
+              "label": "Chỉ tiêu [42] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_42",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "item_43",
+              "label": "Chỉ tiêu [43] - giá trị / số thuế theo tờ khai",
+              "word_key": "item_43",
+              "type": "number",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tax_signature",
+      "title": "Người nộp thuế / đại lý thuế",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "tax_signature",
+          "instance_id": "tax_signature",
+          "block_key": "free_field",
+          "title": "Xác nhận và ký",
+          "order": 1,
+          "fields": [
+            {
+              "key": "no_purchase_sales",
+              "label": "Đánh dấu chỉ tiêu [21] nếu không phát sinh mua bán trong kỳ",
+              "word_key": "no_purchase_sales",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Không đánh dấu",
+                "Đánh dấu X"
+              ]
+            },
+            {
+              "key": "tax_agent_staff",
+              "label": "Nhân viên đại lý thuế (nếu có)",
+              "word_key": "tax_agent_staff",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "tax_agent_certificate",
+              "label": "Số chứng chỉ hành nghề (nếu có)",
+              "word_key": "tax_agent_certificate",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "legal_representative",
+              "label": "Người nộp thuế / đại diện hợp pháp",
+              "word_key": "legal_representative",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "legal_representative_title",
+              "label": "Chức vụ (nếu có)",
+              "word_key": "legal_representative_title",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày ký",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "other_province_branches",
+      "title": "other province branches",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Tên đơn vị phụ thuộc / địa điểm kinh doanh",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "tax_code",
+          "label": "Mã số thuế đơn vị / mã địa điểm",
+          "word_key": "tax_code",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ tại tỉnh khác",
+          "word_key": "address",
+          "type": "textarea",
+          "required": true
+        }
+      ],
+      "condition": {
+        "field": "tax_identity.has_other_province_branch",
+        "equals": "Có"
+      }
+    }
+  ]
+}

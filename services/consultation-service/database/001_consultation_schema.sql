@@ -26,6 +26,7 @@ create table if not exists consultations (
     closed_at        timestamptz,
     last_activity_at timestamptz not null default now(),  -- mốc 10 ngày: lúc tạo, lúc nhận hoặc tin nhắn cuối
     purged_at        timestamptz,                         -- lúc đã xóa question và tin nhắn
+    summarized_until timestamptz,                         -- tin có created_at <= mốc này đã được tóm tắt (consultation_summaries)
     created_at       timestamptz not null default now(),
     updated_at       timestamptz not null default now(),
 
@@ -64,6 +65,9 @@ create index if not exists ix_consultations_cleanup on consultations (last_activ
 create unique index if not exists consultations_open_pair_key on consultations (citizen_user_id, lawyer_user_id)
     where status = 'in_progress';
 
+-- Database đã tạo từ bản cũ: chạy lại file này sẽ thêm cột.
+alter table consultations add column if not exists summarized_until timestamptz;
+
 -- ---------------------------------------------------------------- Tin nhắn
 create table if not exists consultation_messages (
     id              uuid primary key default gen_random_uuid(),
@@ -80,6 +84,23 @@ create index if not exists ix_consultation_messages_history
     on consultation_messages (consultation_id, created_at, id);
 create index if not exists ix_consultation_messages_unread
     on consultation_messages (consultation_id, sender_id) where not is_read;
+
+-- ---------------------------------------------------------------- Tóm tắt hội thoại
+-- Mỗi dòng là biên bản một đoạn chat (window), do Agent trích từ tin trong (window_start, window_end].
+-- Giữ lâu dài, không bị xóa khi cuộc tư vấn bị dọn sau 10 ngày; xóa cùng dòng consultations nếu dòng đó bị xóa hẳn.
+create table if not exists consultation_summaries (
+    id              uuid primary key default gen_random_uuid(),
+    consultation_id uuid        not null references consultations (id) on delete cascade,
+    window_start    timestamptz,                          -- null = từ tin đầu tiên
+    window_end      timestamptz not null,                 -- created_at của tin cuối trong đoạn
+    message_count   integer     not null,
+    summary         jsonb       not null,                 -- JSON theo schema_version, mỗi facts/legal_references/deadlines có "verified"
+    schema_version  integer     not null,
+    prompt_version  varchar(20),                          -- do Agent trả về
+    created_at      timestamptz not null default now(),
+
+    constraint consultation_summaries_window_key unique (consultation_id, window_end)
+);
 
 -- ---------------------------------------------------------------- Report
 -- Admin chỉ thấy ai report ai và lý do, không đọc nội dung chat.
@@ -119,6 +140,8 @@ alter table consultations enable row level security;
 alter table consultation_messages enable row level security;
 alter table consultation_reports enable row level security;
 alter table consultation_terms_acceptances enable row level security;
+alter table consultation_summaries enable row level security;
 
-revoke all on consultations, consultation_messages, consultation_reports, consultation_terms_acceptances
+revoke all on consultations, consultation_messages, consultation_reports, consultation_terms_acceptances,
+    consultation_summaries
     from anon, authenticated;

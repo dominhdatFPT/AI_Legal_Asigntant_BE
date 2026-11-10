@@ -1,4 +1,4 @@
--- 007_dynamic_form_templates.sql
+-- 009_dynamic_form_templates.sql
 -- Bảng mẫu đơn dùng chung (Dynamic Form Templates): admin tạo mẫu kéo-thả,
 -- công dân điền và in PDF trên trình duyệt.
 -- TÁCH BIỆT với bảng form_templates (006): bảng cũ lưu file PDF/DOCX tham khảo cố định.

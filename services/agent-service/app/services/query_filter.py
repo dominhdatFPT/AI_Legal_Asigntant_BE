@@ -26,10 +26,14 @@ def _is_valid_token(token: str) -> bool:
     return bool(_SYLLABLE.match(_strip_accents(token)))
 
 
-def is_meaningless(text: str) -> bool:
-    """True khi đa số từ không phải âm tiết tiếng Việt, ví dụ "dsadsafsaf", "fdavfsva"."""
+def valid_token_ratio(text: str) -> float:
+    """Số từ hợp lệ chia tổng số từ, 0.0 khi đoạn chữ không có từ nào."""
     tokens = _TOKEN.findall(text)
     if not tokens:
-        return True
-    valid = sum(_is_valid_token(t) for t in tokens)
-    return valid * 2 < len(tokens)
+        return 0.0
+    return sum(_is_valid_token(t) for t in tokens) / len(tokens)
+
+
+def is_meaningless(text: str) -> bool:
+    """True khi đa số từ không phải âm tiết tiếng Việt, ví dụ "dsadsafsaf", "fdavfsva"."""
+    return valid_token_ratio(text) < 0.5

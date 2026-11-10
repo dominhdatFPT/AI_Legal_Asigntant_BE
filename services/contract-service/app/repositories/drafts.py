@@ -81,9 +81,18 @@ class DraftRepository(CatalogRepository):
     def list(self, owner, page, size):
         with self.transaction(read=True) as conn:
             total = conn.execute("SELECT count(*) AS total FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL", (owner,)).fetchone()["total"]
-            ids = conn.execute("SELECT id FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",
-                (owner, size, (page-1)*size)).fetchall()
-            return pagination([self.row(conn, row["id"], owner) for row in ids], total, page, size)
+            if self._connect:
+                ids = conn.execute("SELECT id FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",
+                    (owner, size, (page-1)*size)).fetchall()
+                return pagination([self.row(conn, row["id"], owner) for row in ids], total, page, size)
+            rows = conn.execute(
+                "SELECT " + DRAFT + ", COALESCE(ARRAY(SELECT document_id FROM public.contract_draft_documents d WHERE d.draft_id=public.contract_drafts.id AND d.owner_user_id=%s ORDER BY d.document_id), '{}') AS document_ids "
+                "FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",
+                (owner, owner, size, (page-1)*size),
+            ).fetchall()
+            for row in rows:
+                row["document_ids"] = list(row.get("document_ids") or [])
+            return pagination(rows, total, page, size)
 
     def active_guard(self, conn, draft_id):
         if conn.execute("SELECT 1 FROM public.contract_generation_jobs WHERE draft_id=%s AND status IN ('queued','processing') LIMIT 1", (draft_id,)).fetchone():

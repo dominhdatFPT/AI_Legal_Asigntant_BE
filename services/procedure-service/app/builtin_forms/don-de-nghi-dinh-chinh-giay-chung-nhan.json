@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị đính chính thông tin Giấy chứng nhận đã cấp",
+  "code": "",
+  "procedure_code": "DD-007",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đề nghị đính chính thông tin Giấy chứng nhận đã cấp"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người sử dụng đất",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người đề nghị đính chính",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên người sử dụng đất",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": true,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ liên hệ",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy địa chỉ thường trú; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "certificate",
+      "title": "Thông tin Giấy chứng nhận",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "certificate_info",
+          "instance_id": "certificate_info",
+          "block_key": "free_field",
+          "title": "Giấy chứng nhận đã cấp",
+          "order": 1,
+          "fields": [
+            {
+              "key": "serial",
+              "label": "Số phát hành Giấy chứng nhận",
+              "word_key": "certificate_serial",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "book_number",
+              "label": "Số vào sổ cấp Giấy chứng nhận",
+              "word_key": "certificate_book_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "issuing_authority",
+              "label": "Cơ quan cấp",
+              "word_key": "issuing_authority",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp Giấy chứng nhận",
+              "word_key": "certificate_issue_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "correction",
+      "title": "Nội dung đề nghị đính chính",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "correction_info",
+          "instance_id": "correction_info",
+          "block_key": "free_field",
+          "title": "Thông tin sai và thông tin đúng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "incorrect_information",
+              "label": "Thông tin đang ghi sai trên Giấy chứng nhận",
+              "word_key": "incorrect_information",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi nguyên văn thông tin sai trên Giấy chứng nhận."
+            },
+            {
+              "key": "correct_information",
+              "label": "Thông tin đúng đề nghị đính chính",
+              "word_key": "correct_information",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi thông tin đúng theo giấy tờ chứng minh."
+            },
+            {
+              "key": "evidence_documents",
+              "label": "Giấy tờ chứng minh nội dung sai sót",
+              "word_key": "evidence_documents",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Nơi lập, ngày lập và người ký",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Người làm đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người ký đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

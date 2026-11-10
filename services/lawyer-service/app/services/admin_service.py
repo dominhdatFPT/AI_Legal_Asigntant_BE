@@ -46,7 +46,9 @@ def credential_file(db: Session, application_id: uuid.UUID, document_id: uuid.UU
         raise ApiError(404, APPLICATION_NOT_FOUND)
     if str(document_id) not in {str(c.get("document_id")) for c in application.credentials or []}:
         raise ApiError(404, CREDENTIAL_NOT_FOUND)
-    response = document_client.get_content(application.user_id, document_id)
+    owner_user_id = application.user_id
+    db.close()
+    response = document_client.get_content(owner_user_id, document_id)
     # Xem ngay trên trình duyệt (Document Service chỉ nhận PDF/JPG/PNG nên mở inline an toàn).
     disposition = response.headers.get("Content-Disposition", "").replace("attachment", "inline", 1) or "inline"
     return response.content, response.headers.get("Content-Type", "application/octet-stream"), disposition

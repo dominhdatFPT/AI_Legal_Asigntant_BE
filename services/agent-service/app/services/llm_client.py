@@ -195,16 +195,26 @@ async def _generate_openrouter(
     max_output_tokens: int | None = None,
     timeout_seconds: float | None = None,
     max_retries: int | None = None,
+    reasoning_max_tokens: int | None = None,
+    model: str | None = None,
 ) -> tuple[str, int | None]:
     settings = get_settings()
-    if not settings.openrouter_api_key or not settings.openrouter_model:
+    model = model or settings.openrouter_model
+    if not settings.openrouter_api_key or not model:
         raise LLMError("Chưa cấu hình OPENROUTER_API_KEY hoặc OPENROUTER_MODEL")
     messages = [{"role": "system", "content": system_prompt}]
     for m in history:
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_content})
-    reasoning = max(0, settings.openrouter_reasoning_max_tokens)
-    reasoning_args = {"extra_body": {"reasoning": {"max_tokens": reasoning}}} if reasoning else {}
+    if reasoning_max_tokens is None:
+        reasoning = max(0, settings.openrouter_reasoning_max_tokens)
+        reasoning_args = {"extra_body": {"reasoning": {"max_tokens": reasoning}}} if reasoning else {}
+    else:
+        # Lượt gọi phụ tự chọn mức suy luận. 0 = tắt hẳn bằng enabled=false thay vì bỏ tham số: bỏ tham số thì có tắt hay
+        # không còn tuỳ mặc định của model (docs OpenRouter không nói rõ cho Gemini 2.5; đo 29/10/2026 với
+        # google/gemini-2.5-flash thì cả hai đều ra 0 token suy luận)
+        reasoning = max(0, reasoning_max_tokens)
+        reasoning_args = {"extra_body": {"reasoning": {"max_tokens": reasoning} if reasoning else {"enabled": False}}}
 
     max_retries = max(0, settings.openrouter_max_retries if max_retries is None else max_retries)
     last_error: Exception | None = None
@@ -212,7 +222,7 @@ async def _generate_openrouter(
         try:
             resp = await asyncio.wait_for(
                 _get_openrouter_client().chat.completions.create(
-                    model=settings.openrouter_model,
+                    model=model,
                     messages=messages,
                     temperature=0.2,
                     max_tokens=(max_output_tokens or settings.llm_max_output_tokens) + reasoning,
@@ -258,12 +268,20 @@ async def generate(
     max_output_tokens: int | None = None,
     timeout_seconds: float | None = None,
     max_retries: int | None = None,
+    reasoning_max_tokens: int | None = None,
+    model: str | None = None,
 ) -> tuple[str, int | None, str]:
     """
     Trả về (answer, tokens, model_name).
     llm_provider có thể là một provider ("groq") hoặc danh sách ưu tiên ("openrouter,gemini").
     Nếu provider đầu thất bại, tự động thử provider tiếp theo.
-    Ba tham số tùy chọn ghi đè cấu hình mặc định (chỉ chế độ rà soát dùng); không truyền thì giữ hành vi cũ.
+    Ba tham số đầu ghi đè cấu hình mặc định (chỉ chế độ rà soát dùng); không truyền thì giữ hành vi cũ.
+    `reasoning_max_tokens` (lượt gọi phụ như chấm liên quan) chỉ tác dụng với OpenRouter: không truyền thì lấy
+    OPENROUTER_REASONING_MAX_TOKENS như cũ, 0 = tắt suy luận, số dương = chừa chừng đó token. Gemini trực tiếp
+    (luôn tắt suy nghĩ) và Groq bỏ qua tham số này.
+    `model` (lượt gọi phụ, cấu hình OPENROUTER_AUX_MODEL) cũng chỉ tác dụng với OpenRouter: có giá trị thì gọi bằng model đó thay cho
+    OPENROUTER_MODEL và model_name trả về là model đó; không truyền thì như cũ. Gemini và Groq bỏ qua. Model phụ lỗi thì đi tiếp
+    provider kế tiếp như mọi lỗi khác.
     """
     options = {"max_output_tokens": max_output_tokens, "timeout_seconds": timeout_seconds, "max_retries": max_retries}
     s = get_settings()
@@ -279,8 +297,10 @@ async def generate(
                 answer, tokens = await _generate_gemini(system_prompt, history, user_content, **options)
                 return answer, tokens, s.gemini_model
             elif provider == "openrouter":
-                answer, tokens = await _generate_openrouter(system_prompt, history, user_content, **options)
-                return answer, tokens, s.openrouter_model
+                answer, tokens = await _generate_openrouter(
+                    system_prompt, history, user_content, **options, reasoning_max_tokens=reasoning_max_tokens, model=model
+                )
+                return answer, tokens, model or s.openrouter_model
             else:
                 raise LLMError(f"Provider không hợp lệ: {provider}")
         except LLMError as e:

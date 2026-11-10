@@ -7,6 +7,11 @@ ON-TAP-RAG.md
 !.env.example
 *.pem
 .keys/
+# Thư mục keys/ ở mọi cấp: chặn MỌI thứ bên trong (.key, .p12...), chỉ cho phép khoá công khai jwt_public.pem.
+# Chặn phần nội dung (keys/*) chứ không chặn cả thư mục (keys/): quy tắc phủ định không có hiệu lực khi thư mục cha bị chặn.
+# Phủ định phải đứng SAU *.pem ở trên thì mới thắng. Không ảnh hưởng file đã được git theo dõi (vd keys/try_jwt.py).
+**/keys/*
+!**/keys/jwt_public.pem
 
 # Python
 .venv/
@@ -45,4 +50,10 @@ Thumbs.db
 # Postman local config
 .postman/
 postman/
+
+# SonarQube local cache & local secrets override
+.scannerwork/
+.sonar/
+sonar-project.local.properties
+
 

@@ -1,0 +1,579 @@
+{
+  "schema_version": 1,
+  "name": "Hợp đồng tặng cho quyền sử dụng đất và tài sản gắn liền với đất",
+  "code": "",
+  "procedure_code": "DD-006",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Hợp đồng tặng cho quyền sử dụng đất và tài sản gắn liền với đất"
+  ],
+  "review_notice": "Bản nguồn trong kho có chỗ đánh số điều trùng lặp và một số chi tiết cần rà soát. Bản nhập liệu giữ ý chính theo nguồn; hãy kiểm tra pháp lý và nội dung trước khi ký công chứng.",
+  "sections": [
+    {
+      "id": "parties",
+      "title": "Các bên ký hợp đồng",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "transaction",
+          "instance_id": "transaction",
+          "block_key": "free_field",
+          "title": "Ngày, nơi lập và số hợp đồng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "number",
+              "label": "Số hợp đồng",
+              "word_key": "contract_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "contract_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "contract_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "contract_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Nơi lập hợp đồng",
+              "word_key": "contract_place",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "donors",
+          "instance_id": "donors",
+          "block_key": "repeat_group",
+          "title": "Bên tặng cho (thêm từng người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên bên tặng cho",
+              "word_key": "donor_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "donor_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "donor_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp giấy tờ",
+              "word_key": "donor_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "donor_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "donor_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "donor_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "property_role",
+              "label": "Tư cách / phần quyền sở hữu",
+              "word_key": "donor_property_role",
+              "type": "text",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "donees",
+          "instance_id": "donees",
+          "block_key": "repeat_group",
+          "title": "Bên được tặng cho (thêm từng người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên bên được tặng cho",
+              "word_key": "donee_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "donee_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "donee_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp giấy tờ",
+              "word_key": "donee_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "donee_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "donee_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "donee_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "property_role",
+              "label": "Tư cách / phần quyền sở hữu",
+              "word_key": "donee_property_role",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "asset",
+      "title": "Quyền sử dụng đất và tài sản",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "gift_asset",
+          "instance_id": "gift_asset",
+          "block_key": "free_field",
+          "title": "Thông tin tài sản tặng cho",
+          "order": 1,
+          "fields": [
+            {
+              "key": "certificate",
+              "label": "Giấy tờ chứng minh quyền sử dụng / sở hữu",
+              "word_key": "certificate_basis",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "parcel",
+              "label": "Số thửa đất",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ số",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thửa đất",
+              "word_key": "property_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "land_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "area_words",
+              "label": "Diện tích bằng chữ",
+              "word_key": "land_area_words",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "private_area",
+              "label": "Diện tích sử dụng riêng (m²)",
+              "word_key": "private_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "shared_area",
+              "label": "Diện tích sử dụng chung (m²)",
+              "word_key": "shared_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng",
+              "word_key": "land_purpose",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "term",
+              "label": "Thời hạn sử dụng",
+              "word_key": "land_term",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "origin",
+              "label": "Nguồn gốc sử dụng",
+              "word_key": "land_origin",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "restrictions",
+              "label": "Hạn chế quyền sử dụng (nếu có)",
+              "word_key": "land_restrictions",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "attached_property",
+              "label": "Tài sản gắn liền với đất",
+              "word_key": "attached_property",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "asset_documents",
+              "label": "Giấy tờ về tài sản gắn liền với đất",
+              "word_key": "asset_documents",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "value",
+              "label": "Giá trị tài sản (đồng)",
+              "word_key": "property_value",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "value_words",
+              "label": "Giá trị bằng chữ",
+              "word_key": "property_value_words",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "terms",
+      "title": "Thỏa thuận và giấy tờ",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "gift_terms",
+          "instance_id": "gift_terms",
+          "block_key": "free_field",
+          "title": "Nội dung giao nhận và phí",
+          "order": 1,
+          "fields": [
+            {
+              "key": "handover_date",
+              "label": "Thời điểm giao tài sản / giấy tờ",
+              "word_key": "handover_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "effective_from",
+              "label": "Ngày hợp đồng có hiệu lực từ",
+              "word_key": "effective_from",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "effective_until",
+              "label": "Ngày hợp đồng có hiệu lực đến",
+              "word_key": "effective_until",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "registration_payer",
+              "label": "Bên chịu trách nhiệm đăng ký",
+              "word_key": "registration_payer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "tax_fee_payer",
+              "label": "Bên chịu thuế, lệ phí",
+              "word_key": "tax_fee_payer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "copies",
+              "label": "Số bản hợp đồng lập",
+              "word_key": "contract_copies",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "term_note",
+              "label": "Ghi chú khác (nếu có)",
+              "word_key": "contract_note",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "notary",
+      "title": "Lời chứng công chứng",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "notary_info",
+          "instance_id": "notary_info",
+          "block_key": "free_field",
+          "title": "Thông tin công chứng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "notary_date",
+              "label": "Ngày công chứng",
+              "word_key": "notary_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "notary_place",
+              "label": "Địa điểm công chứng",
+              "word_key": "notary_place",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "notary_name",
+              "label": "Tên công chứng viên",
+              "word_key": "notary_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "office",
+              "label": "Phòng / văn phòng công chứng",
+              "word_key": "notary_office",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "city",
+              "label": "Tỉnh / thành phố",
+              "word_key": "notary_city",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "document_number",
+              "label": "Số công chứng",
+              "word_key": "notary_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "book_number",
+              "label": "Quyển số",
+              "word_key": "notary_book_number",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "donors",
+      "title": "Bên tặng cho",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên bên tặng cho",
+          "word_key": "donor_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh",
+          "word_key": "donor_birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD / định danh",
+          "word_key": "donor_identity",
+          "type": "cccd",
+          "required": true
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp giấy tờ",
+          "word_key": "donor_issue_date",
+          "type": "issue_date",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "donor_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thường trú",
+          "word_key": "donor_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "donor_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "property_role",
+          "label": "Tư cách / phần quyền sở hữu",
+          "word_key": "donor_property_role",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "donees",
+      "title": "Bên được tặng cho",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên bên được tặng cho",
+          "word_key": "donee_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh",
+          "word_key": "donee_birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD / định danh",
+          "word_key": "donee_identity",
+          "type": "cccd",
+          "required": true
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp giấy tờ",
+          "word_key": "donee_issue_date",
+          "type": "issue_date",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "donee_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thường trú",
+          "word_key": "donee_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "donee_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "property_role",
+          "label": "Tư cách / phần quyền sở hữu",
+          "word_key": "donee_property_role",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

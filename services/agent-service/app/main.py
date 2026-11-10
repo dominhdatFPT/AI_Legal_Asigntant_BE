@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict, ValidationError
 
 from app.api.v1.conversations import router as conversations_router
+from app.api.v1.internal import minutes_router, router as internal_router
 from app.services import agent, llm_client, rag_client
 
 # Hiện log INFO của app (ví dụ "agent timing") trong docker logs
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Agent Service", version="0.1.0")
 app.include_router(conversations_router)
+app.include_router(internal_router)
+app.include_router(minutes_router)
 procedure_service_url = os.getenv(
     "PROCEDURE_SERVICE_URL",
     "http://procedure-service:8000",

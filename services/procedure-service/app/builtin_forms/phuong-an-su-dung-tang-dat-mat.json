@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "name": "Phương án sử dụng tầng đất mặt",
+  "code": "DD-008",
+  "procedure_code": "DD-008",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Phương án bóc tách, sử dụng tầng đất mặt khi chuyển mục đích sử dụng"
+  ],
+  "sections": [
+    {
+      "id": "holder",
+      "title": "Thông tin người được giao / thuê đất",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "holder_info",
+          "instance_id": "holder_info",
+          "block_key": "free_field",
+          "title": "Người đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "holder_type",
+              "label": "Người đề nghị là",
+              "word_key": "holder_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Cá nhân",
+                "Tổ chức"
+              ]
+            },
+            {
+              "key": "organization",
+              "label": "Tên tổ chức (nếu là tổ chức)",
+              "word_key": "organization_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "name",
+              "label": "Họ tên người đại diện",
+              "word_key": "holder_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ / trụ sở",
+              "word_key": "holder_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "holder_phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "holder_identity",
+              "type": "cccd",
+              "required": false,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "holder_issue_date",
+              "type": "issue_date",
+              "required": false,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "issue_place",
+              "label": "Nơi cấp",
+              "word_key": "holder_issue_place",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "business_registration",
+              "label": "Giấy đăng ký kinh doanh (nếu có)",
+              "word_key": "business_registration",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "business_issue_date",
+              "label": "Ngày cấp đăng ký kinh doanh",
+              "word_key": "business_issue_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "business_issue_place",
+              "label": "Nơi cấp đăng ký kinh doanh",
+              "word_key": "business_issue_place",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "project",
+      "title": "Thông tin chuyển mục đích đất chuyên trồng lúa",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "project_info",
+          "instance_id": "project_info",
+          "block_key": "free_field",
+          "title": "Khu đất và khối lượng đất mặt",
+          "order": 1,
+          "fields": [
+            {
+              "key": "project_name",
+              "label": "Công trình / dự án",
+              "word_key": "project_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "rice_area",
+              "label": "Diện tích đất chuyên trồng lúa phải bóc tách (m²)",
+              "word_key": "rice_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "soil_depth",
+              "label": "Độ sâu tầng đất mặt bóc tách (m)",
+              "word_key": "soil_depth",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "soil_volume",
+              "label": "Khối lượng đất mặt phải bóc tách (m³)",
+              "word_key": "soil_volume",
+              "type": "number",
+              "required": true,
+              "help_text": "Có thể đối chiếu theo công thức: diện tích phải bóc tách × độ sâu tầng đất mặt."
+            },
+            {
+              "key": "use_purpose",
+              "label": "Mục đích sử dụng tầng đất mặt",
+              "word_key": "soil_use_purpose",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "commitment",
+              "label": "Cam kết khác (nếu có)",
+              "word_key": "other_commitment",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "destinations",
+      "title": "Địa điểm sử dụng đất mặt",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "uses",
+          "instance_id": "uses",
+          "block_key": "repeat_group",
+          "title": "Thêm từng vị trí sử dụng trong / ngoài dự án",
+          "order": 1,
+          "fields": [
+            {
+              "key": "location_type",
+              "label": "Vị trí sử dụng",
+              "word_key": "use_location_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Trong khuôn viên dự án",
+                "Ngoài khuôn viên dự án"
+              ]
+            },
+            {
+              "key": "location",
+              "label": "Địa điểm / vị trí cụ thể",
+              "word_key": "use_location",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích sử dụng (m²)",
+              "word_key": "use_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "volume",
+              "label": "Khối lượng đất mặt sử dụng (m³)",
+              "word_key": "use_volume",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng",
+              "word_key": "use_purpose",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Ngày lập và người ký",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Thông tin cuối phương án",
+          "order": 1,
+          "fields": [
+            {
+              "key": "serial",
+              "label": "Số phương án (nếu có)",
+              "word_key": "plan_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người ký",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc."
+            },
+            {
+              "key": "position",
+              "label": "Chức vụ người ký (nếu có)",
+              "word_key": "signer_position",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "uses",
+      "title": "Vị trí sử dụng đất mặt",
+      "fields": [
+        {
+          "key": "location_type",
+          "label": "Vị trí sử dụng",
+          "word_key": "use_location_type",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Trong khuôn viên dự án",
+            "Ngoài khuôn viên dự án"
+          ]
+        },
+        {
+          "key": "location",
+          "label": "Địa điểm / vị trí cụ thể",
+          "word_key": "use_location",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "area",
+          "label": "Diện tích sử dụng (m²)",
+          "word_key": "use_area",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "volume",
+          "label": "Khối lượng đất mặt sử dụng (m³)",
+          "word_key": "use_volume",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "purpose",
+          "label": "Mục đích sử dụng",
+          "word_key": "use_purpose",
+          "type": "textarea",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

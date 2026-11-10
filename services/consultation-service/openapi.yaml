@@ -18,13 +18,13 @@ servers:
 
 # OpenAPI 3.0 không mô tả được WebSocket; phần này ghi lại quy ước ở API_GUIDELINES mục 10.
 x-websocket:
-  x-status: planned
+  x-status: implemented
   url: ws://localhost:8080/ws/consultations/{channel}
   channels:
     lobby: Hàng chờ, chỉ luật sư được hành nghề (`can_practice`). Nhận yêu cầu mới, yêu cầu vừa có người nhận và yêu cầu bị xóa.
     me: Mọi user đã đăng nhập. Nhận sự kiện của các cuộc tư vấn của mình để hiện chấm đỏ.
     "{consultation_id}": Box chat riêng, chỉ người tạo và luật sư của cuộc tư vấn.
-  auth: 'Tin đầu tiên sau khi kết nối: {"type": "auth", "data": {"token": "<JWT>"}}. Quá 5 giây không gửi thì server đóng kết nối.'
+  auth: 'Trình duyệt dùng cookie HttpOnly `access_token`, Origin phải nằm trong `CONSULTATION_ALLOWED_ORIGINS`, không cần gửi tin xác thực. Client không có cookie (Postman, test) gửi tin đầu tiên {"type": "auth", "data": {"token": "<JWT>"}}; quá 5 giây thì server đóng kết nối.'
   receive_only: WebSocket chỉ để nhận. Gửi tin nhắn bằng REST `POST /consultations/{consultation_id}/messages`.
   events:
     consultation.created: "Kênh lobby. data: Consultation"
@@ -108,7 +108,7 @@ paths:
         Có `agent_session_id` thì sau khi commit chạy nền việc tạo tóm tắt AI (xem `GET /consultations/{consultation_id}/summary`);
         user không phải chờ, tạo tóm tắt lỗi cũng không làm hỏng yêu cầu.
         Không tự retry API này (API_GUIDELINES mục 8).
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -250,7 +250,7 @@ paths:
         `citizen` thấy cuộc mình tạo. `lawyer` thấy cuộc mình nhận và cả cuộc mình tạo (luật sư cũng dùng được tính
         năng của người dân). `admin` nhận 403.
         Không trả cuộc đã xóa nội dung (`purged_at` có giá trị). Sắp xếp theo `updated_at` giảm dần (mới hoạt động nhất lên trước).
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -326,7 +326,7 @@ paths:
         Chỉ người tạo và luật sư của cuộc tư vấn xem được. Riêng cuộc `waiting` thì luật sư được hành nghề
         (`can_practice`, kiểm tra như `GET /consultations/lobby`) cũng xem được.
         `admin`, người khác và cuộc đã xóa nội dung (`purged_at` có giá trị) nhận 404.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -388,7 +388,7 @@ paths:
         Người tạo hoặc luật sư của cuộc tư vấn đóng khi tư vấn xong; chỉ đóng được khi `in_progress`.
         Chuyển sang `closed` với `close_reason` = `completed`, `closed_by` = người gọi.
         Đóng rồi vẫn xem được lịch sử (đến khi bị xóa nội dung) nhưng không nhắn thêm được. Đẩy `consultation.closed`.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -424,9 +424,10 @@ paths:
         User xóa hội thoại AI sau khi gửi không thu hồi bản đã lưu; bản này chỉ bị xóa khi job dọn sau 10 ngày.
         `agent_session_id` rỗng, hoặc chưa có bản lưu mà Agent báo không còn hội thoại, thì 404 `SUMMARY_NOT_AVAILABLE`.
 
-        **Phụ thuộc:** Agent Service chưa có API tóm tắt. API này nhận `user_id` (người tạo yêu cầu) để Agent kiểm tra
-        hội thoại đúng của người đó, và `until` để chỉ tóm tắt tin trước mốc này; không đúng chủ thì Agent trả 404.
-      x-status: planned
+        **Phụ thuộc:** Agent Service `POST /internal/v1/agent/conversations/{id}/summary` (body `user_id`, `until`;
+        timeout 60 giây). Agent trả 404 `CONVERSATION_NOT_FOUND` (không có / không đúng chủ) hoặc 422 `CONVERSATION_EMPTY`
+        (chưa có tin nào trước `until`) thì đều thành `SUMMARY_NOT_AVAILABLE`.
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -483,7 +484,7 @@ paths:
 
         Trả mọi cuộc `waiting` chưa hết hạn (`created_at` trong 10 ngày), trừ yêu cầu của chính luật sư.
         Sắp xếp theo `created_at` tăng dần (cũ nhất lên trước). Thay đổi đến qua WebSocket kênh `lobby`.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -525,7 +526,7 @@ paths:
            WHERE id = ? AND status = 'waiting'`. Không có dòng nào đổi thì 409 `CONSULTATION_ALREADY_ACCEPTED`.
         4. Xóa các yêu cầu `waiting` khác của citizen.
         5. Sau khi commit, đẩy `consultation.accepted` và `consultation.removed`.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -595,7 +596,7 @@ paths:
         - Mở box chat: không truyền `after`/`before`, nhận `limit` tin mới nhất.
         - Cuộn lên xem tin cũ: `before=<id tin cũ nhất đang có>`.
         - Kết nối lại WebSocket: `after=<id tin cuối>` để lấy tin bị lỡ.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -647,7 +648,7 @@ paths:
         luật sư bị khóa mất quyền ngay. Lưu tin và cập nhật `last_activity_at` của cuộc tư vấn trong cùng transaction.
         Lưu xong đẩy `message.created` lên kênh của cuộc tư vấn và kênh `me` của người nhận.
         Không tự retry API này (API_GUIDELINES mục 8).
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -686,7 +687,7 @@ paths:
         Người tạo hoặc luật sư của cuộc tư vấn đánh dấu đã đọc mọi tin của bên kia (`is_read = true` cho tin có
         `sender_id` khác người gọi). Dùng được khi `in_progress` hoặc `closed` chưa xóa nội dung; người khác và cuộc
         đã xóa nội dung nhận 404. Gọi lại nhiều lần vẫn trả 200.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -856,7 +857,7 @@ paths:
         Điều khoản phải nói rõ: tư vấn miễn phí, hệ thống không quản lý nội dung tư vấn, luật sư xem được bản tóm tắt AI
         của đoạn chat trước lúc gửi yêu cầu (không xem được lịch sử chat với AI), xóa hội thoại AI không thu hồi bản tóm tắt
         đã gửi, nội dung chat bị xóa sau 10 ngày từ tin nhắn cuối.
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -884,7 +885,7 @@ paths:
       description: |
         Mọi user đã đăng nhập. `terms_version` phải đúng phiên bản hiện hành, sai thì 422.
         Gọi lại nhiều lần vẫn trả 200 (giữ `accepted_at` lần đầu).
-      x-status: planned
+      x-status: implemented
       security:
         - BearerAuth: []
       parameters:
@@ -1367,9 +1368,10 @@ components:
           description: "`conversations.id` của Agent Service khi đi từ chatbox AI"
         status: { $ref: "#/components/schemas/ConsultationStatus" }
         close_reason:
-          allOf:
-            - $ref: "#/components/schemas/CloseReason"
           nullable: true
+          anyOf:
+            - $ref: "#/components/schemas/CloseReason"
+            - $ref: "#/components/schemas/NoError"
           description: Chỉ có khi `status` = `closed`
         accepted_at: { type: string, format: date-time, nullable: true }
         closed_by:
@@ -1379,9 +1381,10 @@ components:
           description: Người đóng; `null` khi hệ thống tự đóng
         closed_at: { type: string, format: date-time, nullable: true }
         last_message:
-          allOf:
-            - $ref: "#/components/schemas/Message"
           nullable: true
+          anyOf:
+            - $ref: "#/components/schemas/Message"
+            - $ref: "#/components/schemas/NoError"
           description: Tin gần nhất, để hiện ở danh sách
         unread_count:
           type: integer

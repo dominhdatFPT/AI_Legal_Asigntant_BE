@@ -5,11 +5,33 @@ import time
 from dataclasses import dataclass, field
 
 from app.core.config import get_settings
-from app.services import llm_client, prompts
+from app.services import cache, llm_client, prompts
 
 logger = logging.getLogger(__name__)
 
 BYPASS_HEADER = "[CHẾ ĐỘ TEST - KHÔNG QUA LLM] Các đoạn luật rag-service tìm được:"
+
+# Cache câu trả lời cuối của nhánh hỏi đáp (qa_agent.prepare), tạo lần đầu cần dùng theo cấu hình. Theo từng process, mất khi restart
+_answer_cache: cache.TTLCache | None = None
+
+
+def _get_answer_cache() -> cache.TTLCache:
+    global _answer_cache
+    if _answer_cache is None:
+        s = get_settings()
+        _answer_cache = cache.TTLCache(s.answer_cache_max_items, s.answer_cache_ttl_seconds)
+    return _answer_cache
+
+
+def get_cached_answer(key) -> dict | None:
+    """{"content", "metadata"} đã lưu (bản sao) hoặc None. Nơi gọi tự bắt lỗi."""
+    return _get_answer_cache().get(key)
+
+
+def clear_answer_cache() -> None:
+    """Bỏ cache để lần dùng sau tạo lại theo cấu hình hiện tại (cho test)."""
+    global _answer_cache
+    _answer_cache = None
 
 
 @dataclass
@@ -28,6 +50,7 @@ class LLMCall:
     graded_done: float | None = None  # chỉ có khi đã chạy bước chấm độ liên quan
     llm_options: dict = field(default_factory=dict)
     metadata_extra: dict = field(default_factory=dict)
+    cache_key: object | None = None  # có giá trị thì `result` lưu kết quả vào cache câu trả lời (chỉ qa_agent đặt)
 
     async def run(self) -> dict:
         answer, tokens, model_name = await llm_client.generate(
@@ -52,7 +75,7 @@ class LLMCall:
                 llm_done - self.graded_done, llm_done - self.started,
                 model_name, tokens, len(self.chunks), len(self.history),
             )
-        return {
+        result = {
             "content": answer,
             "metadata": {
                 "rag_chunk_ids": [c["id"] for c in self.chunks if c.get("id")],
@@ -61,6 +84,12 @@ class LLMCall:
                 **self.metadata_extra,
             },
         }
+        if self.cache_key is not None and answer and answer.strip():
+            try:
+                _get_answer_cache().set(self.cache_key, result)
+            except Exception:
+                logger.warning("answer cache lỗi khi ghi, bỏ qua request_id=%s", self.request_id, exc_info=True)
+        return result
 
 
 async def respond(

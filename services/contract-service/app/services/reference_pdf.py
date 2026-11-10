@@ -26,7 +26,7 @@ def prepare_reference_pdf(data, filename, name, domain, classification):
             for page in document:
                 if page.rect.is_empty or page.rect.is_infinite:
                     raise ValueError('Invalid page size')
-                scale = min(2, 1600 / max(page.rect.width, page.rect.height))
+                scale = min(1.5, 1200 / max(page.rect.width, page.rect.height))
                 pixmap = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
                 image = pixmap.tobytes('png')
                 total_bytes += len(image)

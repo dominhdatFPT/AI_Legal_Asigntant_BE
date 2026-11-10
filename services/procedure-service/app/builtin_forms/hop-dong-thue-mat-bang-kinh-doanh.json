@@ -1,0 +1,425 @@
+{
+  "schema_version": 1,
+  "name": "Hợp đồng cho thuê mặt bằng kinh doanh",
+  "code": "",
+  "procedure_code": "DN-006",
+  "domain": "doanh_nghiep",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Hợp đồng cho thuê mặt bằng kinh doanh"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "agreement",
+      "title": "Ngày, nơi ký và các bên",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "agreement_info",
+          "instance_id": "agreement_info",
+          "block_key": "free_field",
+          "title": "Thông tin hợp đồng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "number",
+              "label": "Số hợp đồng",
+              "word_key": "number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày ký",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "signing_place",
+              "label": "Nơi ký",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "lessors",
+          "instance_id": "lessors",
+          "block_key": "repeat_group",
+          "title": "Bên cho thuê (có thể thêm nhiều người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên / tên tổ chức cho thuê",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh (nếu là cá nhân)",
+              "word_key": "birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "CCCD / mã số doanh nghiệp",
+              "word_key": "identity",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "representative",
+              "label": "Người đại diện (nếu là tổ chức)",
+              "word_key": "representative",
+              "type": "text",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "lessees",
+          "instance_id": "lessees",
+          "block_key": "repeat_group",
+          "title": "Bên thuê (có thể thêm nhiều người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên / tên doanh nghiệp thuê",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh người ký (nếu là cá nhân)",
+              "word_key": "birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "CCCD / mã số doanh nghiệp",
+              "word_key": "identity",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "representative",
+              "label": "Người đại diện doanh nghiệp (nếu có)",
+              "word_key": "representative",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "premises",
+      "title": "Mặt bằng cho thuê",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "premises_info",
+          "instance_id": "premises_info",
+          "block_key": "free_field",
+          "title": "Thông tin mặt bằng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "address",
+              "label": "Địa chỉ mặt bằng",
+              "word_key": "address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "condition",
+              "label": "Hiện trạng bàn giao",
+              "word_key": "condition",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "ownership_basis",
+              "label": "Giấy tờ chứng minh quyền cho thuê",
+              "word_key": "ownership_basis",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "business_purpose",
+              "label": "Mục đích kinh doanh",
+              "word_key": "business_purpose",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "payment",
+      "title": "Thời hạn và thanh toán",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "payment_info",
+          "instance_id": "payment_info",
+          "block_key": "free_field",
+          "title": "Giá, cọc, thanh toán",
+          "order": 1,
+          "fields": [
+            {
+              "key": "start_date",
+              "label": "Ngày bắt đầu thuê",
+              "word_key": "start_date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "end_date",
+              "label": "Ngày kết thúc thuê",
+              "word_key": "end_date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "monthly_rent",
+              "label": "Giá thuê mỗi tháng (đồng)",
+              "word_key": "monthly_rent",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "rent_in_words",
+              "label": "Giá thuê bằng chữ",
+              "word_key": "rent_in_words",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "payment_method",
+              "label": "Phương thức và ngày thanh toán",
+              "word_key": "payment_method",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "deposit",
+              "label": "Tiền đặt cọc (đồng)",
+              "word_key": "deposit",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "deposit_return",
+              "label": "Điều kiện hoàn trả tiền cọc",
+              "word_key": "deposit_return",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "utilities",
+              "label": "Điện, nước và chi phí khác",
+              "word_key": "utilities",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "terms",
+      "title": "Cam kết và chữ ký",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "terms_info",
+          "instance_id": "terms_info",
+          "block_key": "free_field",
+          "title": "Điều khoản",
+          "order": 1,
+          "fields": [
+            {
+              "key": "lessor_obligations",
+              "label": "Quyền và nghĩa vụ bên cho thuê",
+              "word_key": "lessor_obligations",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "lessee_obligations",
+              "label": "Quyền và nghĩa vụ bên thuê",
+              "word_key": "lessee_obligations",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "termination_terms",
+              "label": "Chấm dứt hợp đồng / báo trước",
+              "word_key": "termination_terms",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "dispute_terms",
+              "label": "Giải quyết tranh chấp",
+              "word_key": "dispute_terms",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "copy_count",
+              "label": "Số bản hợp đồng",
+              "word_key": "copy_count",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "lessors",
+      "title": "lessors",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên / tên tổ chức cho thuê",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh (nếu là cá nhân)",
+          "word_key": "birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "CCCD / mã số doanh nghiệp",
+          "word_key": "identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "representative",
+          "label": "Người đại diện (nếu là tổ chức)",
+          "word_key": "representative",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "lessees",
+      "title": "lessees",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên / tên doanh nghiệp thuê",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh người ký (nếu là cá nhân)",
+          "word_key": "birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "CCCD / mã số doanh nghiệp",
+          "word_key": "identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "representative",
+          "label": "Người đại diện doanh nghiệp (nếu có)",
+          "word_key": "representative",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

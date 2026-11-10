@@ -42,10 +42,13 @@ async def grade(
     if not chunks:
         return []
     settings = get_settings()
+    # Model phụ riêng (chỉ OpenRouter); rỗng thì không truyền, dùng OPENROUTER_MODEL như cũ
+    aux_model = {"model": settings.openrouter_aux_model.strip()} if settings.openrouter_aux_model.strip() else {}
     try:
         text, tokens, model_name = await llm_client.generate(
             prompts.build_relevance_prompt(chunks), [], user_content,
             max_output_tokens=MAX_OUTPUT_TOKENS, timeout_seconds=settings.relevance_timeout_seconds, max_retries=0,
+            reasoning_max_tokens=settings.llm_aux_reasoning_max_tokens, **aux_model,
         )
     except llm_client.LLMError as e:
         logger.warning("agent chấm liên quan lỗi, giữ nguyên các đoạn luật request_id=%s: %s", request_id, e)

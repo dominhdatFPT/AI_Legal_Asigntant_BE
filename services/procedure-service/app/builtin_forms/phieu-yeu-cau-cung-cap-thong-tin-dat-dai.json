@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "name": "Phiếu yêu cầu cung cấp thông tin, dữ liệu đất đai và trích lục bản đồ địa chính",
+  "code": "",
+  "procedure_code": "DD-012",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Phiếu yêu cầu cung cấp thông tin, dữ liệu đất đai và trích lục bản đồ địa chính"
+  ],
+  "sections": [
+    {
+      "id": "requester",
+      "title": "Thông tin tổ chức, cá nhân yêu cầu",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "requester_info",
+          "instance_id": "requester_info",
+          "block_key": "free_field",
+          "title": "Người yêu cầu",
+          "order": 1,
+          "fields": [
+            {
+              "key": "requester_type",
+              "label": "Loại người yêu cầu",
+              "word_key": "requester_type",
+              "type": "select",
+              "required": true,
+              "help_text": "Chọn cá nhân hoặc tổ chức để hiện đúng nhóm thông tin.",
+              "options": [
+                "Cá nhân",
+                "Tổ chức"
+              ]
+            },
+            {
+              "key": "person_name",
+              "label": "Họ và tên cá nhân",
+              "word_key": "person_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Cá nhân"
+              }
+            },
+            {
+              "key": "person_identity",
+              "label": "Số định danh cá nhân",
+              "word_key": "person_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Cá nhân"
+              }
+            },
+            {
+              "key": "person_address",
+              "label": "Địa chỉ cá nhân",
+              "word_key": "person_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy địa chỉ thường trú; không thể sửa trong đơn.",
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Cá nhân"
+              }
+            },
+            {
+              "key": "organization_name",
+              "label": "Tên tổ chức",
+              "word_key": "organization_name",
+              "type": "text",
+              "required": true,
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Tổ chức"
+              }
+            },
+            {
+              "key": "organization_tax_code",
+              "label": "Mã số thuế tổ chức",
+              "word_key": "organization_tax_code",
+              "type": "text",
+              "required": true,
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Tổ chức"
+              }
+            },
+            {
+              "key": "organization_address",
+              "label": "Địa chỉ trụ sở tổ chức",
+              "word_key": "organization_address",
+              "type": "textarea",
+              "required": true,
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Tổ chức"
+              }
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "contact_phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone",
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "title": "Thông tin cần cung cấp",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "data_info",
+          "instance_id": "data_info",
+          "block_key": "free_field",
+          "title": "Danh mục dữ liệu và mục đích sử dụng",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel_info",
+              "label": "Thông tin về thửa đất (diện tích, tọa độ, ranh giới, quy hoạch)",
+              "word_key": "data_parcel_info",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "cadastral_map",
+              "label": "Trích lục bản đồ địa chính thửa đất",
+              "word_key": "data_cadastral_map",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "land_history",
+              "label": "Lịch sử biến động quyền sử dụng đất, tình trạng thế chấp",
+              "word_key": "data_land_history",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng dữ liệu",
+              "word_key": "data_purpose",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "result_method",
+              "label": "Hình thức nhận kết quả",
+              "word_key": "result_method",
+              "type": "select",
+              "required": true,
+              "help_text": "Chọn một hình thức nhận kết quả.",
+              "options": [
+                "Nhận trực tiếp",
+                "Qua cổng dịch vụ công trực tuyến"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Ngày lập phiếu và người ký",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Người làm đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "place",
+              "label": "Địa điểm lập phiếu",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "person_signer",
+              "label": "Họ tên người ký (cá nhân)",
+              "word_key": "person_signer",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Cá nhân"
+              }
+            },
+            {
+              "key": "organization_signer",
+              "label": "Người đại diện ký tên (tổ chức)",
+              "word_key": "organization_signer",
+              "type": "text",
+              "required": true,
+              "condition": {
+                "field": "requester_info.requester_type",
+                "equals": "Tổ chức"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

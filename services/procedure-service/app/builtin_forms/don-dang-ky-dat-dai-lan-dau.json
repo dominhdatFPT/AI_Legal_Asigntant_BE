@@ -1,0 +1,753 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đăng ký đất đai, tài sản gắn liền với đất",
+  "code": "M15",
+  "procedure_code": "DD-004",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đăng ký đất đai, cấp Giấy chứng nhận lần đầu (Mẫu 04/ĐK - Bản Word)",
+    "Đơn đăng ký đất đai, cấp Giấy chứng nhận lần đầu (Mẫu 04/ĐK - Bản PDF gốc)"
+  ],
+  "sections": [
+    {
+      "id": "owner",
+      "title": "1. Người sử dụng đất / chủ sở hữu",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "owner_info",
+          "instance_id": "owner_info",
+          "block_key": "free_field",
+          "title": "Thông tin người đứng đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên",
+              "word_key": "owner_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "owner_birth_year",
+              "type": "number",
+              "required": true,
+              "autofill": "profile.birth_year",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "identity",
+              "label": "Số định danh / giấy tờ nhân thân",
+              "word_key": "owner_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "tax_code",
+              "label": "Mã số thuế (nếu có)",
+              "word_key": "owner_tax_code",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú / trụ sở",
+              "word_key": "owner_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại liên hệ",
+              "word_key": "owner_phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Hộp thư điện tử",
+              "word_key": "owner_email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        },
+        {
+          "id": "co_users",
+          "instance_id": "co_users",
+          "block_key": "repeat_group",
+          "title": "Người cùng sử dụng / sở hữu (nếu có)",
+          "order": 2,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người cùng sử dụng / sở hữu",
+              "word_key": "co_user_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "identity",
+              "label": "Số giấy tờ nhân thân",
+              "word_key": "co_user_identity",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "co_user_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "tax_code",
+              "label": "Mã số thuế (nếu có)",
+              "word_key": "co_user_tax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "share",
+              "label": "Diện tích / tỷ lệ sử dụng, sở hữu",
+              "word_key": "co_user_share",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "relation",
+              "label": "Quan hệ / ghi chú",
+              "word_key": "co_user_relation",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "parcel",
+      "title": "2. Thửa đất đăng ký",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "parcel_info",
+          "instance_id": "parcel_info",
+          "block_key": "free_field",
+          "title": "Thông tin thửa đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel_number",
+              "label": "Số thửa (nếu có)",
+              "word_key": "parcel_number_main",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ (nếu có)",
+              "word_key": "map_sheet_main",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thửa đất",
+              "word_key": "land_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Tổng diện tích (m²)",
+              "word_key": "land_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "shared_area",
+              "label": "Diện tích sử dụng chung (m²)",
+              "word_key": "land_shared_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "private_area",
+              "label": "Diện tích sử dụng riêng (m²)",
+              "word_key": "land_private_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng",
+              "word_key": "land_purpose",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "use_start_date",
+              "label": "Thời điểm bắt đầu sử dụng",
+              "word_key": "use_start_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "requested_term",
+              "label": "Thời hạn đề nghị sử dụng đất",
+              "word_key": "requested_term",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "origin",
+              "label": "Nguồn gốc sử dụng đất",
+              "word_key": "land_origin",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "adjacent_rights",
+              "label": "Quyền / hạn chế đối với thửa đất liền kề (nếu có)",
+              "word_key": "adjacent_rights",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "parcels_15b",
+          "instance_id": "parcels_15b",
+          "block_key": "repeat_group",
+          "title": "Danh sách nhiều thửa đất nông nghiệp (Mẫu 15b, nếu áp dụng)",
+          "order": 2,
+          "fields": [
+            {
+              "key": "parcel_number",
+              "label": "Số thửa",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ",
+              "word_key": "map_sheet",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thửa đất",
+              "word_key": "parcel_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "parcel_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích sử dụng",
+              "word_key": "parcel_purpose",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "origin",
+              "label": "Nguồn gốc sử dụng",
+              "word_key": "parcel_origin",
+              "type": "text",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "property",
+      "title": "3. Nhà ở, công trình xây dựng (nếu đăng ký quyền sở hữu)",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "building_info",
+          "instance_id": "building_info",
+          "block_key": "free_field",
+          "title": "Thông tin nhà ở / công trình",
+          "order": 1,
+          "fields": [
+            {
+              "key": "type",
+              "label": "Loại nhà ở / công trình",
+              "word_key": "building_type_main",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "construction_area",
+              "label": "Diện tích xây dựng (m²)",
+              "word_key": "building_construction_area_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "floor_area",
+              "label": "Diện tích sàn / sử dụng (m²)",
+              "word_key": "building_floor_area_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "shared_area",
+              "label": "Diện tích sở hữu chung (m²)",
+              "word_key": "building_shared_area_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "private_area",
+              "label": "Diện tích sở hữu riêng (m²)",
+              "word_key": "building_private_area_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "floors",
+              "label": "Tổng số tầng",
+              "word_key": "building_floors_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "aboveground_floors",
+              "label": "Số tầng nổi",
+              "word_key": "building_aboveground_floors_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "basement_floors",
+              "label": "Số tầng hầm",
+              "word_key": "building_basement_floors_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "origin",
+              "label": "Nguồn gốc hình thành",
+              "word_key": "building_origin_main",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "completion_year",
+              "label": "Năm hoàn thành xây dựng",
+              "word_key": "building_completion_year_main",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "ownership_term",
+              "label": "Thời hạn sở hữu đến",
+              "word_key": "building_ownership_term_main",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "responsibility",
+              "label": "Cam kết chịu trách nhiệm (trường hợp thuộc diện phải cam kết)",
+              "word_key": "building_responsibility",
+              "type": "checkbox",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "buildings_15c",
+          "instance_id": "buildings_15c",
+          "block_key": "repeat_group",
+          "title": "Danh sách nhiều nhà ở / công trình (Mẫu 15c, nếu áp dụng)",
+          "order": 2,
+          "fields": [
+            {
+              "key": "type",
+              "label": "Loại nhà ở / công trình",
+              "word_key": "building_type",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "construction_area",
+              "label": "Diện tích xây dựng (m²)",
+              "word_key": "building_construction_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "floor_area",
+              "label": "Diện tích sàn / sử dụng (m²)",
+              "word_key": "building_floor_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "shared_area",
+              "label": "Diện tích sở hữu chung (m²)",
+              "word_key": "building_shared_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "private_area",
+              "label": "Diện tích sở hữu riêng (m²)",
+              "word_key": "building_private_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "floors",
+              "label": "Tổng số tầng",
+              "word_key": "building_floors",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "aboveground_floors",
+              "label": "Số tầng nổi",
+              "word_key": "building_aboveground_floors",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "basement_floors",
+              "label": "Số tầng hầm",
+              "word_key": "building_basement_floors",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "origin",
+              "label": "Nguồn gốc hình thành",
+              "word_key": "building_origin",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "completion_year",
+              "label": "Năm hoàn thành xây dựng",
+              "word_key": "building_completion_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "ownership_term",
+              "label": "Thời hạn sở hữu đến",
+              "word_key": "building_ownership_term",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "title": "4–6. Đề nghị, miễn giảm và giấy tờ kèm theo",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "request_info",
+          "instance_id": "request_info",
+          "block_key": "free_field",
+          "title": "Nội dung đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "register_land",
+              "label": "Đề nghị đăng ký đất đai, tài sản gắn liền với đất",
+              "word_key": "request_register_land",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "issue_certificate",
+              "label": "Đề nghị cấp Giấy chứng nhận",
+              "word_key": "request_issue_certificate",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "defer_fee",
+              "label": "Đề nghị ghi nợ tiền sử dụng đất (đối với cá nhân)",
+              "word_key": "request_defer_fee",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "other_request",
+              "label": "Đề nghị khác",
+              "word_key": "request_other",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "fee_exemption",
+              "label": "Thông tin miễn, giảm nghĩa vụ tài chính (nếu có)",
+              "word_key": "fee_exemption",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ nộp kèm theo",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "recipient",
+              "label": "Cơ quan tiếp nhận",
+              "word_key": "recipient",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Người kê khai / người ký",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "co_users",
+      "title": "Người cùng sử dụng / sở hữu (Mẫu 15a)",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên người cùng sử dụng / sở hữu",
+          "word_key": "co_user_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "identity",
+          "label": "Số giấy tờ nhân thân",
+          "word_key": "co_user_identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "co_user_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "tax_code",
+          "label": "Mã số thuế (nếu có)",
+          "word_key": "co_user_tax",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "share",
+          "label": "Diện tích / tỷ lệ sử dụng, sở hữu",
+          "word_key": "co_user_share",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "relation",
+          "label": "Quan hệ / ghi chú",
+          "word_key": "co_user_relation",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "parcels_15b",
+      "title": "Nhiều thửa đất nông nghiệp (Mẫu 15b)",
+      "fields": [
+        {
+          "key": "parcel_number",
+          "label": "Số thửa",
+          "word_key": "parcel_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "map_sheet",
+          "label": "Tờ bản đồ",
+          "word_key": "map_sheet",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thửa đất",
+          "word_key": "parcel_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "area",
+          "label": "Diện tích (m²)",
+          "word_key": "parcel_area",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "purpose",
+          "label": "Mục đích sử dụng",
+          "word_key": "parcel_purpose",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "origin",
+          "label": "Nguồn gốc sử dụng",
+          "word_key": "parcel_origin",
+          "type": "text",
+          "required": true
+        }
+      ]
+    },
+    {
+      "key": "buildings_15c",
+      "title": "Nhiều nhà / công trình (Mẫu 15c)",
+      "fields": [
+        {
+          "key": "type",
+          "label": "Loại nhà ở / công trình",
+          "word_key": "building_type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "construction_area",
+          "label": "Diện tích xây dựng (m²)",
+          "word_key": "building_construction_area",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "floor_area",
+          "label": "Diện tích sàn / sử dụng (m²)",
+          "word_key": "building_floor_area",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "shared_area",
+          "label": "Diện tích sở hữu chung (m²)",
+          "word_key": "building_shared_area",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "private_area",
+          "label": "Diện tích sở hữu riêng (m²)",
+          "word_key": "building_private_area",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "floors",
+          "label": "Tổng số tầng",
+          "word_key": "building_floors",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "aboveground_floors",
+          "label": "Số tầng nổi",
+          "word_key": "building_aboveground_floors",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "basement_floors",
+          "label": "Số tầng hầm",
+          "word_key": "building_basement_floors",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "origin",
+          "label": "Nguồn gốc hình thành",
+          "word_key": "building_origin",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "completion_year",
+          "label": "Năm hoàn thành xây dựng",
+          "word_key": "building_completion_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "ownership_term",
+          "label": "Thời hạn sở hữu đến",
+          "word_key": "building_ownership_term",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

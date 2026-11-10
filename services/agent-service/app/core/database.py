@@ -23,10 +23,30 @@ def database_url() -> str:
     return url
 
 
+_POOL_OPTIONS = {
+    "pool_pre_ping": True,
+    "pool_size": 3,
+    "max_overflow": 2,
+    "pool_recycle": 300,
+    "connect_args": {
+        "prepare_threshold": None,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    },
+}
+
+
 def get_engine() -> Engine:
     global _engine, _session_factory
     if _engine is None:
-        _engine = create_engine(database_url(), pool_pre_ping=True)
+        url = database_url()
+        _engine = (
+            create_engine(url, pool_pre_ping=True)
+            if url.startswith("sqlite")
+            else create_engine(url, **_POOL_OPTIONS)
+        )
         _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
 

@@ -39,6 +39,16 @@ def reset_rag_breaker():
     rag_client._fails, rag_client._open_until = 0, 0.0
 
 
+@pytest.fixture(autouse=True)
+def reset_answer_cache():
+    """Cache câu trả lời của responder giữ trạng thái ở cấp module: mỗi test bắt đầu và kết thúc với cache trống."""
+    from app.services import responder
+
+    responder.clear_answer_cache()
+    yield
+    responder.clear_answer_cache()
+
+
 @pytest.fixture
 def chunk():
     """Một chunk mẫu đúng hợp đồng rag-service (services/rag-service/openapi.yaml)."""

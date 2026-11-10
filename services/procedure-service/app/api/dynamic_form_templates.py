@@ -19,8 +19,11 @@ from app.repositories.dynamic_form_template_repository import DynamicFormTemplat
 
 logger = logging.getLogger(__name__)
 
-admin_router = APIRouter(prefix="/admin/form-templates", tags=["Dynamic Form Templates - Admin"])
-citizen_router = APIRouter(prefix="/form-templates", tags=["Dynamic Form Templates - Citizen"])
+# The local service already owns /admin/form-templates and /form-templates for
+# Word/PDF custom templates. Keep the DB-driven form API namespaced so both
+# implementations can coexist without route shadowing.
+admin_router = APIRouter(prefix="/admin/dynamic-form-templates", tags=["Dynamic Form Templates - Admin"])
+citizen_router = APIRouter(prefix="/dynamic-form-templates", tags=["Dynamic Form Templates - Citizen"])
 
 
 # ==============================================================================
@@ -207,12 +210,17 @@ def new_version_template(
 
 
 @admin_router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_template(
+async def delete_template(
     template_id: UUID,
     admin_user: CurrentUser = Depends(require_role("admin")),
 ):
-    """Xóa mềm mẫu đơn (ghi nhận deleted_at)."""
+    """Xóa mềm mẫu đơn (ghi nhận deleted_at) và phát event RabbitMQ."""
     DynamicFormTemplateRepository.soft_delete(str(template_id))
+    try:
+        from app.core.rabbitmq_procedure import procedure_mq
+        await procedure_mq.publish_form_template_deleted(str(template_id), str(admin_user.id))
+    except Exception:
+        pass
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

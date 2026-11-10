@@ -15,6 +15,13 @@ class SearchLimiter:
     async def check(self, user_id: str):
         async with self._lock:
             now = time.monotonic()
+            if len(self._requests) > 1000:
+                stale_users = [
+                    uid for uid, q in self._requests.items()
+                    if not q or (now - q[-1] >= 60)
+                ]
+                for uid in stale_users:
+                    self._requests.pop(uid, None)
             values = self._requests[user_id]
             while values and now - values[0] >= 60:
                 values.popleft()

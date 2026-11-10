@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "name": "Đơn yêu cầu đo đạc đất",
+  "code": "",
+  "procedure_code": "DD-002",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Mẫu đơn xin đo đạc lại đất phục vụ cấp đổi Giấy chứng nhận"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người yêu cầu",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người làm đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "birth_year",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.birth_year",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": true,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "permanent_address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "permanent_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "current_address",
+              "label": "Nơi ở hiện nay",
+              "word_key": "current_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.current_address",
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này."
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại liên hệ",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "land",
+      "title": "Thông tin đất và quan hệ với thửa đất",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "land_info",
+          "instance_id": "land_info",
+          "block_key": "free_field",
+          "title": "Thửa đất cần đo đạc",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel_number",
+              "label": "Số thửa đất cần đo đạc",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_number",
+              "label": "Số Giấy chứng nhận (nếu có)",
+              "word_key": "certificate_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "land_relation",
+              "label": "Quan hệ của người yêu cầu với thửa đất",
+              "word_key": "land_relation",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ví dụ: là người sử dụng đất theo Giấy chứng nhận số… do… cấp ngày…"
+            },
+            {
+              "key": "request_content",
+              "label": "Nội dung sự việc cần trình bày",
+              "word_key": "request_content",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "purpose",
+              "label": "Mục đích cần đo đạc / bảo vệ quyền lợi",
+              "word_key": "request_purpose",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "related_people",
+              "label": "Người có quyền lợi liên quan (nếu có)",
+              "word_key": "related_people",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Nơi nhận, tài liệu và người ký",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Thông tin lập đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "UBND và địa chính xã / phường tiếp nhận",
+              "word_key": "recipient_units",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "attachments",
+              "label": "Tài liệu gửi kèm",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người làm đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

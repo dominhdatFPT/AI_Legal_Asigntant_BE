@@ -1,0 +1,272 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đăng ký biến động đất đai, tài sản gắn liền với đất",
+  "code": "M18",
+  "procedure_code": "DD-001",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đăng ký biến động đất đai, tài sản gắn liền với đất (Mẫu số 18)",
+    "Đơn đăng ký biến động đất đai do chuyển nhượng (Mẫu 11/ĐK - Bản Word)",
+    "Đơn đăng ký biến động đất đai do chuyển nhượng (Mẫu 11/ĐK - Bản PDF gốc)"
+  ],
+  "sections": [
+    {
+      "id": "representative",
+      "title": "I. Người sử dụng đất / người đại diện",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "representative_info",
+          "instance_id": "representative_info",
+          "block_key": "free_field",
+          "title": "Thông tin người đại diện",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên người đại diện",
+              "word_key": "representative_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "representative_birth_year",
+              "type": "number",
+              "required": true,
+              "autofill": "profile.birth_year",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "representative_id",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "representative_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "tax_code",
+              "label": "Mã số thuế (nếu có)",
+              "word_key": "representative_tax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        },
+        {
+          "id": "people",
+          "instance_id": "people",
+          "block_key": "repeat_group",
+          "title": "Người cùng sử dụng / sở hữu khác (thêm từng người nếu có)",
+          "order": 2,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người cùng sử dụng / sở hữu",
+              "word_key": "person_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "person_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "tax_code",
+              "label": "Mã số thuế (nếu có)",
+              "word_key": "person_tax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Giấy tờ pháp nhân / số định danh",
+              "word_key": "person_identity",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "share",
+              "label": "Diện tích sử dụng / tỷ lệ sở hữu",
+              "word_key": "person_share",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "note",
+              "label": "Ghi chú / quan hệ với người đại diện",
+              "word_key": "person_note",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "change",
+      "title": "II–IV. Nội dung biến động và giấy tờ kèm theo",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "change_info",
+          "instance_id": "change_info",
+          "block_key": "free_field",
+          "title": "Nội dung đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "receiving_agency",
+              "label": "Văn phòng / Chi nhánh Văn phòng Đăng ký đất đai",
+              "word_key": "receiving_agency",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "change_content",
+              "label": "Nội dung biến động (ví dụ: nhận chuyển nhượng, tặng cho, cấp đổi)",
+              "word_key": "change_content",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "tax_exemption",
+              "label": "Đối tượng miễn / giảm nghĩa vụ tài chính (nếu có)",
+              "word_key": "tax_exemption",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "attached_documents",
+              "label": "Giấy tờ liên quan nộp kèm",
+              "word_key": "attached_documents",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer_name",
+              "label": "Người viết đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "people",
+      "title": "Người cùng sử dụng / sở hữu (Bảng 18a)",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên người cùng sử dụng / sở hữu",
+          "word_key": "person_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "person_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "tax_code",
+          "label": "Mã số thuế (nếu có)",
+          "word_key": "person_tax",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Giấy tờ pháp nhân / số định danh",
+          "word_key": "person_identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "share",
+          "label": "Diện tích sử dụng / tỷ lệ sở hữu",
+          "word_key": "person_share",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "note",
+          "label": "Ghi chú / quan hệ với người đại diện",
+          "word_key": "person_note",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

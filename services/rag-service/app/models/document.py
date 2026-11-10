@@ -29,6 +29,11 @@ class LegalDocument(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # true khi mọi chunk đã có embedding
     is_processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # pending (nháp, chưa duyệt) | processing (đang cắt + embed) | done (đã xong) | failed (lần duyệt gần nhất lỗi)
+    # Mặc định phía server là done: văn bản có sẵn và văn bản nạp bằng script đều là done (database/002_ingest_status.sql)
+    ingest_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="done")
+    # Thông báo lỗi ngắn (tối đa 500 ký tự) của lần duyệt thất bại gần nhất
+    ingest_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

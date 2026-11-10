@@ -19,10 +19,16 @@ _session_factory: sessionmaker[Session] | None = None
 # (thiếu pre_ping thì kết nối bị pooler cắt vẫn nằm trong pool, request lấy trúng sẽ treo rồi lỗi).
 _POOL_OPTIONS = {
     "pool_pre_ping": True,
-    "pool_size": 5,
-    "max_overflow": 10,
+    "pool_size": 3,
+    "max_overflow": 2,
     "pool_recycle": 300,
-    "connect_args": {"keepalives": 1, "keepalives_idle": 30, "keepalives_interval": 10, "keepalives_count": 3},
+    "connect_args": {
+        "prepare_threshold": None,
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 3,
+    },
 }
 
 

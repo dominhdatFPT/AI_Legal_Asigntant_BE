@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
-from app.api.v1 import internal
+from app.api.v1 import documents, internal
 from app.core.config import get_settings
 from app.core.database import get_engine
+from app.services.document_approval import recover_on_startup
 from app.services.embedding import get_embedder
 
 logging.basicConfig(level=logging.INFO)
@@ -37,11 +38,15 @@ def warmup() -> None:
 async def lifespan(_: FastAPI):
     if get_settings().warmup_on_startup:
         await run_in_threadpool(warmup)
+    if get_settings().rag_database_url:
+        # Giả định rag-service chạy MỘT tiến trình: văn bản còn processing lúc khởi động là việc nền đã bị ngắt
+        await run_in_threadpool(recover_on_startup)
     yield
 
 
 app = FastAPI(title="RAG Service", version="0.2.0", lifespan=lifespan)
 app.include_router(internal.router)
+app.include_router(documents.router)
 
 
 def _request_id(request: Request) -> str:

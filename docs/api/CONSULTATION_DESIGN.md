@@ -251,11 +251,41 @@ Bỏ: `WAITING_CONSULTATION_EXISTS`, `LAWYER_OFFLINE`.
 - **Khách chưa đăng nhập:** bản demo không có tóm tắt (Agent không lưu hội thoại của khách). Nếu sau này cần, phương án nhẹ
   là FE gửi kèm nội dung chat của khách trong yêu cầu; chưa kiểm tra FE làm được không.
 
+## 9b. Biên bản hội thoại user - luật sư
+
+Khác mục 9 (tóm tắt chat AI trước khi gửi yêu cầu). Đây là biên bản chính cuộc chat giữa user và luật sư, lưu **lâu dài**
+làm dữ liệu cho hệ thống (ví dụ báo admin). Tin gốc vẫn bị dọn sau 10 ngày (mục 7); biên bản thì không.
+
+- **Khi nào:** vòng quét 60 giây trong chính service. Cuộc `in_progress` im lặng từ 10 phút (`last_activity_at`), hoặc đã
+  `closed`, hoặc chưa tóm tắt đã đủ 50 tin thì gửi tối đa 50 tin chưa tóm tắt cho Agent. Khi đóng cuộc, một việc nền tóm tắt
+  nốt phần còn lại. WebSocket không dùng để canh giờ vì im lặng thì không có sự kiện nào.
+- **Mốc:** `consultations.summarized_until` = `created_at` của tin cuối đã tóm tắt. Mỗi đoạn một dòng
+  `consultation_summaries (window_start, window_end, summary jsonb, schema_version, prompt_version)`; không gộp đè bản cũ.
+  Ghi biên bản và đẩy mốc cùng một transaction, so sánh mốc cũ (`IS NOT DISTINCT FROM`): hai bản service tóm tắt trùng
+  một đoạn thì chỉ một bản được ghi (bản kia có thể tốn thêm một lần gọi LLM).
+- **Trước khi gửi:** Consultation che PII (`[CCCD]`, `[SĐT]`, `[EMAIL]`, `[STK]`). Agent không tự che.
+- **Sau khi nhận:** Consultation kiểm đúng schema, `source_ids` có thật, `has_substance=false` thì mọi danh sách rỗng; mỗi
+  phần tử `facts` / `legal_references` / `deadlines` được thêm `verified` = giá trị nguyên văn có xuất hiện trong tin nguồn
+  (sau chuẩn hóa NFC, khoảng trắng, hoa thường). Sai cấu trúc thì không lưu, tin giữ nguyên để thử lại; một cuộc lỗi 3 lần
+  thì dừng đến khi khởi động lại.
+- **Điều khoản:** nội dung chat riêng tư đi qua LLM và bản tóm tắt lưu lâu dài; điều khoản phải nói rõ.
+
+**Contract Agent cần làm** (chưa có bên Agent): `POST /internal/v1/agent/transcripts/summary`, header `X-Internal-Token`.
+
+```json
+{"consultation_id": "uuid", "window_start": "iso|null", "window_end": "iso",
+ "previous_summary": {"overview": "...", "legal_domains": ["dat_dai"]},
+ "messages": [{"id": "uuid", "role": "CITIZEN|LAWYER", "time": "iso", "content": "đã che PII"}]}
+```
+
+Trả `data: {"summary": {…theo schema JSON đã chốt, schema_version 1…}, "prompt_version": "v1"}`. Agent escape `< > &`
+trong `content` trước khi đưa vào thẻ `<msg>`, không tự lưu gì. Timeout phía Consultation: 150 giây (việc nền; đo thực tế ~40 giây cho 4 tin với model suy luận).
+
 ## 10. Phụ thuộc
 
 | Việc | Bên làm | Ghi chú |
 |---|---|---|
-| API tóm tắt hội thoại AI | Agent Service (Dũng) | Chưa có. Nhận `conversation_id`, `user_id` và `until`, kèm `X-Internal-Token`; chỉ tóm tắt tin có `created_at < until` (đã có index `(conversation_id, created_at)`); hội thoại không có hoặc không thuộc user thì trả 404. Timeout 60 giây (gọi LLM). Đường dẫn do Agent chốt |
+| API tóm tắt hội thoại AI | Agent Service (Dũng) | **Đã có:** `POST /internal/v1/agent/conversations/{id}/summary`, body `{user_id, until}` (có múi giờ), kèm `X-Internal-Token`, trả `data.summary`. Chỉ tóm tắt tin có `created_at < until`; không có / không thuộc user → 404 `CONVERSATION_NOT_FOUND`; chưa có tin nào trước `until` → 422 `CONVERSATION_EMPTY` (cả hai thành `SUMMARY_NOT_AVAILABLE` ở Consultation); lỗi LLM → 503 `AI_SERVICE_ERROR` (thành `AGENT_BAD_RESPONSE`). Timeout 60 giây. Consultation gọi qua `agent_client.py` |
 | Lịch sử chat AI của khách chưa đăng nhập | — | Đã chốt cho demo: không lưu, khách không có tóm tắt (`conversations.user_id` bắt buộc) |
 | Đóng cuộc khi khóa, hạ quyền, xóa tài khoản | User Service | Thay TODO trong `services/user-service/app/clients/consultation_client.py`: gọi `POST /internal/v1/consultations/close-by-user/{user_id}` (đường dẫn cũ ghi `close-by-lawyer`), body `{reason}`. Thêm trường hợp citizen bị khóa/xóa ở bước code |
 | Biến môi trường | Consultation Service, khi code | `CONSULTATION_TERMS_VERSION`, `INTERNAL_TOKEN`, `USER_SERVICE_URL`, `LAWYER_SERVICE_URL`, `AGENT_SERVICE_URL` trong `.env.example` |

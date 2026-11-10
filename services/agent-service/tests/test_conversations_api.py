@@ -710,3 +710,331 @@ def test_old_endpoint_unchanged_while_stream_exists(client, fake_agent):
 
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
     assert r.json()["data"]["assistant_message"]["content"] == AI_RESULT["content"]
+
+
+# ── Cache câu trả lời ở endpoint stream (ANSWER_CACHE_ENABLED) ────────────────
+
+def enable_answer_cache(monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("ANSWER_CACHE_ENABLED", "true")
+    get_settings.cache_clear()
+    responder.clear_answer_cache()
+
+
+def test_stream_answer_cache_second_conversation_gets_one_delta_without_llm(client, streaming, monkeypatch, chunk):
+    enable_answer_cache(monkeypatch)
+    first_id, second_id = create(client), create(client)
+
+    first = parse_sse(client.post(stream_url(first_id), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+    second = parse_sse(client.post(stream_url(second_id), json={"content": "  sang TÊN sổ đỏ cần gì ?"}).text)
+
+    assert [n for n, _ in first] == ["delta", "delta", "delta", "done"]
+    assert [n for n, _ in second] == ["delta", "done"]
+    assert second[0][1]["text"] == "".join(STREAM_PARTS)
+    assert len(streaming["stream_calls"]) == 1 and len(streaming["searches"]) == 1
+    done = second[-1][1]
+    assert done["assistant_message"]["content"] == "".join(STREAM_PARTS)
+    assert done["assistant_message"]["metadata"] == {
+        "rag_chunk_ids": [chunk["id"]], "model": "stream-model", "tokens_used": 0, "cache_hit": True,
+    }
+    # lượt trúng cache vẫn được lưu vào hội thoại mới như bình thường
+    saved = saved_messages(client, second_id)
+    assert [m["role"] for m in saved] == ["user", "assistant"] and saved[1] == done["assistant_message"]
+
+
+def test_stream_answer_cache_follow_up_in_same_conversation_is_not_cached(client, streaming, monkeypatch):
+    enable_answer_cache(monkeypatch)
+    conversation_id = create(client)
+
+    client.post(stream_url(conversation_id), json={"content": "Sang tên sổ đỏ cần gì?"})
+    again = parse_sse(client.post(stream_url(conversation_id), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+
+    assert [n for n, _ in again] == ["delta", "delta", "delta", "done"]  # có lịch sử: gọi LLM thật
+    assert len(streaming["stream_calls"]) == 2
+
+
+def test_stream_answer_cache_broken_stream_is_not_stored(client, streaming, monkeypatch):
+    enable_answer_cache(monkeypatch)
+    streaming["fail_after"] = 1
+    broken = parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+    assert broken[-1][0] == "error"
+    assert len(responder._get_answer_cache()) == 0
+
+    streaming["fail_after"] = None
+    ok = parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+
+    assert ok[-1][0] == "done" and len(streaming["stream_calls"]) == 2
+
+
+def test_send_message_and_stream_share_the_answer_cache(client, streaming, monkeypatch):
+    enable_answer_cache(monkeypatch)
+    parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+
+    r = client.post(f"{BASE}/{create(client)}/messages", json={"content": "sang tên sổ đỏ cần gì?"})
+
+    assert r.status_code == 200
+    message = r.json()["data"]["assistant_message"]
+    assert message["content"] == "".join(STREAM_PARTS)
+    assert message["metadata"]["cache_hit"] is True and message["metadata"]["tokens_used"] == 0
+    assert len(streaming["stream_calls"]) == 1 and len(streaming["searches"]) == 1
+
+
+def test_stream_answer_cache_off_by_default(client, streaming):
+    for _ in range(2):
+        parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
+    assert len(streaming["stream_calls"]) == 2 and len(streaming["searches"]) == 2
+
+
+# ---------- Kịch bản hội thoại: GET /conversations/{id}/transcript ----------
+
+def seed_messages(db, conversation_id, items, start=datetime(2026, 10, 7, 1, 0, 0, tzinfo=timezone.utc)):
+    """Ghi thẳng tin nhắn vào DB với thời gian tăng dần từng phút. items: [(role, content), ...]."""
+    from datetime import timedelta
+    from app.models import Message
+
+    db.add_all([
+        Message(conversation_id=uuid.UUID(str(conversation_id)), role=role, content=content,
+                created_at=start + timedelta(minutes=i))
+        for i, (role, content) in enumerate(items)
+    ])
+    db.commit()
+
+
+def transcript_url(conversation_id):
+    return f"{BASE}/{conversation_id}/transcript"
+
+
+TWO_TURNS = [
+    ("user", "Sang tên sổ đỏ cần gì?"),
+    ("assistant", "Theo Điều 188 Luật Đất đai 2024:\n- Hồ sơ\n- Lệ phí"),
+    ("user", "Còn thời hạn?"),
+    ("assistant", "Tối đa 20 ngày."),
+]
+
+
+def test_transcript_json_two_turns_in_order(client, db):
+    conversation_id = create(client, "Sang tên đất")
+    seed_messages(db, conversation_id, TWO_TURNS)
+
+    r = client.get(transcript_url(conversation_id), headers={"X-Request-ID": "req-t"})
+
+    assert r.status_code == 200
+    assert r.headers["X-Request-ID"] == "req-t"
+    body = r.json()
+    assert body["error"] is None and body["request_id"] == "req-t"
+    data = body["data"]
+    assert data["conversation_id"] == conversation_id and data["title"] == "Sang tên đất"
+    assert {"created_at", "updated_at"} <= data.keys()
+    assert data["total_messages"] == 4 and data["truncated"] is False
+    assert [t["turn"] for t in data["turns"]] == [1, 2]
+    assert data["turns"][0]["user"]["content"] == "Sang tên sổ đỏ cần gì?"
+    assert data["turns"][0]["assistant"]["content"] == "Theo Điều 188 Luật Đất đai 2024:\n- Hồ sơ\n- Lệ phí"
+    assert data["turns"][1]["user"]["content"] == "Còn thời hạn?"
+    assert data["turns"][1]["assistant"]["content"] == "Tối đa 20 ngày."
+    assert data["turns"][0]["user"]["created_at"] < data["turns"][0]["assistant"]["created_at"] \
+        < data["turns"][1]["user"]["created_at"]
+
+
+def test_transcript_not_limited_by_history_limit(client, db):
+    conversation_id = create(client)
+    items = [(role, f"{role} {i}") for i in range(1, 11) for role in ("user", "assistant")]  # 20 tin > HISTORY_LIMIT
+    seed_messages(db, conversation_id, items)
+
+    data = client.get(transcript_url(conversation_id)).json()["data"]
+
+    assert len(data["turns"]) == 10 and data["total_messages"] == 20
+    assert data["turns"][0]["user"]["content"] == "user 1" and data["turns"][-1]["assistant"]["content"] == "assistant 10"
+
+
+def test_transcript_same_created_at_orders_by_id(client, db):
+    """Bằng thời gian thì xếp theo id để thứ tự ổn định giữa các lần gọi."""
+    from app.models import Message
+
+    conversation_id = uuid.UUID(create(client))
+    same = datetime(2026, 10, 7, 1, 0, 0, tzinfo=timezone.utc)
+    low, high = uuid.UUID(int=1), uuid.UUID(int=2)
+    db.add_all([
+        Message(id=high, conversation_id=conversation_id, role="assistant", content="Trả lời", created_at=same),
+        Message(id=low, conversation_id=conversation_id, role="user", content="Hỏi", created_at=same),
+    ])
+    db.commit()
+
+    turns = client.get(transcript_url(conversation_id)).json()["data"]["turns"]
+
+    assert turns[0]["user"]["content"] == "Hỏi" and turns[0]["assistant"]["content"] == "Trả lời"
+
+
+def test_transcript_text_format(client, db):
+    conversation_id = create(client, "Sang tên đất")
+    seed_messages(db, conversation_id, TWO_TURNS)  # 01:00 UTC = 08:00 giờ Việt Nam
+
+    r = client.get(transcript_url(conversation_id), params={"format": "text"}, headers={"X-Request-ID": "req-t"})
+
+    assert r.status_code == 200
+    assert r.headers["content-type"].replace(" ", "").lower() == "text/plain;charset=utf-8"
+    assert r.headers["X-Request-ID"] == "req-t"
+    assert "content-disposition" not in r.headers
+    lines = r.text.split("\n")
+    assert lines[0] == "Hội thoại: Sang tên đất"
+    assert lines[1].startswith("Bắt đầu: ") and len(lines[1]) == len("Bắt đầu: 07/10/2026 08:00")
+    assert r.text.split("\n", 2)[2] == (
+        "\n"
+        "Lượt 1\n"
+        "  Người dùng: Sang tên sổ đỏ cần gì?\n"
+        "  Trợ lý: Theo Điều 188 Luật Đất đai 2024:\n- Hồ sơ\n- Lệ phí\n"
+        "\n"
+        "Lượt 2\n"
+        "  Người dùng: Còn thời hạn?\n"
+        "  Trợ lý: Tối đa 20 ngày.\n"
+    )
+
+
+def test_transcript_text_start_time_is_vietnam_time(client, db, monkeypatch):
+    conversation_id = create(client)
+    conversation = repo.get_conversation(db, uuid.UUID(conversation_id))
+    conversation.created_at = datetime(2026, 10, 7, 20, 5, tzinfo=timezone.utc)  # 20:05 UTC = 03:05 ngày 08/10 giờ VN
+    db.commit()
+
+    text = client.get(transcript_url(conversation_id), params={"format": "text"}).text
+
+    assert "Bắt đầu: 08/10/2026 03:05\n" in text
+
+
+def test_transcript_text_without_title(client):
+    text = client.get(transcript_url(create(client)), params={"format": "text"}).text
+
+    assert text.split("\n")[0] == "Hội thoại: (chưa có tiêu đề)"
+
+
+def test_transcript_rejects_bad_format(client):
+    r = client.get(transcript_url(create(client)), params={"format": "pdf"})
+
+    assert r.status_code == 422 and r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_transcript_download_adds_content_disposition(client, db):
+    conversation_id = create(client)
+    seed_messages(db, conversation_id, TWO_TURNS)
+
+    r = client.get(transcript_url(conversation_id), params={"format": "text", "download": "true"})
+
+    assert r.status_code == 200
+    assert r.headers["content-disposition"] == f'attachment; filename="kich-ban-{conversation_id[:8]}.txt"'
+    assert r.text.startswith("Hội thoại:")
+
+
+def test_transcript_download_false_or_json_has_no_content_disposition(client):
+    conversation_id = create(client)
+
+    off = client.get(transcript_url(conversation_id), params={"format": "text", "download": "false"})
+    as_json = client.get(transcript_url(conversation_id), params={"download": "true"})
+
+    assert "content-disposition" not in off.headers
+    assert as_json.status_code == 200 and "content-disposition" not in as_json.headers
+    assert as_json.json()["data"]["turns"] == []
+
+
+def test_transcript_never_contains_other_conversations_messages(client, db, current_user):
+    a = create(client, "Của A")
+    seed_messages(db, a, [("user", "Hỏi của A"), ("assistant", "Đáp của A")])
+    current_user["sub"] = USER_B
+    b = create(client, "Của B")
+    seed_messages(db, b, [("user", "Hỏi của B"), ("assistant", "Đáp của B"), ("user", "Hỏi thêm của B")])
+    current_user["sub"] = USER_A
+
+    json_data = client.get(transcript_url(a)).json()["data"]
+    text = client.get(transcript_url(a), params={"format": "text"}).text
+
+    assert json_data["total_messages"] == 2 and len(json_data["turns"]) == 1
+    assert json_data["turns"][0]["user"]["content"] == "Hỏi của A"
+    assert "của B" not in json.dumps(json_data, ensure_ascii=False) and "của B" not in text
+
+
+def test_transcript_of_other_users_conversation_is_forbidden(client, db, current_user):
+    conversation_id = create(client)
+    seed_messages(db, conversation_id, [("user", "Bí mật của A"), ("assistant", "Đáp")])
+    current_user["sub"] = USER_B
+
+    for params in ({}, {"format": "text"}, {"format": "text", "download": "true"}):
+        r = client.get(transcript_url(conversation_id), params=params)
+        assert r.status_code == 403
+        assert r.json()["error"]["code"] == "CONVERSATION_FORBIDDEN"
+        assert "Bí mật" not in r.text
+
+
+def test_transcript_unknown_conversation_is_404(client):
+    r = client.get(transcript_url(uuid.uuid4()))
+
+    assert r.status_code == 404 and r.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+
+
+def test_transcript_missing_token_returns_401(db):
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        r = TestClient(app).get(transcript_url(uuid.uuid4()))
+    finally:
+        app.dependency_overrides.clear()
+
+    assert r.status_code == 401 and r.json()["error"]["code"] == "UNAUTHORIZED"
+
+
+def test_transcript_empty_conversation(client):
+    conversation_id = create(client)
+
+    as_json = client.get(transcript_url(conversation_id))
+    as_text = client.get(transcript_url(conversation_id), params={"format": "text"})
+
+    assert as_json.status_code == 200
+    data = as_json.json()["data"]
+    assert data["turns"] == [] and data["total_messages"] == 0 and data["truncated"] is False
+    assert as_text.status_code == 200 and as_text.text.startswith("Hội thoại: (chưa có tiêu đề)\nBắt đầu: ")
+    assert "Lượt" not in as_text.text
+
+
+def test_transcript_trailing_question_without_answer(client, db):
+    conversation_id = create(client)
+    seed_messages(db, conversation_id, TWO_TURNS + [("user", "Câu hỏi chưa được trả lời")])
+
+    r = client.get(transcript_url(conversation_id))
+    text = client.get(transcript_url(conversation_id), params={"format": "text"}).text
+
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["total_messages"] == 5 and len(data["turns"]) == 3
+    last = data["turns"][2]
+    assert last["turn"] == 3 and last["user"]["content"] == "Câu hỏi chưa được trả lời" and last["assistant"] is None
+    assert text.endswith("Lượt 3\n  Người dùng: Câu hỏi chưa được trả lời\n  Trợ lý:\n")
+
+
+def test_transcript_consecutive_user_messages_are_kept(client, db):
+    conversation_id = create(client)
+    seed_messages(db, conversation_id, [("user", "Một"), ("user", "Hai"), ("assistant", "Đáp hai")])
+
+    turns = client.get(transcript_url(conversation_id)).json()["data"]["turns"]
+
+    assert [(t["user"]["content"], t["assistant"] and t["assistant"]["content"]) for t in turns] == [
+        ("Một", None), ("Hai", "Đáp hai"),
+    ]
+
+
+def test_transcript_longer_than_500_messages_is_truncated(client, db):
+    conversation_id = create(client)
+    items = [(role, f"{role} {i}") for i in range(1, 256) for role in ("user", "assistant")]  # 510 tin
+    seed_messages(db, conversation_id, items)
+
+    data = client.get(transcript_url(conversation_id)).json()["data"]
+
+    assert data["truncated"] is True and data["total_messages"] == 510
+    assert len(data["turns"]) == 250  # 500 tin đầu = 250 lượt
+    assert data["turns"][0]["user"]["content"] == "user 1"
+    assert data["turns"][-1]["assistant"]["content"] == "assistant 250"
+
+
+def test_transcript_exactly_500_messages_is_not_truncated(client, db):
+    conversation_id = create(client)
+    seed_messages(db, conversation_id, [(role, f"{role} {i}") for i in range(250) for role in ("user", "assistant")])
+
+    data = client.get(transcript_url(conversation_id)).json()["data"]
+
+    assert data["truncated"] is False and data["total_messages"] == 500 and len(data["turns"]) == 250

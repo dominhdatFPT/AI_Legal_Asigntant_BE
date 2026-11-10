@@ -1,0 +1,674 @@
+{
+  "schema_version": 1,
+  "name": "Giấy đề nghị đăng ký doanh nghiệp công ty cổ phần",
+  "code": "",
+  "procedure_code": "DN-003",
+  "domain": "doanh_nghiep",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Giấy đề nghị đăng ký doanh nghiệp công ty cổ phần"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "registration",
+      "title": "Thông tin đăng ký doanh nghiệp",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người kê khai / người nộp hồ sơ",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "birth_date",
+              "label": "Ngày sinh",
+              "word_key": "applicant_birth_date",
+              "type": "dob",
+              "required": true,
+              "autofill": "profile.dob",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số định danh cá nhân / CCCD",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": false,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "issue_place",
+              "label": "Nơi cấp",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú / liên hệ",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "applicant_phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "applicant_email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        },
+        {
+          "id": "company_info",
+          "instance_id": "company_info",
+          "block_key": "free_field",
+          "title": "Thông tin doanh nghiệp",
+          "order": 1,
+          "fields": [
+            {
+              "key": "company_name_vn",
+              "label": "Tên doanh nghiệp bằng tiếng Việt",
+              "word_key": "company_name_vn",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "company_name_foreign",
+              "label": "Tên doanh nghiệp bằng tiếng nước ngoài (nếu có)",
+              "word_key": "company_name_foreign",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "company_short_name",
+              "label": "Tên viết tắt (nếu có)",
+              "word_key": "company_short_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address_detail",
+              "label": "Số nhà, đường, tổ/xóm/ấp/thôn",
+              "word_key": "address_detail",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "ward",
+              "label": "Xã / phường / đặc khu",
+              "word_key": "ward",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "province",
+              "label": "Tỉnh / thành phố",
+              "word_key": "province",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": true
+            },
+            {
+              "key": "fax",
+              "label": "Fax (nếu có)",
+              "word_key": "fax",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "email",
+              "type": "email",
+              "required": false
+            },
+            {
+              "key": "website",
+              "label": "Website (nếu có)",
+              "word_key": "website",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "headquarters_in_zone",
+              "label": "Khu công nghiệp / khu chế xuất / khu kinh tế / khu công nghệ cao (nếu có)",
+              "word_key": "headquarters_in_zone",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "social_enterprise",
+              "label": "Doanh nghiệp xã hội (nếu có)",
+              "word_key": "social_enterprise",
+              "type": "select",
+              "required": false,
+              "options": [
+                "Không",
+                "Có"
+              ]
+            },
+            {
+              "key": "company_phone_for_tax",
+              "label": "Số điện thoại đăng ký thuế",
+              "word_key": "company_phone_for_tax",
+              "type": "phone",
+              "required": true
+            },
+            {
+              "key": "accounting_year",
+              "label": "Năm tài chính bắt đầu",
+              "word_key": "accounting_year",
+              "type": "text",
+              "required": true,
+              "help_text": "Ví dụ: ngày 01 tháng 01."
+            },
+            {
+              "key": "accounting_method",
+              "label": "Chế độ kế toán áp dụng",
+              "word_key": "accounting_method",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Theo chế độ kế toán doanh nghiệp hiện hành",
+                "Theo chế độ kế toán doanh nghiệp nhỏ và vừa",
+                "Khác"
+              ]
+            },
+            {
+              "key": "accounting_method_other",
+              "label": "Chế độ kế toán khác",
+              "word_key": "accounting_method_other",
+              "type": "text",
+              "required": false,
+              "condition": {
+                "field": "company_info.accounting_method",
+                "equals": "Khác"
+              }
+            },
+            {
+              "key": "tax_period",
+              "label": "Hình thức kê khai thuế GTGT",
+              "word_key": "tax_period",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Theo tháng",
+                "Theo quý",
+                "Theo từng lần phát sinh",
+                "Không thuộc trường hợp kê khai GTGT"
+              ]
+            },
+            {
+              "key": "recipient",
+              "label": "Cơ quan đăng ký kinh doanh cấp tỉnh",
+              "word_key": "recipient",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "formation_type",
+              "label": "Tình trạng thành lập",
+              "word_key": "formation_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Thành lập mới",
+                "Hợp nhất doanh nghiệp",
+                "Chuyển đổi loại hình doanh nghiệp",
+                "Chuyển đổi từ hộ kinh doanh",
+                "Trường hợp khác"
+              ]
+            },
+            {
+              "key": "formation_other",
+              "label": "Nêu trường hợp thành lập khác",
+              "word_key": "formation_other",
+              "type": "text",
+              "required": false,
+              "condition": {
+                "field": "company_info.formation_type",
+                "equals": "Trường hợp khác"
+              }
+            },
+            {
+              "key": "charter_capital",
+              "label": "Vốn điều lệ (đồng)",
+              "word_key": "charter_capital",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "charter_capital_words",
+              "label": "Vốn điều lệ bằng chữ",
+              "word_key": "charter_capital_words",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "legal_representative_name",
+              "label": "Họ tên người đại diện theo pháp luật",
+              "word_key": "legal_representative_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "legal_representative_birth_date",
+              "label": "Ngày sinh người đại diện",
+              "word_key": "legal_representative_birth_date",
+              "type": "dob",
+              "required": true
+            },
+            {
+              "key": "legal_representative_identity",
+              "label": "Số định danh / CCCD người đại diện",
+              "word_key": "legal_representative_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "legal_representative_issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "legal_representative_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "legal_representative_issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "legal_representative_issue_place",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "legal_representative_address",
+              "label": "Địa chỉ liên lạc người đại diện",
+              "word_key": "legal_representative_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "legal_representative_title",
+              "label": "Chức danh người đại diện",
+              "word_key": "legal_representative_title",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "authorized_representative",
+              "label": "Người được ủy quyền thực hiện thủ tục (nếu khác người đại diện)",
+              "word_key": "authorized_representative",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày lập",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "share_total",
+              "label": "Tổng số cổ phần đăng ký",
+              "word_key": "share_total",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "share_nominal_value",
+              "label": "Mệnh giá một cổ phần (đồng)",
+              "word_key": "share_nominal_value",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "share_currency",
+              "label": "Loại tài sản dùng để góp vốn",
+              "word_key": "share_currency",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "shareholders",
+          "instance_id": "shareholders",
+          "block_key": "repeat_group",
+          "title": "Thêm từng cổ đông sáng lập",
+          "order": 1,
+          "fields": [
+            {
+              "key": "kind",
+              "label": "Loại cổ đông",
+              "word_key": "kind",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Cá nhân",
+                "Tổ chức"
+              ]
+            },
+            {
+              "key": "name",
+              "label": "Tên cổ đông / tổ chức",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_date",
+              "label": "Ngày sinh (cá nhân)",
+              "word_key": "birth_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "gender",
+              "label": "Giới tính (cá nhân)",
+              "word_key": "gender",
+              "type": "select",
+              "required": false,
+              "options": [
+                "Nam",
+                "Nữ",
+                "Khác"
+              ]
+            },
+            {
+              "key": "identity",
+              "label": "CCCD / mã số doanh nghiệp",
+              "word_key": "identity",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "representative",
+              "label": "Người đại diện (nếu cổ đông là tổ chức)",
+              "word_key": "representative",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "shares",
+              "label": "Số cổ phần đăng ký mua",
+              "word_key": "shares",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "share_class",
+              "label": "Loại cổ phần",
+              "word_key": "share_class",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Phổ thông",
+                "Ưu đãi biểu quyết",
+                "Ưu đãi cổ tức",
+                "Ưu đãi hoàn lại",
+                "Loại khác"
+              ]
+            },
+            {
+              "key": "contribution_value",
+              "label": "Giá trị vốn góp (đồng)",
+              "word_key": "contribution_value",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "contribution_deadline",
+              "label": "Thời hạn góp vốn",
+              "word_key": "contribution_deadline",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "note",
+              "label": "Ghi chú / tư cách cổ đông sáng lập",
+              "word_key": "note",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "industries",
+      "title": "Ngành, nghề kinh doanh",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "business_lines",
+          "instance_id": "business_lines",
+          "block_key": "repeat_group",
+          "title": "Thêm từng ngành nghề",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Tên ngành, nghề kinh doanh",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "code",
+              "label": "Mã ngành cấp 4 (nếu đã xác định)",
+              "word_key": "code",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "main",
+              "label": "Ngành nghề chính",
+              "word_key": "main",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Có",
+                "Không"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "business_lines",
+      "title": "business lines",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Tên ngành, nghề kinh doanh",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "code",
+          "label": "Mã ngành cấp 4 (nếu đã xác định)",
+          "word_key": "code",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "main",
+          "label": "Ngành nghề chính",
+          "word_key": "main",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Có",
+            "Không"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "shareholders",
+      "title": "shareholders",
+      "fields": [
+        {
+          "key": "kind",
+          "label": "Loại cổ đông",
+          "word_key": "kind",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Cá nhân",
+            "Tổ chức"
+          ]
+        },
+        {
+          "key": "name",
+          "label": "Tên cổ đông / tổ chức",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_date",
+          "label": "Ngày sinh (cá nhân)",
+          "word_key": "birth_date",
+          "type": "date",
+          "required": false
+        },
+        {
+          "key": "gender",
+          "label": "Giới tính (cá nhân)",
+          "word_key": "gender",
+          "type": "select",
+          "required": false,
+          "options": [
+            "Nam",
+            "Nữ",
+            "Khác"
+          ]
+        },
+        {
+          "key": "identity",
+          "label": "CCCD / mã số doanh nghiệp",
+          "word_key": "identity",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "representative",
+          "label": "Người đại diện (nếu cổ đông là tổ chức)",
+          "word_key": "representative",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "shares",
+          "label": "Số cổ phần đăng ký mua",
+          "word_key": "shares",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "share_class",
+          "label": "Loại cổ phần",
+          "word_key": "share_class",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Phổ thông",
+            "Ưu đãi biểu quyết",
+            "Ưu đãi cổ tức",
+            "Ưu đãi hoàn lại",
+            "Loại khác"
+          ]
+        },
+        {
+          "key": "contribution_value",
+          "label": "Giá trị vốn góp (đồng)",
+          "word_key": "contribution_value",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "contribution_deadline",
+          "label": "Thời hạn góp vốn",
+          "word_key": "contribution_deadline",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "note",
+          "label": "Ghi chú / tư cách cổ đông sáng lập",
+          "word_key": "note",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

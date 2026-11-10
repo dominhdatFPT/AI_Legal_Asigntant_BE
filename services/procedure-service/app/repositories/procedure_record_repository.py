@@ -20,7 +20,7 @@ from app.core.exceptions import (
     ApplicationPermissionError,
     ApplicationValidationError,
 )
-from app.database import get_engine, get_supabase_config, is_postgres_circuit_open, mark_postgres_failed
+from app.database import database_url, get_engine, get_supabase_config, is_postgres_circuit_open, mark_postgres_failed
 from app.repositories.procedure_repository import db_connection, ProcedureInvalidData, ProcedureDbUnavailable
 
 logger = logging.getLogger(__name__)
@@ -28,9 +28,11 @@ logger = logging.getLogger(__name__)
 # Pattern chuẩn cho 8 ký tự hex mã định danh rút gọn
 HEX_8_PATTERN = re.compile(r"^[0-9a-fA-F]{8}$")
 
-# Reusable in-memory cache cho tra cứu hồ sơ (TTL 60s)
+# Reusable in-memory cache cho tra cứu hồ sơ (TTL 60s) và thống kê tổng quan (TTL 30s)
 _lookup_cache: dict[str, tuple[float, any]] = {}
 LOOKUP_CACHE_TTL = 60.0
+_summary_cache: dict[str, any] = {"data": None, "timestamp": 0.0}
+SUMMARY_CACHE_TTL = 30.0
 
 # HTTP Session riêng cho từng thread (requests.Session không an toàn khi dùng chung giữa các thread), có Connection Pool chống socket exhaustion (M5)
 _local = threading.local()
@@ -198,6 +200,7 @@ def save_procedure_record(
             result = _serialize_row(dict(row))
             result["domain"] = domain
             result["target_table"] = table
+            _summary_cache["data"] = None
             return result
         except Exception as e:
             logger.warning(f"Lỗi khi lưu hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
@@ -411,6 +414,7 @@ def lookup_procedure_record(code_or_id: str, owner_id: Optional[str] = None) -> 
                         res = _serialize_row(rows[0])
                         res["domain"] = dom
                         res["target_table"] = table
+                        _summary_cache["data"] = None
                         return res
     except Exception as e:
         logger.warning(f"Lỗi fallback PostgREST trong lookup_procedure_record: {e}")
@@ -446,7 +450,7 @@ def list_procedure_records(
         engine = get_engine()
         if engine:
             try:
-                with engine.begin() as conn:
+                with engine.connect() as conn:
                     queries = []
                     params = {"limit": page_size, "offset": offset}
                     
@@ -663,6 +667,7 @@ def update_procedure_record(
                         res = _serialize_row(dict(row))
                         res["domain"] = clean_domain
                         res["target_table"] = table
+                        _summary_cache["data"] = None
                         return res
             except OperationalError as e:
                 mark_postgres_failed()
@@ -757,6 +762,7 @@ def delete_procedure_record(domain: str, record_id: str, user_id: Optional[str] 
             try:
                 with engine.begin() as conn:
                     conn.execute(text(f"DELETE FROM public.{table} WHERE id = :id"), {"id": safe_uuid_str(record_id) or str(record_id)})
+                    _summary_cache["data"] = None
                     return True
             except OperationalError as e:
                 mark_postgres_failed()
@@ -811,6 +817,7 @@ def submit_procedure_record(domain: str, record_id: str, user_id: Optional[str] 
                         res = _serialize_row(dict(row))
                         res["domain"] = clean_domain
                         res["target_table"] = table
+                        _summary_cache["data"] = None
                         return res
             except OperationalError as e:
                 mark_postgres_failed()
@@ -1028,6 +1035,11 @@ def list_records(owner_id: Optional[str], domain: Optional[str], status: Optiona
 
 def count_records() -> dict:
     """Số hồ sơ theo lĩnh vực và trạng thái (cho dashboard admin)."""
+    now = time.monotonic()
+    use_cache = database_url().startswith("postgresql")
+    if use_cache and _summary_cache["data"] is not None and (now - _summary_cache["timestamp"]) < SUMMARY_CACHE_TTL:
+        return copy.deepcopy(_summary_cache["data"])
+
     by_domain = {"land": 0, "business": 0}
     by_status = dict.fromkeys(STATUSES, 0)
 
@@ -1040,7 +1052,11 @@ def count_records() -> dict:
                     by_domain[domain] += n
                 if status in by_status:
                     by_status[status] += n
-            return {"total": sum(by_domain.values()), "by_domain": by_domain, "by_status": by_status}
+            result = {"total": sum(by_domain.values()), "by_domain": by_domain, "by_status": by_status}
+            if use_cache:
+                _summary_cache["data"] = result
+                _summary_cache["timestamp"] = now
+            return copy.deepcopy(result) if use_cache else result
         except Exception as e:
             logger.warning(f"Lỗi khi đếm hồ sơ qua SQLAlchemy: {e}. Thử fallback PostgREST...")
 

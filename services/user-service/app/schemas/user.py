@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 from app.models import UserRole, UserStatus
+from app.schemas.citizen_profile import CitizenProfileOut
 
 
 class UserOut(BaseModel):
@@ -22,3 +23,10 @@ class UserOut(BaseModel):
     locked_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class MeOut(UserOut):
+    """Thông tin tài khoản kèm hồ sơ CCCD trong 1 request /users/me để FE không phải gọi tách 2 lần."""
+
+    has_citizen_profile: bool = False
+    citizen_profile: CitizenProfileOut | None = None

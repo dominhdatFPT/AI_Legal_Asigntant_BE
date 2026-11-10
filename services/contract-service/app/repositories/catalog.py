@@ -2,9 +2,9 @@
 from contextlib import contextmanager
 
 import psycopg
-from psycopg.rows import dict_row
 
 from app.core.config import DatabaseSettings
+from app.core.database import pooled_connection
 from app.core.errors import ContractError
 from app.schemas.catalog import VersionInput
 
@@ -33,15 +33,16 @@ class CatalogRepository:
     def transaction(self, *, read=False):
         try:
             if self._connect:
-                connection = self._connect()
+                with self._connect() as conn:
+                    if read:
+                        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    yield conn
             else:
                 uri = DatabaseSettings.from_env().database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-                connection = psycopg.connect(uri, connect_timeout=5, prepare_threshold=None,
-                    row_factory=dict_row, options="-c statement_timeout=5000 -c lock_timeout=2000")
-            with connection as conn:
-                if read:
-                    conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                yield conn
+                with pooled_connection(uri, connect_timeout=5, use_dict_row=True) as conn:
+                    if read:
+                        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    yield conn
         except (psycopg.IntegrityError, psycopg.errors.DeadlockDetected):
             raise conflict() from None
         except psycopg.Error:
@@ -139,9 +140,25 @@ class CatalogRepository:
                 raise missing()
             rows = conn.execute("SELECT " + VERSION + ",extraction_snapshot FROM public.contract_template_versions WHERE " + condition +
                 " ORDER BY version DESC LIMIT %s OFFSET %s", (template_id, size, (page-1)*size)).fetchall()
-            for row in rows:
-                row["fields"] = self.fields(conn, row["id"])
-                self.form_options(row)
+            if rows and not self._connect:
+                version_ids = [row["id"] for row in rows]
+                all_fields = conn.execute(
+                    "SELECT version_id,name,label,type,required,identity_key FROM public.contract_template_fields "
+                    "WHERE version_id = ANY(%s) ORDER BY version_id, ordinal",
+                    (version_ids,),
+                ).fetchall()
+                fields_by_version = {vid: [] for vid in version_ids}
+                for f in all_fields:
+                    vid = f.pop("version_id")
+                    if vid in fields_by_version:
+                        fields_by_version[vid].append(f)
+                for row in rows:
+                    row["fields"] = fields_by_version.get(row["id"], [])
+                    self.form_options(row)
+            else:
+                for row in rows:
+                    row["fields"] = self.fields(conn, row["id"])
+                    self.form_options(row)
             return pagination(rows, total, page, size)
 
     def get_version(self, version_id, admin, owner):

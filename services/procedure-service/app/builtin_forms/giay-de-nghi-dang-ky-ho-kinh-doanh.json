@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "name": "Giấy đề nghị đăng ký hộ kinh doanh",
+  "code": "",
+  "procedure_code": "HKD-001",
+  "domain": "ho_kinh_doanh",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Giấy đề nghị đăng ký hộ kinh doanh"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "application",
+      "title": "Thông tin đăng ký hộ kinh doanh",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "application_info",
+          "instance_id": "application_info",
+          "block_key": "free_field",
+          "title": "Giấy đề nghị đăng ký hộ kinh doanh",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Cơ quan đăng ký kinh doanh cấp xã",
+              "word_key": "recipient",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "business_name",
+              "label": "Tên hộ kinh doanh (viết bằng chữ in hoa)",
+              "word_key": "business_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "business_address",
+              "label": "Địa điểm kinh doanh",
+              "word_key": "business_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": true
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "email",
+              "type": "email",
+              "required": false
+            },
+            {
+              "key": "capital",
+              "label": "Vốn kinh doanh (đồng)",
+              "word_key": "capital",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "capital_words",
+              "label": "Vốn kinh doanh bằng chữ",
+              "word_key": "capital_words",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "employees",
+              "label": "Số lao động dự kiến",
+              "word_key": "employees",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "owner_name",
+              "label": "Chủ hộ kinh doanh",
+              "word_key": "owner_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_birth_date",
+              "label": "Ngày sinh chủ hộ",
+              "word_key": "owner_birth_date",
+              "type": "dob",
+              "required": true,
+              "autofill": "profile.dob",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_gender",
+              "label": "Giới tính",
+              "word_key": "owner_gender",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Nam",
+                "Nữ",
+                "Khác"
+              ]
+            },
+            {
+              "key": "owner_identity",
+              "label": "Số định danh cá nhân / CCCD",
+              "word_key": "owner_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "owner_issue_date",
+              "type": "issue_date",
+              "required": false,
+              "autofill": "profile.cccd_issue_date",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "owner_issue_place",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.cccd_issue_place",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "owner_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày lập",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "business_lines",
+      "title": "Ngành, nghề kinh doanh",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "business_lines",
+          "instance_id": "business_lines",
+          "block_key": "repeat_group",
+          "title": "Thêm ngành nghề",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Tên ngành, nghề kinh doanh",
+              "word_key": "name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "code",
+              "label": "Mã ngành (nếu có)",
+              "word_key": "code",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "business_lines",
+      "title": "business lines",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Tên ngành, nghề kinh doanh",
+          "word_key": "name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "code",
+          "label": "Mã ngành (nếu có)",
+          "word_key": "code",
+          "type": "text",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

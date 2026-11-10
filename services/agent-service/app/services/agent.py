@@ -1,9 +1,10 @@
 # Bộ điều hướng: chọn nhánh xử lý cho tin nhắn, không gọi LLM ở đây.
-# Câu vô nghĩa trả sớm; có tài liệu đính kèm -> review_agent; còn lại -> qa_agent.
+# Câu vô nghĩa trả sớm; có tài liệu đính kèm -> (cổng document_gate nếu bật) review_agent; còn lại -> qa_agent.
 # Lưu DB do endpoint đảm nhận (khi có models/repositories).
 import logging
 
-from app.services import qa_agent, query_filter, responder, review_agent
+from app.core.config import get_settings
+from app.services import document_gate, qa_agent, query_filter, responder, review_agent
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,15 @@ def _meaningless_result(request_id: str | None) -> dict:
         "content": query_filter.DEFAULT_ANSWER,
         "metadata": {"rag_chunk_ids": [], "model": None, "tokens_used": None},
     }
+
+
+def _check_documents(documents: list[dict], request_id: str | None) -> str | None:
+    # Cổng lỗi bất ngờ thì coi như không có cổng: cứ rà soát như trước, không làm hỏng câu trả lời
+    try:
+        return document_gate.check(documents, request_id=request_id)
+    except Exception:
+        logger.warning("agent kiểm tra tài liệu lỗi, bỏ qua cổng request_id=%s", request_id, exc_info=True)
+        return None
 
 
 async def prepare(user_content: str, history: list[dict], request_id: str | None = None) -> dict | responder.LLMCall:
@@ -43,5 +53,13 @@ async def process_message(
         return _meaningless_result(request_id)
 
     if documents:
+        settings = get_settings()
+        if settings.document_gate_enabled and not settings.llm_bypass:
+            unreadable = _check_documents(documents, request_id)
+            if unreadable:
+                return {
+                    "content": unreadable,
+                    "metadata": {"rag_chunk_ids": [], "model": None, "tokens_used": None, "type": "document_unreadable"},
+                }
         return await review_agent.review(user_content, history, documents, request_id=request_id)
     return await qa_agent.answer(user_content, history, request_id=request_id)

@@ -1,0 +1,630 @@
+{
+  "schema_version": 1,
+  "name": "Hợp đồng thế chấp quyền sử dụng đất và tài sản gắn liền với đất",
+  "code": "",
+  "procedure_code": "DD-010",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Hợp đồng thế chấp quyền sử dụng đất và tài sản gắn liền với đất",
+    "Hợp đồng thế chấp quyền sử dụng đất bảo đảm nghĩa vụ vay vốn"
+  ],
+  "review_notice": "Bản nguồn có đoạn nhắc đến căn hộ chung cư và số điều bị lặp. Hãy rà soát loại tài sản, điều khoản và nội dung pháp lý trước khi ký hoặc công chứng.",
+  "sections": [
+    {
+      "id": "parties",
+      "title": "Các bên trong hợp đồng",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "transaction",
+          "instance_id": "transaction",
+          "block_key": "free_field",
+          "title": "Số hợp đồng, ngày và nơi ký",
+          "order": 1,
+          "fields": [
+            {
+              "key": "number",
+              "label": "Số hợp đồng",
+              "word_key": "contract_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "contract_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "contract_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "contract_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Nơi lập hợp đồng",
+              "word_key": "contract_place",
+              "type": "text",
+              "required": true
+            }
+          ]
+        },
+        {
+          "id": "mortgagors",
+          "instance_id": "mortgagors",
+          "block_key": "repeat_group",
+          "title": "Bên thế chấp (thêm từng người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên bên thế chấp",
+              "word_key": "mortgagor_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "mortgagor_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "mortgagor_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp giấy tờ",
+              "word_key": "mortgagor_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "mortgagor_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "mortgagor_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "mortgagor_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "property_role",
+              "label": "Tư cách / phần quyền sở hữu",
+              "word_key": "mortgagor_property_role",
+              "type": "text",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "mortgagees",
+          "instance_id": "mortgagees",
+          "block_key": "repeat_group",
+          "title": "Bên nhận thế chấp (thêm từng người)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên bên nhận thế chấp",
+              "word_key": "mortgagee_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_year",
+              "label": "Năm sinh",
+              "word_key": "mortgagee_birth_year",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "mortgagee_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp giấy tờ",
+              "word_key": "mortgagee_issue_date",
+              "type": "issue_date",
+              "required": false
+            },
+            {
+              "key": "issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "mortgagee_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "mortgagee_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại",
+              "word_key": "mortgagee_phone",
+              "type": "phone",
+              "required": false
+            },
+            {
+              "key": "property_role",
+              "label": "Tư cách / phần quyền sở hữu",
+              "word_key": "mortgagee_property_role",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obligation",
+      "title": "Nghĩa vụ được bảo đảm",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "obligation_info",
+          "instance_id": "obligation_info",
+          "block_key": "free_field",
+          "title": "Nội dung khoản vay / nghĩa vụ",
+          "order": 1,
+          "fields": [
+            {
+              "key": "obligation",
+              "label": "Nghĩa vụ được bảo đảm",
+              "word_key": "secured_obligation",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "obligation_amount",
+              "label": "Số tiền / giá trị nghĩa vụ",
+              "word_key": "obligation_amount",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "obligation_words",
+              "label": "Số tiền bằng chữ",
+              "word_key": "obligation_words",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "repayment_terms",
+              "label": "Thời hạn và phương thức thực hiện",
+              "word_key": "repayment_terms",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "property",
+      "title": "Tài sản thế chấp và giá trị",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "secured_assets",
+          "instance_id": "secured_assets",
+          "block_key": "repeat_group",
+          "title": "Từng tài sản thế chấp",
+          "order": 1,
+          "fields": [
+            {
+              "key": "parcel",
+              "label": "Số thửa đất",
+              "word_key": "property_parcel",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet",
+              "label": "Tờ bản đồ số",
+              "word_key": "property_map_sheet",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ tài sản",
+              "word_key": "property_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "land_type",
+              "label": "Loại đất",
+              "word_key": "property_land_type",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "property_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "certificate",
+              "label": "Giấy chứng nhận / số phát hành",
+              "word_key": "property_certificate",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "certificate_issuer",
+              "label": "Cơ quan cấp",
+              "word_key": "property_issuer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_date",
+              "label": "Ngày cấp",
+              "word_key": "property_issue_date",
+              "type": "past_date",
+              "required": false
+            },
+            {
+              "key": "description",
+              "label": "Tài sản gắn liền với đất / mô tả",
+              "word_key": "property_description",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        },
+        {
+          "id": "valuation",
+          "instance_id": "valuation",
+          "block_key": "free_field",
+          "title": "Giá trị và xử lý tài sản",
+          "order": 1,
+          "fields": [
+            {
+              "key": "value",
+              "label": "Giá trị tài sản thế chấp (đồng)",
+              "word_key": "collateral_value",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "value_words",
+              "label": "Giá trị bằng chữ",
+              "word_key": "collateral_value_words",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "valuation_date",
+              "label": "Ngày xác định giá trị",
+              "word_key": "valuation_date",
+              "type": "past_date",
+              "required": false
+            },
+            {
+              "key": "disposal_method",
+              "label": "Phương thức xử lý khi vi phạm nghĩa vụ",
+              "word_key": "disposal_method",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "fee_payer",
+              "label": "Bên chịu lệ phí đăng ký",
+              "word_key": "registration_fee_payer",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Thời hạn, chữ ký và công chứng",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Hiệu lực và số bản",
+          "order": 1,
+          "fields": [
+            {
+              "key": "effective_from",
+              "label": "Có hiệu lực từ ngày",
+              "word_key": "effective_from",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "effective_until",
+              "label": "Có hiệu lực đến ngày",
+              "word_key": "effective_until",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "copies",
+              "label": "Số bản hợp đồng",
+              "word_key": "contract_copies",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "notary_date",
+              "label": "Ngày công chứng",
+              "word_key": "notary_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "notary_place",
+              "label": "Địa điểm công chứng",
+              "word_key": "notary_place",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "notary_name",
+              "label": "Công chứng viên",
+              "word_key": "notary_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "notary_office",
+              "label": "Phòng / văn phòng công chứng",
+              "word_key": "notary_office",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "notary_number",
+              "label": "Số / quyển công chứng",
+              "word_key": "notary_reference",
+              "type": "text",
+              "required": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "mortgagors",
+      "title": "Bên thế chấp",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên bên thế chấp",
+          "word_key": "mortgagor_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh",
+          "word_key": "mortgagor_birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD / định danh",
+          "word_key": "mortgagor_identity",
+          "type": "cccd",
+          "required": true
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp giấy tờ",
+          "word_key": "mortgagor_issue_date",
+          "type": "issue_date",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "mortgagor_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thường trú",
+          "word_key": "mortgagor_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "mortgagor_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "property_role",
+          "label": "Tư cách / phần quyền sở hữu",
+          "word_key": "mortgagor_property_role",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "mortgagees",
+      "title": "Bên nhận thế chấp",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên bên nhận thế chấp",
+          "word_key": "mortgagee_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "birth_year",
+          "label": "Năm sinh",
+          "word_key": "mortgagee_birth_year",
+          "type": "number",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD / định danh",
+          "word_key": "mortgagee_identity",
+          "type": "cccd",
+          "required": true
+        },
+        {
+          "key": "issue_date",
+          "label": "Ngày cấp giấy tờ",
+          "word_key": "mortgagee_issue_date",
+          "type": "issue_date",
+          "required": false
+        },
+        {
+          "key": "issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "mortgagee_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thường trú",
+          "word_key": "mortgagee_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "phone",
+          "label": "Điện thoại",
+          "word_key": "mortgagee_phone",
+          "type": "phone",
+          "required": false
+        },
+        {
+          "key": "property_role",
+          "label": "Tư cách / phần quyền sở hữu",
+          "word_key": "mortgagee_property_role",
+          "type": "text",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "secured_assets",
+      "title": "Tài sản thế chấp",
+      "fields": [
+        {
+          "key": "parcel",
+          "label": "Số thửa đất",
+          "word_key": "property_parcel",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "map_sheet",
+          "label": "Tờ bản đồ số",
+          "word_key": "property_map_sheet",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ tài sản",
+          "word_key": "property_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "land_type",
+          "label": "Loại đất",
+          "word_key": "property_land_type",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "area",
+          "label": "Diện tích (m²)",
+          "word_key": "property_area",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "certificate",
+          "label": "Giấy chứng nhận / số phát hành",
+          "word_key": "property_certificate",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "certificate_issuer",
+          "label": "Cơ quan cấp",
+          "word_key": "property_issuer",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "certificate_date",
+          "label": "Ngày cấp",
+          "word_key": "property_issue_date",
+          "type": "past_date",
+          "required": false
+        },
+        {
+          "key": "description",
+          "label": "Tài sản gắn liền với đất / mô tả",
+          "word_key": "property_description",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

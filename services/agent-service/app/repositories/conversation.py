@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models import Conversation, Message
 
 TITLE_MAX_LENGTH = 80
+TRANSCRIPT_MAX_MESSAGES = 500  # trần an toàn của kịch bản hội thoại: dài hơn thì chỉ lấy 500 tin đầu
 
 
 def _now() -> datetime:
@@ -53,6 +54,25 @@ def get_conversation(db: Session, conversation_id: uuid.UUID) -> Conversation | 
     return db.get(Conversation, conversation_id)
 
 
+def get_conversation_of_user(db: Session, conversation_id: uuid.UUID, user_id: uuid.UUID) -> Conversation | None:
+    """Hội thoại có đúng `id` VÀ đúng chủ. Không có hoặc của người khác đều trả None (API nội bộ không phân biệt hai trường hợp)."""
+    return db.scalar(
+        select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+    )
+
+
+def get_messages_before(
+    db: Session, conversation_id: uuid.UUID, until: datetime, limit: int | None = None,
+) -> list[Message]:
+    """Tin nhắn có created_at < `until`, cũ → mới. Có `limit` thì chỉ lấy `limit` tin gần `until` nhất."""
+    until = until.astimezone(timezone.utc)  # cùng múi giờ với created_at đã lưu (UTC)
+    query = select(Message).where(Message.conversation_id == conversation_id, Message.created_at < until)
+    if limit is None:
+        return list(db.scalars(query.order_by(Message.created_at, Message.id)).all())
+    recent = db.scalars(query.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)).all()
+    return list(reversed(recent))
+
+
 def delete_conversation(db: Session, conversation: Conversation) -> None:
     db.delete(conversation)  # tin nhắn bị xóa theo (CASCADE)
     db.commit()
@@ -65,6 +85,23 @@ def get_messages(db: Session, conversation_id: uuid.UUID, limit: int | None = No
         return list(db.scalars(query.order_by(Message.created_at, Message.id)).all())
     recent = db.scalars(query.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)).all()
     return list(reversed(recent))
+
+
+def get_messages_for_transcript(
+    db: Session, conversation_id: uuid.UUID, limit: int = TRANSCRIPT_MAX_MESSAGES,
+) -> tuple[list[Message], int]:
+    """Kịch bản hội thoại: tối đa `limit` tin ĐẦU TIÊN (cũ → mới, bằng thời gian thì theo id cho ổn định), không áp
+    HISTORY_LIMIT. Trả về (tin nhắn, tổng số tin của hội thoại); tổng lớn hơn số tin trả về nghĩa là đã bị cắt."""
+    total = db.scalar(
+        select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
+    )
+    messages = db.scalars(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at, Message.id)
+        .limit(limit)
+    ).all()
+    return list(messages), total or 0
 
 
 def add_message_pair(
@@ -81,6 +118,7 @@ def add_message_pair(
     """
     # Câu trả lời luôn sau câu hỏi để thứ tự tin nhắn không bị đảo khi trùng thời điểm
     answered_at = max(_now(), asked_at + timedelta(microseconds=1))
+    conversation = db.merge(conversation)
     user_message = Message(
         conversation_id=conversation.id, role="user", content=question, created_at=asked_at,
     )

@@ -7,6 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.core.config import DatabaseSettings
+from app.core.database import pooled_connection
 from app.core.errors import ContractError
 
 ASSET_NAME = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:-page-([1-9][0-9]{0,2})\.png|\.pdf)")
@@ -16,8 +17,7 @@ ASSET_NAME = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 def connection():
     url = DatabaseSettings.from_env(default_tls=True).database_url.replace('postgresql+psycopg://', 'postgresql://', 1)
     try:
-        with psycopg.connect(url, connect_timeout=5, prepare_threshold=None,
-                             options='-c statement_timeout=15000 -c lock_timeout=3000') as conn:
+        with pooled_connection(url, connect_timeout=5, use_dict_row=False) as conn:
             yield conn
     except psycopg.errors.UndefinedTable:
         raise ContractError('REFERENCE_UPLOAD_SCHEMA_NOT_READY', 'Chưa cập nhật database cho chức năng tải PDF.') from None

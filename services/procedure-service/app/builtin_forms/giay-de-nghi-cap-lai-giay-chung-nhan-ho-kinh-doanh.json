@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "name": "Giấy đề nghị cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
+  "code": "",
+  "procedure_code": null,
+  "domain": "ho_kinh_doanh",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Giấy đề nghị cấp lại Giấy chứng nhận đăng ký hộ kinh doanh"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "reissue",
+      "title": "Đề nghị cấp lại giấy chứng nhận",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "reissue_info",
+          "instance_id": "reissue_info",
+          "block_key": "free_field",
+          "title": "Thông tin hộ kinh doanh",
+          "order": 1,
+          "fields": [
+            {
+              "key": "household_name",
+              "label": "Tên hộ kinh doanh (viết bằng chữ in hoa)",
+              "word_key": "household_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "business_code",
+              "label": "Mã số hộ kinh doanh",
+              "word_key": "business_code",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "recipient",
+              "label": "Cơ quan đăng ký kinh doanh cấp xã",
+              "word_key": "recipient",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "reason",
+              "label": "Lý do đề nghị cấp lại",
+              "word_key": "reason",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "application_number",
+              "label": "Số giấy đề nghị",
+              "word_key": "application_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "owner_name",
+              "label": "Chủ hộ kinh doanh ký đơn",
+              "word_key": "owner_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_identity",
+              "label": "Số định danh cá nhân / CCCD",
+              "word_key": "owner_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày lập",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

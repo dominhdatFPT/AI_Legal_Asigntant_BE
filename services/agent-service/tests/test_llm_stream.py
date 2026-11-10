@@ -256,6 +256,7 @@ def test_groq_khong_stream_phat_ca_cau_mot_lan(monkeypatch):
 def test_openrouter_goi_stream_kem_usage_va_giu_tham_so_reasoning(monkeypatch):
     _, openrouter = configure(
         monkeypatch, "openrouter", openrouter=[[o("Xin "), o("chào"), o(None, tokens=55)]],
+        OPENROUTER_REASONING_MAX_TOKENS="1024",  # mặc định của cấu hình là 0; đặt tường minh để thử đường có suy luận
     )
     info = {}
 
@@ -325,3 +326,12 @@ def test_dung_som_thi_dong_stream_cua_provider(monkeypatch):
 def test_info_khong_bat_buoc(monkeypatch):
     configure(monkeypatch, "gemini", gemini=[[g("OK")]])
     assert collect(None)[0] == ["OK"]
+
+
+def test_openrouter_stream_mac_dinh_khong_gui_reasoning_va_khong_cong_token(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)  # dùng mặc định của cấu hình (0)
+    _, openrouter = configure(monkeypatch, "openrouter", openrouter=[[o("OK")]])
+
+    collect()
+
+    assert "extra_body" not in openrouter.calls[0] and openrouter.calls[0]["max_tokens"] == 800

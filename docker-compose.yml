@@ -51,6 +51,33 @@ services:
       # Chặn câu hỏi ngoài phạm vi kho luật: nhờ LLM chấm độ liên quan của các đoạn luật trước khi trả lời
       RELEVANCE_CHECK: ${RELEVANCE_CHECK:-false}
       RELEVANCE_TIMEOUT_SECONDS: ${RELEVANCE_TIMEOUT_SECONDS:-8}
+      # Số ký tự đầu mỗi đoạn luật mà bước chấm liên quan được đọc
+      RELEVANCE_CHUNK_CHARS: ${RELEVANCE_CHUNK_CHARS:-600}
+      # Viết lại câu hỏi thành câu tìm kiếm dùng thuật ngữ luật trước khi tìm trong rag-service (nhờ LLM, lỗi thì dùng câu gốc)
+      QUERY_REWRITE_ENABLED: ${QUERY_REWRITE_ENABLED:-false}
+      QUERY_REWRITE_TIMEOUT_SECONDS: ${QUERY_REWRITE_TIMEOUT_SECONDS:-5}
+      # Tìm 2 bước (cần RELEVANCE_CHECK=true): lấy RAG_CANDIDATE_K đoạn làm ứng viên rồi AI chấm giữ tối đa RAG_SELECT_MAX đoạn. 0 = tắt
+      RAG_CANDIDATE_K: ${RAG_CANDIDATE_K:-0}
+      RAG_SELECT_MAX: ${RAG_SELECT_MAX:-5}
+      # Cache kết quả tìm luật trong bộ nhớ agent-service. Nạp luật mới xong phải restart agent-service để xoá cache
+      RAG_CACHE_ENABLED: ${RAG_CACHE_ENABLED:-false}
+      RAG_CACHE_TTL_SECONDS: ${RAG_CACHE_TTL_SECONDS:-86400}
+      RAG_CACHE_MAX_ITEMS: ${RAG_CACHE_MAX_ITEMS:-1000}
+      # Cache câu trả lời cuối trong bộ nhớ agent-service: chỉ câu đầu hội thoại, không kèm tài liệu. Đổi prompt hoặc model thì restart
+      ANSWER_CACHE_ENABLED: ${ANSWER_CACHE_ENABLED:-false}
+      ANSWER_CACHE_TTL_SECONDS: ${ANSWER_CACHE_TTL_SECONDS:-21600}
+      ANSWER_CACHE_MAX_ITEMS: ${ANSWER_CACHE_MAX_ITEMS:-500}
+      # Chặn tài liệu đính kèm quá ít chữ hoặc chữ rác trước khi tìm luật và gọi AI
+      DOCUMENT_GATE_ENABLED: ${DOCUMENT_GATE_ENABLED:-false}
+      DOCUMENT_MIN_CHARS: ${DOCUMENT_MIN_CHARS:-200}
+      DOCUMENT_MIN_VALID_RATIO: ${DOCUMENT_MIN_VALID_RATIO:-0.5}
+      # Tự đếm chỗ trống và kiểm tra tài liệu bị cắt, đưa vào prompt rà soát như dữ kiện cho AI nêu lại
+      DOCUMENT_FACTS_ENABLED: ${DOCUMENT_FACTS_ENABLED:-false}
+      DOCUMENT_PLACEHOLDER_MIN: ${DOCUMENT_PLACEHOLDER_MIN:-5}
+      # Không nhận ra loại hợp đồng và câu hỏi chung chung thì hỏi lại người dùng thay vì tìm luật và gọi AI
+      DOCUMENT_ASK_TYPE_ENABLED: ${DOCUMENT_ASK_TYPE_ENABLED:-false}
+      # Kiểm bằng từ khoá các mục thường gặp của hợp đồng, đưa vào prompt rà soát như dữ kiện (chỉ báo "chưa thấy từ khoá")
+      DOCUMENT_CHECKLIST_ENABLED: ${DOCUMENT_CHECKLIST_ENABLED:-false}
       GEMINI_MAX_RETRIES: ${GEMINI_MAX_RETRIES:-3}
       GEMINI_TIMEOUT_SECONDS: ${GEMINI_TIMEOUT_SECONDS:-45}
       OPENROUTER_TIMEOUT_SECONDS: ${OPENROUTER_TIMEOUT_SECONDS:-30}
@@ -63,7 +90,14 @@ services:
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
       OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-}
-      OPENROUTER_REASONING_MAX_TOKENS: ${OPENROUTER_REASONING_MAX_TOKENS:-1024}
+      # Token chừa cho "suy nghĩ" của câu trả lời chính. 0 = không gửi tham số reasoning (hợp với Gemini, không bắt buộc suy nghĩ).
+      # Model suy luận bắt buộc (vd recursive/flint-v1.0:free) cần đặt lại khoảng 1024, để 0 thì câu trả lời có thể bị cắt hoặc rỗng
+      OPENROUTER_REASONING_MAX_TOKENS: ${OPENROUTER_REASONING_MAX_TOKENS:-0}
+      # Mức suy luận riêng cho lượt gọi phụ (chấm liên quan) chỉ cần trả JSON ngắn: 0 = tắt suy luận
+      LLM_AUX_REASONING_MAX_TOKENS: ${LLM_AUX_REASONING_MAX_TOKENS:-0}
+      # Model OpenRouter riêng cho lượt gọi phụ (chấm liên quan, viết lại câu hỏi). Rỗng = dùng OPENROUTER_MODEL
+      OPENROUTER_AUX_MODEL: ${OPENROUTER_AUX_MODEL:-}
+      MINUTES_MODEL: ${MINUTES_MODEL:-}
       # Trong mạng Docker gọi rag-service theo tên service (không dùng localhost)
       RAG_SERVICE_URL: http://rag-service:8000
       RAG_TIMEOUT_SECONDS: ${RAG_TIMEOUT_SECONDS:-30}
@@ -136,11 +170,43 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       PROCEDURE_DATABASE_URL: ${PROCEDURE_DATABASE_URL:-}
+      USER_SERVICE_URL: http://user-service:8000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      ONLYOFFICE_INTERNAL_URL: ${ONLYOFFICE_INTERNAL_URL:-http://onlyoffice}
+      ONLYOFFICE_PUBLIC_URL: ${ONLYOFFICE_PUBLIC_URL:-http://localhost:8082}
+      ONLYOFFICE_CALLBACK_BASE: ${ONLYOFFICE_CALLBACK_BASE:-http://procedure-service:8000/api/v1/procedures}
+      ONLYOFFICE_BACKUP_DIR: ${ONLYOFFICE_BACKUP_DIR:-/app/office-backups}
       SUPABASE_URL: ${SUPABASE_URL:-https://qqwuhiymixomwrdunfkz.supabase.co}
-      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxd3VoaXltaXhvbXdyZHVuZmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MzgxNzAsImV4cCI6MjEwNzAxNDE3MH0.SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA}
+      # Khoá anon lấy từ Supabase (mục API), đặt trong .env; không có giá trị mặc định ghi cứng trong file này
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
     volumes:
       - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
+      - office_backups:/app/office-backups
+
+  onlyoffice:
+    image: onlyoffice/documentserver:9.3
+    restart: unless-stopped
+    environment:
+      JWT_ENABLED: 'true'
+      JWT_HEADER: Authorization
+      ALLOW_PRIVATE_IP_ADDRESS: 'true'
+    ports:
+      - '127.0.0.1:8082:80'
+    shm_size: '1gb'
+    # Secret JWT = sha256 của khoá RS256 sẵn có (cùng công thức với procedure-service), không cần biến .env riêng
+    entrypoint: ["sh", "-c", "export JWT_SECRET=$${ONLYOFFICE_JWT_SECRET:-$$(sha256sum /run/keys/jwt_private.pem | cut -d' ' -f1)}; exec /app/ds/run-document-server.sh"]
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}:/run/keys:ro
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost/healthcheck']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
 
   rag-service:
     build:
@@ -156,6 +222,10 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       RAG_DATABASE_URL: ${RAG_DATABASE_URL:-}
+      # Chống treo khi kết nối DB chết ngầm (giây; 0 = bỏ giới hạn)
+      DB_CONNECT_TIMEOUT_SECONDS: ${DB_CONNECT_TIMEOUT_SECONDS:-10}
+      DB_COMMAND_TIMEOUT_SECONDS: ${DB_COMMAND_TIMEOUT_SECONDS:-20}
+      DB_POOL_RECYCLE_SECONDS: ${DB_POOL_RECYCLE_SECONDS:-300}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-gemini}
@@ -179,6 +249,7 @@ services:
     environment:
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       CONTRACT_DATABASE_URL: ${CONTRACT_DATABASE_URL:-}
+      PROCEDURE_DATABASE_URL: ${PROCEDURE_DATABASE_URL:-}
       CONTRACT_SUPABASE_URL: ${CONTRACT_SUPABASE_URL:-}
       CONTRACT_SUPABASE_SERVICE_ROLE_KEY: ${CONTRACT_SUPABASE_SERVICE_ROLE_KEY:-}
       CONTRACT_STORAGE_BUCKET: ${CONTRACT_STORAGE_BUCKET:-contract-files}
@@ -213,6 +284,7 @@ services:
     tmpfs: [/tmp:rw,noexec,nosuid,size=256m,mode=1777]
     environment:
       CONTRACT_DATABASE_URL: ${CONTRACT_DATABASE_URL:-}
+      PROCEDURE_DATABASE_URL: ${PROCEDURE_DATABASE_URL:-}
       CONTRACT_SUPABASE_URL: ${CONTRACT_SUPABASE_URL:-}
       CONTRACT_SUPABASE_SERVICE_ROLE_KEY: ${CONTRACT_SUPABASE_SERVICE_ROLE_KEY:-}
       CONTRACT_STORAGE_BUCKET: ${CONTRACT_STORAGE_BUCKET:-contract-files}
@@ -310,6 +382,11 @@ services:
     environment:
       CONSULTATION_DATABASE_URL: ${CONSULTATION_DATABASE_URL:-}
       LAWYER_SERVICE_URL: ${LAWYER_SERVICE_URL:-http://lawyer-service:8000}
+      USER_SERVICE_URL: ${USER_SERVICE_URL:-http://user-service:8000}
+      AGENT_SERVICE_URL: ${AGENT_SERVICE_URL:-http://agent-service:8000}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      CONSULTATION_TERMS_VERSION: ${CONSULTATION_TERMS_VERSION:-2026-11-01}
+      CONSULTATION_ALLOWED_ORIGINS: ${CONSULTATION_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8000}
       JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
       RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq-core-events:5672/
@@ -389,5 +466,8 @@ services:
           - rabbitmq-core-events
 
 volumes:
+  onlyoffice_data:
+  onlyoffice_logs:
+  office_backups:
   notification-data:
   rabbitmq-data:

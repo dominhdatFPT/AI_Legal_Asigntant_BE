@@ -4,7 +4,7 @@ import logging
 import time
 
 from app.core.config import get_settings
-from app.services import contract_review, prompts, rag_client, responder
+from app.services import contract_review, document_gate, prompts, rag_client, responder
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,26 @@ async def search_for_review(queries: list[str], request_id: str | None) -> list[
     return contract_review.merge_chunks([r for r in results if not isinstance(r, BaseException)])
 
 
+def _ask_contract_type(contract_type: str, user_content: str, request_id: str | None) -> str | None:
+    # Lỗi bất ngờ thì rà soát như trước, không làm hỏng câu trả lời
+    try:
+        return document_gate.ask_contract_type(contract_type, user_content, request_id=request_id)
+    except Exception:
+        logger.warning("agent kiểm tra loại hợp đồng lỗi, bỏ qua bước hỏi lại request_id=%s", request_id, exc_info=True)
+        return None
+
+
+def _document_facts(documents: list[dict], request_id: str | None, include_checklist: bool = False) -> list[str] | None:
+    # Lỗi bất ngờ thì coi như không có dữ kiện: vẫn rà soát như trước, không làm hỏng câu trả lời
+    try:
+        if include_checklist:
+            return document_gate.facts(documents, request_id=request_id, include_checklist=True)
+        return document_gate.facts(documents, request_id=request_id)
+    except Exception:
+        logger.warning("agent tự kiểm tra tài liệu lỗi, bỏ qua dữ kiện request_id=%s", request_id, exc_info=True)
+        return None
+
+
 async def review(
     user_content: str,
     history: list[dict],
@@ -38,10 +58,23 @@ async def review(
     contract_type = next(
         (t for t in (contract_review.detect_contract_type(d["text"]) for d in documents) if t != "khac"), "khac",
     )
+    if settings.document_ask_type_enabled and not settings.llm_bypass:
+        question = _ask_contract_type(contract_type, user_content, request_id)
+        if question:
+            return {
+                "content": question,
+                "metadata": {
+                    "rag_chunk_ids": [], "model": None, "tokens_used": None,
+                    "type": "document_need_type", "mode": "contract_review", "contract_type": contract_type,
+                },
+            }
     queries = contract_review.review_queries(contract_type, user_content, documents[0]["text"])
     # Không tìm được câu nào (tài liệu rỗng, câu hỏi chung chung) thì tìm theo câu hỏi như thường
     queries = queries or [user_content]
     chunks = await search_for_review(queries, request_id)
+    facts = None
+    if settings.document_facts_enabled or settings.document_checklist_enabled:
+        facts = _document_facts(documents, request_id, include_checklist=settings.document_checklist_enabled)
     # Không thử lại cùng provider: 40s x 2 lần vượt timeout của gateway, người dùng gửi lại và bị trả lời trùng
     llm_options = {
         "max_output_tokens": settings.llm_review_max_output_tokens,
@@ -55,7 +88,7 @@ async def review(
     )
     rag_done = time.perf_counter()
     return await responder.respond(
-        prompts.build_review_prompt(chunks, documents), chunks, history, user_content,
+        prompts.build_review_prompt(chunks, documents, facts=facts), chunks, history, user_content,
         queries=queries, request_id=request_id, started=started, rag_done=rag_done,
         llm_options=llm_options, metadata_extra=metadata_extra,
     )

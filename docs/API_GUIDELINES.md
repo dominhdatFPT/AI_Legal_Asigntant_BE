@@ -238,7 +238,7 @@ Danh sách (có phân trang):
   - `/ws/consultations/lobby`: phòng chờ, chỉ luật sư được hành nghề; nhận câu hỏi mới, câu hỏi đã có người nhận và câu hỏi bị xóa.
   - `/ws/consultations/me`: mọi user đã đăng nhập; nhận sự kiện của các cuộc tư vấn của mình để hiện chấm đỏ.
   - `/ws/consultations/{id}`: box chat riêng, chỉ 2 người trong cuộc.
-- **Xác thực:** trình duyệt không gắn được header cho WebSocket, nên tin nhắn **đầu tiên** sau khi kết nối phải là:
+- **Xác thực:** trình duyệt dùng cookie HttpOnly `access_token`, Origin phải nằm trong `CONSULTATION_ALLOWED_ORIGINS`. Client không có cookie (Postman, test) gửi tin nhắn **đầu tiên** sau khi kết nối:
   ```json
   { "type": "auth", "data": { "token": "<JWT>" } }
   ```

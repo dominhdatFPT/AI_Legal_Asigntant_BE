@@ -94,6 +94,9 @@ def test_chua_khai_ho_so_thi_data_null(client, me):
     res = client.get(URL, headers=headers)
     assert res.status_code == 200
     assert res.json()["data"] is None
+    me_res = client.get("/api/v1/users/me", headers=headers).json()["data"]
+    assert me_res["has_citizen_profile"] is False
+    assert me_res["citizen_profile"] is None
 
 
 def test_chua_dang_nhap_tra_401(client):
@@ -129,6 +132,8 @@ def test_luu_ho_so_doi_ten_tai_khoan_va_luu_sdt(client, db, me):
     assert user.phone == "0912345678"
     me_res = client.get("/api/v1/users/me", headers=headers).json()["data"]
     assert me_res["full_name"] == "NGUYỄN VĂN AN"
+    assert me_res["has_citizen_profile"] is True
+    assert me_res["citizen_profile"]["id_number"] == "001095012345"
 
 
 def test_noi_o_hien_tai_khac_thuong_tru(client, me):

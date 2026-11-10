@@ -1,6 +1,7 @@
+import json
 import logging
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from typing import Any, Callable, Dict, List, Optional
 
 from app.schemas.form_schema import (
@@ -69,7 +70,7 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=True,
             placeholder="001095012345",
             section=section,
-            validation_regex="^[0-9]{12}$",
+            validation_regex="^[0-9]{9,12}$",
         ),
         FormField(
             name=f"{prefix}_id_issue_date",
@@ -93,7 +94,7 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=True,
             placeholder="0912345678",
             section=section,
-            validation_regex="^0[35789][0-9]{8}$",
+            validation_regex="^[0-9]{10,11}$",
         ),
         FormField(
             name=f"{prefix}_email",
@@ -102,7 +103,6 @@ def get_applicant_block(prefix: str = "applicant", section: str = "applicant") -
             required=False,
             placeholder="example@gmail.com",
             section=section,
-            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name=f"{prefix}_permanent_address",
@@ -272,7 +272,6 @@ def get_business_info_block(section: str = "business") -> List[FormField]:
             required=True,
             placeholder="02838123456",
             section=section,
-            validation_regex="^0[0-9]{9,10}$",
         ),
         FormField(
             name="headquarters_email",
@@ -281,7 +280,6 @@ def get_business_info_block(section: str = "business") -> List[FormField]:
             required=False,
             placeholder="contact@company.vn",
             section=section,
-            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name="charter_capital",
@@ -389,7 +387,7 @@ def get_fields_mau_so_18(change_hint: Optional[str] = None) -> List[FormField]:
             required=True,
             placeholder="0912345678",
             section="applicant",
-            validation_regex="^0[35789][0-9]{8}$",
+            validation_regex="^[0-9]{10,11}$",
         ),
         FormField(
             name="applicant_email",
@@ -398,7 +396,6 @@ def get_fields_mau_so_18(change_hint: Optional[str] = None) -> List[FormField]:
             required=False,
             placeholder="example@gmail.com",
             section="applicant",
-            validation_regex=r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$",
         ),
         FormField(
             name="change_content",
@@ -869,7 +866,6 @@ def get_fields_hkd_001() -> List[FormField]:
             required=True,
             placeholder="0912345678",
             section="business",
-            validation_regex="^0[0-9]{9,10}$",
         ),
         FormField(
             name="charter_capital",
@@ -1494,80 +1490,62 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
 }
 
 
-def convert_dynamic_template_to_schema(row_dict: dict, content: dict, code_upper: str) -> ProcedureFormSchema:
-    domain_val = row_dict.get("domain") or content.get("domain") or "dat_dai"
-    domain = "land" if domain_val in ("land", "dat_dai") else "business"
+def _convert_dynamic_template_to_schema(row_dict: dict, content: dict, code_upper: str) -> ProcedureFormSchema:
+    """Convert a published DB template into the same schema used by static forms."""
+    domain_value = row_dict.get("domain") or content.get("domain") or "dat_dai"
+    domain = "land" if domain_value in ("land", "dat_dai") else "business"
     target_table = "land_procedure_records" if domain == "land" else "business_procedure_records"
     name = row_dict.get("name") or content.get("name") or f"Thủ tục {code_upper}"
+    sections: List[FormSection] = []
+    fields: List[FormField] = []
 
-    sections_data = content.get("sections") or []
-    final_sections: List[FormSection] = []
-    final_fields: List[FormField] = []
-
-    for s_idx, sec in enumerate(sections_data):
-        sec_id = str(sec.get("id") or f"sec_{s_idx + 1}")
-        sec_title = sec.get("title") or f"Mục {s_idx + 1}"
-        final_sections.append(
-            FormSection(
-                key=sec_id,
-                title=sec_title,
-                order=s_idx + 1,
-            )
-        )
-
-        blocks = sec.get("blocks") or []
-        for b_idx, blk in enumerate(blocks):
-            inst_id = blk.get("instance_id") or f"blk_{b_idx + 1}"
-            b_key = blk.get("block_key", "")
-            f_list = blk.get("fields") or []
-
-            if b_key == "free_field" and not f_list:
-                f_list = [{
+    for section_index, section in enumerate(content.get("sections") or []):
+        section_key = str(section.get("id") or f"section_{section_index + 1}")
+        sections.append(FormSection(key=section_key, title=section.get("title") or f"Mục {section_index + 1}", order=section_index + 1))
+        for block_index, block in enumerate(section.get("blocks") or []):
+            instance_id = block.get("instance_id") or f"block_{block_index + 1}"
+            block_fields = block.get("fields") or []
+            if block.get("block_key") == "free_field" and not block_fields:
+                block_fields = [{
                     "key": "value",
-                    "label": blk.get("label") or "Trường tự do",
-                    "type": blk.get("type", "text"),
-                    "required": blk.get("required", False)
+                    "label": block.get("label") or "Trường tự do",
+                    "type": block.get("type", "text"),
+                    "required": block.get("required", False),
                 }]
 
-            for f_idx, fld in enumerate(f_list):
-                raw_key = fld.get("key") or fld.get("name") or f"field_{f_idx + 1}"
-                field_name = f"{inst_id}.{raw_key}" if (inst_id and "." not in raw_key) else raw_key
-                label = fld.get("label") or raw_key
-                f_type_str = str(fld.get("type", "text")).lower()
-
-                if f_type_str == "textarea":
-                    field_type = FieldType.textarea
-                elif f_type_str in ("date", "dob", "issue_date", "past_date"):
-                    field_type = FieldType.date
-                elif f_type_str == "number":
-                    field_type = FieldType.number
-                elif f_type_str == "select":
-                    field_type = FieldType.select
-                elif f_type_str == "checkbox":
-                    field_type = FieldType.checkbox
-                elif f_type_str == "radio":
-                    field_type = FieldType.radio
-                else:
-                    field_type = FieldType.text
-
+            for field_index, field in enumerate(block_fields):
+                raw_key = field.get("key") or field.get("name") or f"field_{field_index + 1}"
+                field_name = f"{instance_id}.{raw_key}" if instance_id and "." not in raw_key else raw_key
+                field_type_name = str(field.get("type", "text")).lower()
+                field_type = {
+                    "textarea": FieldType.textarea,
+                    "date": FieldType.date,
+                    "dob": FieldType.date,
+                    "issue_date": FieldType.date,
+                    "past_date": FieldType.date,
+                    "number": FieldType.number,
+                    "select": FieldType.select,
+                    "checkbox": FieldType.checkbox,
+                    "radio": FieldType.radio,
+                }.get(field_type_name, FieldType.text)
                 options = None
-                if fld.get("options") and isinstance(fld["options"], list):
-                    options = [FormFieldOption(value=str(o), label=str(o)) for o in fld["options"]]
-
-                required = bool(fld.get("required", False))
-                placeholder = fld.get("placeholder")
-
-                final_fields.append(
-                    FormField(
-                        name=field_name,
-                        label=label,
-                        field_type=field_type,
-                        required=required,
-                        placeholder=placeholder,
-                        options=options,
-                        section=sec_id,
-                    )
-                )
+                if isinstance(field.get("options"), list):
+                    options = [
+                        FormFieldOption(
+                            value=str(option.get("value", option)) if isinstance(option, dict) else str(option),
+                            label=str(option.get("label", option.get("value", option))) if isinstance(option, dict) else str(option),
+                        )
+                        for option in field["options"]
+                    ]
+                fields.append(FormField(
+                    name=field_name,
+                    label=field.get("label") or raw_key,
+                    field_type=field_type,
+                    required=bool(field.get("required", False)),
+                    placeholder=field.get("placeholder"),
+                    options=options,
+                    section=section_key,
+                ))
 
     return ProcedureFormSchema(
         procedure_code=code_upper,
@@ -1575,88 +1553,64 @@ def convert_dynamic_template_to_schema(row_dict: dict, content: dict, code_upper
         domain=domain,
         target_table=target_table,
         template_filename=None,
-        sections=final_sections,
-        fields=final_fields,
+        sections=sections,
+        fields=fields,
     )
 
 
 def get_dynamic_form_schema(procedure_code: str) -> Optional[ProcedureFormSchema]:
-    """
-    Kiểm tra xem thủ tục có mẫu đơn dùng chung (Dynamic Form Template)
-    đã được Admin xuất bản (published) hay không.
-    Nếu có, chuyển đổi cấu trúc sections & blocks của mẫu đơn thành ProcedureFormSchema
-    để ưu tiên trả về cho người dân điền đơn.
-    """
+    """Return the latest published DB form, or None so static forms remain the fallback."""
     try:
         from app.database import get_engine
         from sqlalchemy import text
-        import json
+
         engine = get_engine()
         if not engine:
             return None
-
         code_upper = procedure_code.strip().upper()
         with engine.connect() as conn:
-            proc_id_str = None
-            try:
-                proc_row = conn.execute(
-                    text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
-                    {"code": code_upper}
-                ).fetchone()
-                if proc_row:
-                    proc_id_str = str(proc_row[0])
-            except Exception:
-                pass
-
+            procedure_row = conn.execute(
+                text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
+                {"code": code_upper},
+            ).fetchone()
             params = {"code": code_upper}
-            where_proc = "(UPPER(procedure_id) = :code OR UPPER(code) = :code"
-            if proc_id_str:
-                params["proc_id"] = proc_id_str
-                where_proc += " OR procedure_id = :proc_id"
-            where_proc += ")"
-
-            sql = f"""
+            where_clause = "(UPPER(procedure_id) = :code OR UPPER(code) = :code"
+            if procedure_row:
+                params["procedure_uuid"] = str(procedure_row[0])
+                where_clause += " OR procedure_id = :procedure_uuid"
+            where_clause += ")"
+            row = conn.execute(text(f"""
                 SELECT * FROM public.dynamic_form_templates
-                WHERE {where_proc}
+                WHERE {where_clause}
                   AND status = 'published'
                   AND deleted_at IS NULL
                 ORDER BY version DESC, updated_at DESC
                 LIMIT 1
-            """
-            row = conn.execute(text(sql), params).fetchone()
+            """), params).fetchone()
             if not row:
                 return None
-
-            m = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
-            content = m.get("content")
+            record = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
+            content = record.get("content")
             if isinstance(content, str):
-                try:
-                    content = json.loads(content)
-                except Exception:
-                    content = {}
+                content = json.loads(content)
             if not isinstance(content, dict) or not content.get("sections"):
                 return None
-
-            return convert_dynamic_template_to_schema(m, content, code_upper)
-    except Exception as e:
-        logger.warning(f"Không thể tải dynamic form schema cho thủ tục {procedure_code}: {e}")
+            return _convert_dynamic_template_to_schema(record, content, code_upper)
+    except Exception as exc:
+        # A missing/unmigrated dynamic table must not break the existing static forms.
+        logger.info("Dynamic form unavailable for %s; using static schema: %s", procedure_code, exc)
         return None
 
 
 def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
     """
-    Hàm trung gian (Dispatcher): Nhận vào mã thủ tục (ví dụ: DD-001 hoặc HKD-001).
-    Ưu tiên 1: Lấy schema từ Mẫu đơn dùng chung (Dynamic Form Template) do Admin tùy chỉnh & xuất bản.
-    Ưu tiên 2: Fallback về schema mặc định ban đầu từ 26 hàm thủ tục cố định.
+    Ưu tiên mẫu động đã publish; nếu không có thì dùng schema tĩnh local.
     """
     code_upper = procedure_code.strip().upper()
-
-    # 1. Thử lấy schema từ mẫu đơn động đã xuất bản của Admin
     dynamic_schema = get_dynamic_form_schema(code_upper)
-    if dynamic_schema and len(dynamic_schema.fields) > 0:
+    if dynamic_schema and dynamic_schema.fields:
         return dynamic_schema
 
-    # 2. Fallback về cấu hình tĩnh mặc định
     handler = PROCEDURE_FIELD_DISPATCHER.get(code_upper)
     if not handler:
         raise ValueError(f"Không tìm thấy cấu hình biểu mẫu cho mã thủ tục: '{procedure_code}'")
@@ -1756,11 +1710,7 @@ def _format_error(field: FormField, value) -> Optional[str]:
             return "Phải là số."
     elif kind == FieldType.date:
         try:
-            d = date.fromisoformat(value)
-            if any(kw in field.name for kw in ("_dob", "date_of_birth", "_issue_date")):
-                vn_today = datetime.now(timezone(timedelta(hours=7))).date()
-                if d > vn_today:
-                    return "Ngày không được ở tương lai."
+            date.fromisoformat(value)
         except (TypeError, ValueError):
             return "Ngày phải theo dạng YYYY-MM-DD."
     elif kind == FieldType.checkbox:

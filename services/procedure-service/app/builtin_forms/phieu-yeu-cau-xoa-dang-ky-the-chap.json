@@ -1,0 +1,301 @@
+{
+  "schema_version": 1,
+  "name": "Phiếu yêu cầu xóa đăng ký biện pháp bảo đảm bằng quyền sử dụng đất",
+  "code": "DD-011",
+  "procedure_code": "DD-011",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Phiếu yêu cầu xóa đăng ký biện pháp bảo đảm bằng quyền sử dụng đất (Giải chấp Sổ đỏ)",
+    "Phiếu yêu cầu xóa đăng ký biện pháp bảo đảm bằng quyền sử dụng đất, tài sản gắn liền với đất (03a)"
+  ],
+  "sections": [
+    {
+      "id": "requester",
+      "title": "Người yêu cầu xóa đăng ký",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "requester_info",
+          "instance_id": "requester_info",
+          "block_key": "free_field",
+          "title": "Người làm hồ sơ",
+          "order": 1,
+          "fields": [
+            {
+              "key": "role_secured_party",
+              "label": "Bên nhận bảo đảm",
+              "word_key": "requester_secured_party",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_debtor",
+              "label": "Bên bảo đảm",
+              "word_key": "requester_debtor",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_transferee",
+              "label": "Người nhận chuyển giao tài sản bảo đảm",
+              "word_key": "requester_transferee",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_trustee",
+              "label": "Quản tài viên / doanh nghiệp quản lý tài sản",
+              "word_key": "requester_trustee",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_enforcement",
+              "label": "Cơ quan thi hành án / Chấp hành viên",
+              "word_key": "requester_enforcement",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_other",
+              "label": "Cơ quan / người có thẩm quyền khác",
+              "word_key": "requester_other_role",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "role_branch",
+              "label": "Chi nhánh của pháp nhân / người đại diện",
+              "word_key": "requester_branch",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "name",
+              "label": "Họ và tên / tên tổ chức",
+              "word_key": "requester_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "requester_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "contact_name",
+              "label": "Người liên hệ",
+              "word_key": "contact_name",
+              "type": "text",
+              "required": false,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa thông tin gốc trong đơn."
+            },
+            {
+              "key": "phone",
+              "label": "Số điện thoại",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email",
+              "word_key": "email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        },
+        {
+          "id": "other_requesters",
+          "instance_id": "other_requesters",
+          "block_key": "repeat_group",
+          "title": "Người cùng yêu cầu khác (nếu có)",
+          "order": 2,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người yêu cầu khác",
+              "word_key": "other_requester_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "role",
+              "label": "Tư cách / chức danh",
+              "word_key": "other_requester_role",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "identity",
+              "label": "Số định danh / giấy tờ",
+              "word_key": "other_requester_identity",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "other_requester_address",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cancellation",
+      "title": "Căn cứ xóa đăng ký và kết quả",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "cancellation_info",
+          "instance_id": "cancellation_info",
+          "block_key": "free_field",
+          "title": "Thông tin xóa đăng ký",
+          "order": 1,
+          "fields": [
+            {
+              "key": "receiving_agency",
+              "label": "Cơ quan đăng ký có thẩm quyền",
+              "word_key": "receiving_agency",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "grounds",
+              "label": "Căn cứ xóa đăng ký (nêu rõ nghĩa vụ đã chấm dứt / căn cứ pháp lý)",
+              "word_key": "cancellation_grounds",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "fee_exempt",
+              "label": "Thuộc đối tượng không phải nộp phí đăng ký",
+              "word_key": "fee_exempt",
+              "type": "checkbox",
+              "required": false
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ kèm theo",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "result_method",
+              "label": "Cách thức nhận kết quả",
+              "word_key": "result_method",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Nhận trực tiếp tại cơ quan đăng ký",
+                "Qua dịch vụ bưu chính",
+                "Cách thức điện tử (nếu pháp luật quy định)",
+                "Cách thức khác nếu được đồng ý"
+              ]
+            },
+            {
+              "key": "result_address",
+              "label": "Tên và địa chỉ người nhận qua bưu chính (nếu chọn)",
+              "word_key": "result_address",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "result_electronic",
+              "label": "Địa chỉ / cách thức nhận điện tử (nếu chọn)",
+              "word_key": "result_electronic",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "recipient",
+              "label": "Người đại diện ký thay (nếu có)",
+              "word_key": "requester_signer",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập phiếu",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "other_requesters",
+      "title": "Người cùng yêu cầu xóa đăng ký",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên người yêu cầu khác",
+          "word_key": "other_requester_name",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "role",
+          "label": "Tư cách / chức danh",
+          "word_key": "other_requester_role",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "identity",
+          "label": "Số định danh / giấy tờ",
+          "word_key": "other_requester_identity",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "other_requester_address",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

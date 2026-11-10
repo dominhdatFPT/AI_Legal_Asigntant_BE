@@ -9,9 +9,11 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.database import get_engine
-from sqlalchemy.exc import SQLAlchemyError
 from app.api.procedures import router as procedures_router
 from app.api.templates import router as templates_router
+from app.api.mau18 import router as mau18_router
+from app.api.custom_form_templates import router as custom_form_templates_router
+from app.api.office_editor import router as office_editor_router
 from app.api.dynamic_form_templates import (
     admin_router as dft_admin_router,
     citizen_router as dft_citizen_router,
@@ -21,11 +23,7 @@ from app.core.exceptions import (
     TemplateNotDraftError,
     TemplateInvalidStatusError,
 )
-from app.repositories.procedure_repository import (
-    FormDataInvalid,
-    ProcedureDbUnavailable,
-    ProcedureInvalidData,
-)
+from app.repositories.procedure_repository import FormDataInvalid, ProcedureDbUnavailable, ProcedureInvalidData
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +37,17 @@ async def lifespan(app: FastAPI):
         engine = get_engine()
         if engine:
             logger.info("Kết nối cơ sở dữ liệu đã sẵn sàng.")
+            import threading
+            def _bg_seed():
+                try:
+                    from app.api.custom_form_templates import ensure_builtin_seeded
+                    from app.repositories.procedure_repository import db_connection
+                    with db_connection(write=True) as conn:
+                        ensure_builtin_seeded(conn)
+                    logger.info("Hoàn tất kiểm tra seed mẫu đơn ban đầu.")
+                except Exception as err:
+                    logger.warning(f"Seed mẫu đơn ban đầu gặp lỗi: {err}")
+            threading.Thread(target=_bg_seed, daemon=True).start()
     except Exception as e:
         logger.warning(f"Chưa thể kết nối CSDL khi khởi động: {e}")
     yield
@@ -155,7 +164,6 @@ async def invalid_data_handler(request: Request, exc: ProcedureInvalidData):
 
 @app.exception_handler(ProcedureDbUnavailable)
 async def db_unavailable_handler(request: Request, exc: ProcedureDbUnavailable):
-    logger.warning("Database thủ tục lỗi: %s - %s", type(exc).__name__, exc)
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
     return JSONResponse(
         status_code=503,
@@ -170,7 +178,7 @@ async def db_unavailable_handler(request: Request, exc: ProcedureDbUnavailable):
     )
 
 
-# Repository mẫu đơn dùng chung không tự bắt lỗi DB (mất kết nối, chưa chạy 007...) → cùng 503 như trên.
+# Dynamic form repository dùng SQLAlchemy và đẩy lỗi DB lên cùng response 503.
 app.add_exception_handler(SQLAlchemyError, db_unavailable_handler)
 
 
@@ -179,14 +187,7 @@ async def template_not_found_handler(request: Request, exc: TemplateNotFoundErro
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
     return JSONResponse(
         status_code=404,
-        content={
-            "data": None,
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-            },
-            "request_id": req_id,
-        },
+        content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
     )
 
 
@@ -195,14 +196,7 @@ async def template_not_draft_handler(request: Request, exc: TemplateNotDraftErro
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
     return JSONResponse(
         status_code=409,
-        content={
-            "data": None,
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-            },
-            "request_id": req_id,
-        },
+        content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
     )
 
 
@@ -211,31 +205,7 @@ async def template_invalid_status_handler(request: Request, exc: TemplateInvalid
     req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
     return JSONResponse(
         status_code=409,
-        content={
-            "data": None,
-            "error": {
-                "code": exc.code,
-                "message": exc.message,
-            },
-            "request_id": req_id,
-        },
-    )
-
-
-@app.exception_handler(SQLAlchemyError)
-async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
-    logger.error(f"SQLAlchemy database error: {exc}")
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
-    return JSONResponse(
-        status_code=503,
-        content={
-            "data": None,
-            "error": {
-                "code": "DATABASE_UNAVAILABLE",
-                "message": "Không kết nối được cơ sở dữ liệu, vui lòng thử lại sau giây lát.",
-            },
-            "request_id": req_id,
-        },
+        content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
     )
 
 
@@ -256,80 +226,18 @@ async def internal_error_handler(request: Request, exc: Exception):
     )
 
 
-# === MẪU ĐƠN DÙNG CHUNG (Dynamic Form Templates) ===
-# Mount TRƯỚC templates_router và procedures_router.
-# Lý do: procedures_router có route "/{procedure_id}" (catch-all) ở cuối;
-# nếu mount sau, request GET /form-templates bị nhầm thành procedure_id="form-templates" -> 404.
+# Dynamic form phải đăng ký trước templates/procedures router để route "/form-templates" không bị bắt nhầm bởi "/{procedure_id}".
 app.include_router(dft_admin_router, prefix="/api/v1/procedures", tags=["Dynamic Form Templates - Admin"])
 app.include_router(dft_citizen_router, prefix="/api/v1/procedures", tags=["Dynamic Form Templates - Citizen"])
-# Alias không có /v1 (Nginx rewrite /api/procedures/ -> /api/v1/procedures/)
 app.include_router(dft_admin_router, prefix="/api/procedures", tags=["DFT Admin Alias"], include_in_schema=False)
 app.include_router(dft_citizen_router, prefix="/api/procedures", tags=["DFT Citizen Alias"], include_in_schema=False)
 
-# Kho mẫu đơn tham khảo file PDF/DOCX (templates_router)
+# Kho mẫu đơn tham khảo file PDF/DOCX.
 app.include_router(templates_router, prefix="/api/v1/procedures", tags=["Form templates"])
 app.include_router(templates_router, prefix="/api/procedures", tags=["Form templates Alias"], include_in_schema=False)
-# Thủ tục hành chính (procedures_router)
+app.include_router(mau18_router, prefix="/api/v1/procedures", tags=["Form templates"])
+app.include_router(custom_form_templates_router, prefix="/api/v1/procedures", tags=["User configured forms"])
+app.include_router(office_editor_router, prefix="/api/v1/procedures", tags=["Word editor"])
+app.include_router(custom_form_templates_router, prefix="/api/procedures", tags=["User configured forms alias"], include_in_schema=False)
 app.include_router(procedures_router, prefix="/api/v1/procedures", tags=["Procedures"])
 app.include_router(procedures_router, prefix="/api/procedures", tags=["Procedures-Alias"], include_in_schema=False)
-
-# Mock Auth cho môi trường dev local độc lập (đáp ứng protectPage của FE khi chạy không có NGINX gateway)
-if True:
-    from fastapi import APIRouter
-    dev_router = APIRouter(prefix="/api/users", tags=["Dev Mock Auth"])
-
-    @dev_router.get("/me")
-    async def dev_me(request: Request):
-        role = request.cookies.get("dev_role") or request.headers.get("X-Dev-Role") or "admin"
-        return {
-            "data": {
-                "id": "dev-user-01",
-                "role": role,
-                "full_name": "Quản Trị Viên Hệ Thống" if role == "admin" else "Nguyễn Văn Công Dân",
-                "username": role,
-                "email": f"{role}@dichvucong.gov.vn",
-            }
-        }
-
-    @dev_router.post("/auth/login")
-    async def dev_login(request: Request):
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        username = body.get("username", "admin")
-        role = "admin" if "admin" in username else "citizen"
-        return {
-            "data": {
-                "token": "dev-mock-jwt-token",
-                "user": {
-                    "id": "dev-user-01",
-                    "role": role,
-                    "full_name": "Quản Trị Viên" if role == "admin" else "Nguyễn Văn Công Dân",
-                    "username": username,
-                    "email": f"{username}@dichvucong.gov.vn",
-                }
-            }
-        }
-
-    @dev_router.get("/me/citizen-profile")
-    async def dev_citizen_profile():
-        return {
-            "data": {
-                "full_name": "Nguyễn Văn Công Dân",
-                "identity_number": "001200000001",
-                "date_of_birth": "1990-01-01",
-                "issue_date": "2021-01-01",
-                "issue_place": "Cục CS QLHC về TTXH",
-                "permanent_address": "Số 1 Tràng Tiền, Hoàn Kiếm, Hà Nội",
-                "phone": "0912345678",
-                "email": "congdan@example.com",
-            }
-        }
-
-    @dev_router.put("/me/citizen-profile")
-    async def dev_put_citizen_profile():
-        return {"data": {"success": True}}
-
-    app.include_router(dev_router)
-

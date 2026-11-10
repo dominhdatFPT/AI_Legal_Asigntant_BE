@@ -6,6 +6,7 @@ import time
 import httpx
 
 from app.core.config import get_settings
+from app.services import cache
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,26 @@ _FAIL_LIMIT = 3
 _OPEN_SECONDS = 30
 _fails = 0
 _open_until = 0.0
+
+
+# Cache kết quả tìm luật (RAG_CACHE_ENABLED, mặc định tắt): cùng câu tìm + top_k luôn ra cùng đoạn luật, trừ khi nạp luật mới.
+# shortcut: cache theo từng process, mất khi restart; nạp luật mới xong phải restart agent-service để xoá cache.
+_cache: cache.TTLCache | None = None
+
+
+def _get_cache() -> cache.TTLCache:
+    """Tạo lần đầu cần dùng, theo cấu hình lúc đó."""
+    global _cache
+    if _cache is None:
+        s = get_settings()
+        _cache = cache.TTLCache(s.rag_cache_max_items, s.rag_cache_ttl_seconds)
+    return _cache
+
+
+def clear_cache() -> None:
+    """Xoá cache; lần dùng sau tạo lại theo cấu hình (cho test)."""
+    global _cache
+    _cache = None
 
 
 class RAGError(Exception):
@@ -68,9 +89,21 @@ async def search(
     {"id", "content", "score", "section_info": {"chuong", "dieu", "khoan", "diem"},
      "document": {"id", "title", "doc_number", "doc_type"}}
     """
-    resp = await _post(
-        "/internal/v1/rag/search", {"query": query[:MAX_QUERY_LENGTH], "top_k": top_k}, request_id, transport
-    )
+    query = query[:MAX_QUERY_LENGTH]
+    key = None
+    if get_settings().rag_cache_enabled:
+        # Trúng cache thì trả luôn, không gọi rag-service (kể cả khi circuit breaker đang ngắt). Lỗi cache thì gọi rag như không có cache
+        try:
+            key = (cache.normalize(query), top_k)
+            hit = _get_cache().get(key)
+        except Exception:  # noqa: BLE001 - cache là phần phụ, không được làm hỏng việc tìm luật
+            logger.warning("rag cache lỗi khi đọc, gọi rag-service như không có cache, request_id=%s", request_id, exc_info=True)
+            key, hit = None, None
+        if hit is not None:
+            logger.info("rag cache hit request_id=%s top_k=%d", request_id, top_k)
+            return hit
+
+    resp = await _post("/internal/v1/rag/search", {"query": query, "top_k": top_k}, request_id, transport)
     try:
         resp.raise_for_status()
         chunks = resp.json()["data"]["chunks"]
@@ -81,4 +114,10 @@ async def search(
 
     if not isinstance(chunks, list):
         raise RAGError("rag-service trả kết quả không hợp lệ")
+    # Chỉ lưu danh sách hợp lệ và không rỗng (rỗng thường là kho chưa có dữ liệu, không nên giữ tới khi nạp luật rồi restart)
+    if key is not None and chunks:
+        try:
+            _get_cache().set(key, chunks)
+        except Exception:  # noqa: BLE001
+            logger.warning("rag cache lỗi khi ghi, bỏ qua, request_id=%s", request_id, exc_info=True)
     return chunks

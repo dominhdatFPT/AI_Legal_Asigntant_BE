@@ -19,6 +19,8 @@ tags:
     description: Kiểm tra service còn chạy
   - name: Conversations
     description: Quản lý hội thoại của người dùng đang đăng nhập
+  - name: Internal
+    description: API nội bộ giữa các service, kèm `X-Internal-Token`. Gateway không chuyển tiếp `/internal/...`
 
 paths:
   /agent/health:
@@ -195,6 +197,91 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/ConversationForbidden" }
         "404": { $ref: "#/components/responses/ConversationNotFound" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /agent/conversations/{conversation_id}/transcript:
+    get:
+      tags: [Conversations]
+      operationId: getConversationTranscript
+      summary: Xem cả hội thoại như một bản kịch bản (chỉ đọc)
+      description: |
+        Chỉ xem được hội thoại của chính mình. Lấy TẤT CẢ tin nhắn (không áp giới hạn lịch sử gửi cho AI),
+        gom thành các lượt: một lượt là tin người dùng rồi tin trợ lý liền sau. Tin người dùng cuối chưa có
+        câu trả lời vẫn thành một lượt với `assistant: null`. Tối đa 500 tin đầu theo thứ tự thời gian
+        (bằng nhau thì theo id); dài hơn thì `truncated: true`.
+
+        `format=text` trả văn bản thuần (`text/plain; charset=utf-8`, KHÔNG có phong bì `data/error/request_id`):
+        dòng `Hội thoại: <tiêu đề>`, dòng `Bắt đầu: <dd/mm/yyyy HH:MM giờ Việt Nam>`, rồi mỗi lượt gồm dòng
+        `Lượt N`, `  Người dùng: ...`, `  Trợ lý: ...`, cách nhau một dòng trống; xuống dòng bên trong nội dung tin
+        được giữ nguyên. `download=true` (chỉ có tác dụng với `format=text`) thêm header `Content-Disposition`
+        để tải về với tên `kich-ban-<8 ký tự đầu của id>.txt`.
+      x-status: implemented
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConversationId"
+        - name: format
+          in: query
+          required: false
+          description: "`json` (mặc định) hoặc `text` (văn bản thuần)"
+          schema: { type: string, enum: [json, text], default: json }
+        - name: download
+          in: query
+          required: false
+          description: "`true` + `format=text` thì thêm header `Content-Disposition: attachment`"
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Kịch bản hội thoại
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+            Content-Disposition:
+              description: Chỉ có khi `format=text` và `download=true`
+              schema: { type: string, example: 'attachment; filename="kich-ban-9a8b7c6d.txt"' }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TranscriptResponse" }
+              example:
+                data:
+                  conversation_id: 9a8b7c6d-5e4f-3a2b-1c0d-e9f8a7b6c5d4
+                  title: Thủ tục sang tên đất
+                  created_at: "2026-10-07T08:00:00Z"
+                  updated_at: "2026-10-07T08:15:00Z"
+                  total_messages: 3
+                  truncated: false
+                  turns:
+                    - turn: 1
+                      user:
+                        content: Thủ tục sang tên đất cần những giấy tờ gì?
+                        created_at: "2026-10-07T08:01:00Z"
+                      assistant:
+                        content: "Theo Điều 188 Luật Đất đai 2024, hồ sơ chuyển nhượng gồm..."
+                        created_at: "2026-10-07T08:01:03Z"
+                    - turn: 2
+                      user:
+                        content: Còn thời hạn giải quyết?
+                        created_at: "2026-10-07T08:15:00Z"
+                      assistant: null
+                error: null
+                request_id: req-123
+            text/plain:
+              schema: { type: string }
+              example: |
+                Hội thoại: Thủ tục sang tên đất
+                Bắt đầu: 07/10/2026 15:00
+
+                Lượt 1
+                  Người dùng: Thủ tục sang tên đất cần những giấy tờ gì?
+                  Trợ lý: Theo Điều 188 Luật Đất đai 2024, hồ sơ chuyển nhượng gồm...
+
+                Lượt 2
+                  Người dùng: Còn thời hạn giải quyết?
+                  Trợ lý:
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/ConversationForbidden" }
+        "404": { $ref: "#/components/responses/ConversationNotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
 
   /agent/conversations/{conversation_id}/messages:
@@ -430,6 +517,217 @@ paths:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
         "500": { $ref: "#/components/responses/InternalError" }
 
+  # ---------------------------------------------------------------- Internal
+  /internal/v1/agent/conversations/{conversation_id}/summary:
+    post:
+      tags: [Internal]
+      operationId: summarizeConversation
+      summary: Tóm tắt hội thoại AI cho luật sư (consultation-service gọi)
+      description: |
+        Chỉ consultation-service gọi, kèm `X-Internal-Token` (không dùng JWT). Gateway không chuyển tiếp `/internal/...`.
+        Luật sư không xem lịch sử chat AI, chỉ đọc bản tóm tắt này trước khi tư vấn.
+
+        **Phạm vi:** chỉ dùng tin của hội thoại có `created_at < until`, sắp xếp theo `created_at`. Tin gửi từ `until` trở đi
+        không được dùng. `until` là lúc người dùng gửi yêu cầu tư vấn và phải có múi giờ (ví dụ `...Z`, `...+07:00`).
+
+        **Chủ sở hữu:** hội thoại phải có `user_id` khớp body. Không tồn tại, đã xóa hoặc của người khác đều trả cùng một lỗi
+        404 `CONVERSATION_NOT_FOUND` (không có `CONVERSATION_FORBIDDEN` ở API này) để không lộ hội thoại có tồn tại hay không.
+
+        **Nội dung:** tiếng Việt, ngôi thứ ba, văn bản thuần, tối đa khoảng 2000 ký tự (do prompt dặn, service không cắt cứng).
+        Nêu vấn đề pháp lý, các tình tiết người dùng đã kể, câu hỏi còn chưa được giải đáp; gợi ý của AI được ghi ngắn và đánh
+        dấu là gợi ý của AI. Dặn AI không ghi số CCCD, số điện thoại, email, địa chỉ chi tiết (đây là lời dặn, không phải bộ lọc).
+
+        **Không lưu:** agent-service không lưu bản tóm tắt. Gọi lại cùng tham số là an toàn (mỗi lần gọi LLM một lần,
+        nội dung có thể khác chút).
+
+        **Giới hạn đầu vào:** lấy tối đa 60 tin gần `until` nhất, mỗi tin cắt còn 3000 ký tự, tổng tối đa 24000 ký tự;
+        dài hơn thì bỏ tin cũ nhất, giữ phần gần `until`.
+
+        **Thời gian:** tối đa 50 giây cho cả lượt gọi LLM (mỗi provider 20 giây, không thử lại cùng provider), để
+        consultation-service chờ 60 giây không bị quá giờ. LLM lỗi hoặc quá giờ đều trả 503 `AI_SERVICE_ERROR`; phía gọi
+        có thể map sang `AGENT_BAD_RESPONSE` (LLM trả lỗi) hoặc `AGENT_TIMEOUT` (không có phản hồi trong 60 giây).
+
+        Log chỉ ghi `conversation_id`, số tin, thời gian, `request_id`; không ghi nội dung tin nhắn hay bản tóm tắt.
+      x-status: implemented
+      servers:
+        - url: http://agent-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SummaryRequest" }
+            example:
+              user_id: 11111111-1111-4111-8111-111111111111
+              until: "2026-11-02T09:00:00Z"
+      responses:
+        "200":
+          description: Bản tóm tắt
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SummaryResponse" }
+              example:
+                data:
+                  conversation_id: 3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b
+                  summary: "Người dùng hỏi về thủ tục tách thửa đất để cho con. Người dùng cho biết đất đã có sổ đỏ đứng tên mình từ năm 2019, diện tích khoảng 300 m2, chưa thế chấp. Gợi ý của trợ lý AI (chưa được xác minh): cần xem diện tích tối thiểu được tách thửa theo quy định của địa phương. Câu hỏi còn chưa được giải đáp: tách thửa rồi tặng cho con thì cần những giấy tờ gì và đóng những khoản phí nào."
+                error: null
+                request_id: req-123
+        "401":
+          description: Thiếu hoặc sai `X-Internal-Token`, hoặc service chưa cấu hình `INTERNAL_TOKEN`
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: UNAUTHORIZED
+                  message: Thiếu hoặc sai mã xác thực nội bộ.
+                request_id: req-123
+        "404":
+          description: Không có hội thoại, đã xóa, hoặc không thuộc `user_id` (không phân biệt các trường hợp này)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: CONVERSATION_NOT_FOUND
+                  message: Không tìm thấy hội thoại.
+                request_id: req-123
+        "422":
+          description: Body sai (`VALIDATION_ERROR`) hoặc hội thoại chưa có tin nào trước `until` (`CONVERSATION_EMPTY`, không gọi LLM)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              examples:
+                body_sai:
+                  summary: Thiếu `user_id` hoặc `until`, sai UUID, sai định dạng hoặc thiếu múi giờ
+                  value:
+                    data: null
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Dữ liệu gửi lên không hợp lệ.
+                      details:
+                        - field: until
+                          message: Input should be a valid datetime
+                    request_id: req-123
+                hoi_thoai_rong:
+                  summary: Không có tin nào trước `until`
+                  value:
+                    data: null
+                    error:
+                      code: CONVERSATION_EMPTY
+                      message: Hội thoại chưa có tin nhắn nào trước thời điểm yêu cầu.
+                    request_id: req-123
+        "503":
+          description: LLM lỗi hoặc quá thời gian (cùng mã và status với lỗi LLM ở `sendMessage`)
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: AI_SERVICE_ERROR
+                  message: Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.
+                request_id: req-123
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /internal/v1/agent/transcripts/summary:
+    post:
+      tags: [Internal]
+      operationId: summarizeTranscript
+      summary: Trích biên bản JSON từ một đoạn chat user - luật sư (consultation-service gọi)
+      description: |
+        Chỉ consultation-service gọi, kèm `X-Internal-Token`. Nội dung tin nhắn do phía gọi gửi lên (đã che PII bằng
+        `[CCCD]`, `[SĐT]`, `[EMAIL]`, `[STK]`); agent-service không đọc database và không lưu gì.
+
+        **Kết quả:** `data.summary` là một object JSON theo schema biên bản (`has_substance`, `legal_domains`, `overview`,
+        `citizen_issues`, `facts`, `lawyer_advice`, `legal_references`, `deadlines`, `next_steps`, `conflicts`,
+        `open_questions`; schema nằm trong prompt, `app/services/minutes.py`). `data.prompt_version` là phiên bản prompt.
+        Agent chỉ bảo đảm đó là object JSON; **consultation-service** kiểm đúng schema, `source_ids` có thật và đánh dấu
+        `verified` cho số liệu nguyên văn.
+
+        **An toàn:** nội dung tin được escape `& < >` trước khi đưa vào thẻ `<msg>`, prompt dặn coi tin nhắn là dữ liệu.
+
+        **Thời gian:** tối đa 145 giây cho cả lượt gọi LLM (mỗi provider 140 giây; đo ~40 giây cho 4 tin), phía gọi chờ 150 giây. LLM lỗi hoặc quá giờ
+        trả 503 `AI_SERVICE_ERROR`; LLM trả về không phải object JSON thì 502 `AI_OUTPUT_INVALID`.
+
+        Log chỉ ghi `consultation_id`, số tin, thời gian, `request_id`; không ghi nội dung.
+      x-status: implemented
+      servers:
+        - url: http://agent-service:8000
+          description: Chỉ gọi được trong mạng Docker
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [consultation_id, window_end, messages]
+              properties:
+                consultation_id: { type: string, format: uuid }
+                window_start: { type: [string, "null"], format: date-time }
+                window_end: { type: string, format: date-time, description: Có múi giờ }
+                previous_summary:
+                  type: [object, "null"]
+                  description: "Chỉ để hiểu ngữ cảnh, không được chép lại"
+                  properties:
+                    overview: { type: [string, "null"] }
+                    legal_domains: { type: array, items: { type: string } }
+                messages:
+                  type: array
+                  minItems: 1
+                  maxItems: 60
+                  items:
+                    type: object
+                    required: [id, role, time, content]
+                    properties:
+                      id: { type: string, description: Duy nhất trong request }
+                      role: { enum: [CITIZEN, LAWYER] }
+                      time: { type: string, format: date-time }
+                      content: { type: string, minLength: 1, maxLength: 5000 }
+      responses:
+        "200":
+          description: Biên bản
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      summary: { type: object }
+                      prompt_version: { type: string, example: v1 }
+                  error: { type: "null" }
+                  request_id: { type: string }
+        "401": { description: "Thiếu hoặc sai `X-Internal-Token`" }
+        "422": { description: "Body sai (`VALIDATION_ERROR`): thiếu trường, thiếu múi giờ, id tin trùng, quá 60 tin" }
+        "502": { description: "LLM trả về không phải object JSON (`AI_OUTPUT_INVALID`)" }
+        "503": { description: "LLM lỗi hoặc quá thời gian (`AI_SERVICE_ERROR`)" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -437,6 +735,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: "`access_token` lấy từ `POST /users/auth/firebase` hoặc `POST /users/auth/refresh`."
+    InternalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: Giá trị `INTERNAL_TOKEN` trong `.env`, chỉ dùng cho `/internal/v1/...`.
 
   parameters:
     RequestId:
@@ -600,6 +903,36 @@ components:
         error:      { $ref: "#/components/schemas/ErrorBody" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 
+    # ---------- Tóm tắt hội thoại (nội bộ) ----------
+    SummaryRequest:
+      type: object
+      required: [user_id, until]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Người tạo yêu cầu tư vấn; phải là chủ hội thoại, nếu không trả 404 `CONVERSATION_NOT_FOUND`
+        until:
+          type: string
+          format: date-time
+          description: Chỉ dùng tin có `created_at` nhỏ hơn mốc này (lúc người dùng gửi yêu cầu tư vấn). Bắt buộc có múi giờ
+          example: "2026-11-02T09:00:00Z"
+
+    SummaryResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [conversation_id, summary]
+          properties:
+            conversation_id: { type: string, format: uuid }
+            summary:
+              type: string
+              description: Văn bản thuần tiếng Việt, ngôi thứ ba, khoảng 2000 ký tự trở xuống
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
     # ---------- Hội thoại ----------
     Conversation:
       type: object
@@ -640,10 +973,23 @@ components:
           example: 512
         type:
           type: string
-          enum: [out_of_scope]
+          enum: [out_of_scope, document_unreadable, document_need_type]
           description: |
-            Chỉ có khi server bật `RELEVANCE_CHECK` và không đoạn luật nào tìm được dùng trả lời câu hỏi: `content` là câu
+            `out_of_scope`: chỉ có khi server bật `RELEVANCE_CHECK` và không đoạn luật nào tìm được dùng trả lời câu hỏi: `content` là câu
             cố định "chưa tìm thấy quy định liên quan trong kho văn bản", `rag_chunk_ids` rỗng, `model` là model đã dùng để chấm
+
+            `document_unreadable`: chỉ có khi server bật `DOCUMENT_GATE_ENABLED`, lượt hỏi có `document_ids` và có tài liệu quá ít chữ
+            hoặc chữ rác (nghi scan mờ, OCR lỗi): `content` là câu cố định nêu số thứ tự tài liệu, lý do và gợi ý tải bản rõ hơn
+            hoặc dán nội dung vào khung chat; không tìm luật, không gọi AI nên `rag_chunk_ids` rỗng, `model` và `tokens_used` là `null`
+
+            `document_need_type`: chỉ có khi server bật `DOCUMENT_ASK_TYPE_ENABLED`, lượt hỏi có `document_ids`, agent không nhận ra
+            loại hợp đồng (`contract_type` = `khac`) và câu hỏi chung chung (vd "kiểm tra giúp tôi"): `content` là câu hỏi lại
+            loại hợp đồng (kèm các loại hỗ trợ) hoặc điều cần kiểm tra; không tìm luật, không gọi AI nên `rag_chunk_ids` rỗng, `model`
+            và `tokens_used` là `null`, có thêm `mode` = `contract_review`. Người dùng trả lời bằng câu cụ thể (kèm lại `document_ids`)
+            thì lượt đó rà soát bình thường
+        cache_hit:
+          type: boolean
+          description: Chỉ có (luôn `true`) khi server bật `ANSWER_CACHE_ENABLED` và câu trả lời lấy từ cache câu trả lời (câu đầu hội thoại, không kèm tài liệu, đã có người hỏi giống hệt); khi đó `tokens_used` là `0` (lượt này không gọi AI), `model` và `rag_chunk_ids` giữ như lúc lưu cache
         llm_bypass:
           type: boolean
           description: Chỉ có khi server bật `LLM_BYPASS` (chế độ test, không qua LLM); khi đó `model` là `no-llm`, `content` là các đoạn luật rag tìm được
@@ -760,6 +1106,58 @@ components:
       required: [data, error, request_id]
       properties:
         data:       { $ref: "#/components/schemas/ConversationWithMessages" }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    TranscriptMessage:
+      type: object
+      required: [content, created_at]
+      properties:
+        content:    { type: string, description: Nội dung tin, giữ nguyên xuống dòng }
+        created_at: { type: string, format: date-time }
+
+    TranscriptTurn:
+      type: object
+      required: [turn, user, assistant]
+      properties:
+        turn: { type: integer, minimum: 1, description: Số thứ tự lượt, từ 1 }
+        user:
+          allOf:
+            - $ref: "#/components/schemas/TranscriptMessage"
+          nullable: true
+          description: "`null` chỉ khi dữ liệu lệch cặp (tin trợ lý không có tin người dùng đứng trước); luồng lưu thông thường không tạo ra"
+        assistant:
+          allOf:
+            - $ref: "#/components/schemas/TranscriptMessage"
+          nullable: true
+          description: "`null` khi tin người dùng cuối chưa có câu trả lời"
+
+    Transcript:
+      type: object
+      required: [conversation_id, title, created_at, updated_at, total_messages, truncated, turns]
+      properties:
+        conversation_id: { type: string, format: uuid }
+        title:
+          type: string
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        total_messages:
+          type: integer
+          minimum: 0
+          description: Tổng số tin của hội thoại; lớn hơn số tin nằm trong `turns` khi `truncated` là true
+        truncated:
+          type: boolean
+          description: "`true` khi hội thoại dài hơn 500 tin và `turns` chỉ gồm 500 tin đầu"
+        turns:
+          type: array
+          items: { $ref: "#/components/schemas/TranscriptTurn" }
+
+    TranscriptResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:       { $ref: "#/components/schemas/Transcript" }
         error:      { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 

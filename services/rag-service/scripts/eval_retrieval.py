@@ -9,9 +9,17 @@ Cách chạy (ở thư mục gốc legal-assistant-ai, đã bật venv, .env có
     python services/rag-service/scripts/eval_retrieval.py --compare    # so sánh tắt/bật đổi từ đời thường
     python services/rag-service/scripts/eval_retrieval.py --top-k 4 -v # in từng câu
     python services/rag-service/scripts/eval_retrieval.py --multi      # câu nhiều ý: so sánh tắt/bật tách câu hỏi
+    python services/rag-service/scripts/eval_retrieval.py --file services/rag-service/scripts/eval_natural.json -v
+                                                                       # chọn bộ câu khác (mặc định eval_questions.json,
+                                                                       # còn --multi thì mặc định eval_multi_questions.json)
+
+Bộ câu hỏi có sẵn: eval_questions.json (20 câu), eval_natural.json (12 câu theo lời người dân thường hỏi),
+eval_multi_questions.json (câu nhiều ý, dùng với --multi). --file nhận bất kỳ file cùng định dạng.
 
 Chạy trong Docker (không cần venv), ở thư mục gốc:
     docker compose run --rm -v ./services/rag-service/scripts:/app/scripts rag-service python scripts/eval_retrieval.py --compare
+    docker compose run --rm -v ./services/rag-service/scripts:/app/scripts rag-service python scripts/eval_retrieval.py --file scripts/eval_natural.json -v
+(trong Docker thư mục làm việc là /app nên đường dẫn của --file tính từ đó)
 """
 
 import argparse
@@ -94,12 +102,13 @@ def main() -> int:
     p.add_argument("--compare", action="store_true", help="chạy 2 lần: tắt và bật đổi từ đời thường")
     p.add_argument("-v", "--verbose", action="store_true", help="in kết quả từng câu")
     p.add_argument("--multi", action="store_true", help="câu nhiều ý: chạy 2 lần, tắt và bật tách câu hỏi")
+    p.add_argument("--file", type=Path, help="file bộ câu hỏi (mặc định eval_questions.json; với --multi là eval_multi_questions.json)")
     args = p.parse_args()
 
     if args.multi:
         from app.core.config import get_settings
 
-        questions = json.loads(MULTI_QUESTIONS.read_text(encoding="utf-8"))
+        questions = json.loads((args.file or MULTI_QUESTIONS).read_text(encoding="utf-8"))
         expansion = get_settings().query_expansion_enabled
         for split in (False, True):
             label = "BẬT tách câu hỏi" if split else "TẮT tách câu hỏi"
@@ -109,8 +118,8 @@ def main() -> int:
                   f"({r['parts_covered'] / r['parts_total']:.0%}) | trung bình {r['avg_s']:.2f}s/câu")
         return 0
 
-    questions = json.loads(QUESTIONS.read_text(encoding="utf-8"))
-    modes = [False, True] if args.compare else [None]
+    questions = json.loads((args.file or QUESTIONS).read_text(encoding="utf-8"))
+    modes =[False, True] if args.compare else [None]
     for mode in modes:
         if mode is None:
             from app.core.config import get_settings

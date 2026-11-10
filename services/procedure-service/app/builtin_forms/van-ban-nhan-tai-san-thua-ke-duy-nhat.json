@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "name": "Văn bản nhận tài sản thừa kế của người thừa kế duy nhất",
+  "code": "",
+  "procedure_code": "DD-006",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Văn bản nhận tài sản thừa kế (người thừa kế duy nhất)",
+    "Văn bản khai nhận di sản thừa kế quyền sử dụng đất"
+  ],
+  "review_notice": "Mẫu nguồn chỉ dành cho trường hợp người ký là người thừa kế duy nhất theo pháp luật. Không dùng nếu có người thừa kế khác hoặc có di chúc cần xử lý.",
+  "sections": [
+    {
+      "id": "inheritance",
+      "title": "Thông tin nhận di sản",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "heir_info",
+          "instance_id": "heir_info",
+          "block_key": "free_field",
+          "title": "Người nhận và người để lại di sản",
+          "order": 1,
+          "fields": [
+            {
+              "key": "heir",
+              "label": "Họ tên người nhận di sản",
+              "word_key": "heir_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "birth_date",
+              "label": "Ngày sinh",
+              "word_key": "heir_birth_date",
+              "type": "dob",
+              "required": true
+            },
+            {
+              "key": "identity",
+              "label": "Số CMND / CCCD",
+              "word_key": "heir_identity",
+              "type": "cccd",
+              "required": true
+            },
+            {
+              "key": "issue_date",
+              "label": "Ngày cấp",
+              "word_key": "heir_issue_date",
+              "type": "issue_date",
+              "required": true
+            },
+            {
+              "key": "issuer",
+              "label": "Nơi cấp",
+              "word_key": "heir_issuer",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Hộ khẩu thường trú",
+              "word_key": "heir_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "deceased",
+              "label": "Họ tên người để lại di sản",
+              "word_key": "deceased_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "death_date",
+              "label": "Ngày mất",
+              "word_key": "death_date",
+              "type": "past_date",
+              "required": true
+            },
+            {
+              "key": "death_certificate",
+              "label": "Số giấy chứng tử / trích lục khai tử",
+              "word_key": "death_certificate",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "death_issuer",
+              "label": "Ủy ban nhân dân cấp giấy chứng tử",
+              "word_key": "death_issuer",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "death_issue_date",
+              "label": "Ngày cấp giấy chứng tử",
+              "word_key": "death_issue_date",
+              "type": "past_date",
+              "required": true
+            },
+            {
+              "key": "inheritance_asset",
+              "label": "Tài sản nhận thừa kế",
+              "word_key": "inheritance_asset",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm ký",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

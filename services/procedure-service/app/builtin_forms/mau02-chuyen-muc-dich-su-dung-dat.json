@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị chuyển mục đích sử dụng đất",
+  "code": "",
+  "procedure_code": "DD-008",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người đề nghị",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên người đề nghị",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "help_text": "Tự lấy họ tên từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "autofill": "profile.full_name"
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "help_text": "Tự lấy số CCCD từ hồ sơ; không thể sửa trong đơn.",
+              "autofill": "profile.cccd_number"
+            },
+            {
+              "key": "identity_issue_date",
+              "label": "Ngày cấp CCCD",
+              "word_key": "applicant_issue_date",
+              "type": "issue_date",
+              "required": true,
+              "help_text": "Tự lấy ngày cấp từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "autofill": "profile.cccd_issue_date"
+            },
+            {
+              "key": "identity_issue_place",
+              "label": "Nơi cấp CCCD",
+              "word_key": "applicant_issue_place",
+              "type": "text",
+              "required": true,
+              "help_text": "Tự lấy nơi cấp từ hồ sơ CCCD; không thể sửa trong đơn.",
+              "autofill": "profile.cccd_issue_place"
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thường trú / trụ sở chính",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Tự lấy địa chỉ thường trú từ hồ sơ; không thể sửa trong đơn.",
+              "autofill": "profile.permanent_address"
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại liên hệ",
+              "word_key": "applicant_phone",
+              "type": "phone",
+              "required": false,
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này.",
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Email liên hệ",
+              "word_key": "applicant_email",
+              "type": "email",
+              "required": false,
+              "help_text": "Tự điền từ hồ sơ cá nhân; có thể sửa cho đơn này.",
+              "autofill": "profile.email"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recipient-date",
+      "title": "Nơi nhận và ngày lập đơn",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "recipient_info",
+          "instance_id": "recipient_info",
+          "block_key": "free_field",
+          "title": "Nơi nhận đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Đơn vị / xã, phường nơi có đất",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true,
+              "help_text": "Ghi địa danh theo hướng dẫn của thủ tục."
+            }
+          ]
+        },
+        {
+          "id": "signing_date",
+          "instance_id": "signing_date",
+          "block_key": "free_field",
+          "title": "Ngày lập đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "land-info",
+      "title": "Thông tin thửa đất",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "land_info",
+          "instance_id": "land_info",
+          "block_key": "free_field",
+          "title": "Thửa đất / khu đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "location",
+              "label": "Địa điểm thửa đất / khu đất",
+              "word_key": "land_location",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi xã/phường và tỉnh/thành phố nơi có đất."
+            },
+            {
+              "key": "current_area",
+              "label": "Diện tích hiện tại (m²)",
+              "word_key": "current_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "current_purpose",
+              "label": "Mục đích sử dụng hiện tại",
+              "word_key": "current_purpose",
+              "type": "text",
+              "required": true,
+              "help_text": "Ghi theo Giấy chứng nhận hoặc giấy tờ liên quan."
+            },
+            {
+              "key": "current_term",
+              "label": "Thời hạn sử dụng đất hiện tại",
+              "word_key": "current_term",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "current_use_form",
+              "label": "Hình thức sử dụng đất hiện tại",
+              "word_key": "current_use_form",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Giao đất không thu tiền sử dụng đất",
+                "Giao đất có thu tiền sử dụng đất",
+                "Cho thuê đất thu tiền thuê đất một lần cho cả thời gian thuê",
+                "Cho thuê đất thu tiền thuê đất hằng năm"
+              ]
+            },
+            {
+              "key": "authority_document",
+              "label": "Số, ngày và cơ quan ban hành văn bản có thẩm quyền (nếu có)",
+              "word_key": "authority_document",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conversion",
+      "title": "Nội dung đề nghị chuyển mục đích",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "conversion_info",
+          "instance_id": "conversion_info",
+          "block_key": "free_field",
+          "title": "Nội dung chuyển mục đích",
+          "order": 1,
+          "fields": [
+            {
+              "key": "requested_area_purpose",
+              "label": "Diện tích và mục đích sử dụng đất đề nghị chuyển",
+              "word_key": "requested_area_purpose",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "rice_area",
+              "label": "Diện tích đất chuyên trồng lúa (m²), nếu có",
+              "word_key": "rice_area",
+              "type": "number",
+              "required": false
+            },
+            {
+              "key": "requested_term",
+              "label": "Thời hạn sử dụng đất đề nghị",
+              "word_key": "requested_term",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "requested_use_form",
+              "label": "Hình thức sử dụng đất đề nghị",
+              "word_key": "requested_use_form",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Giao đất không thu tiền sử dụng đất",
+                "Giao đất có thu tiền sử dụng đất",
+                "Cho thuê đất thu tiền thuê đất một lần cho cả thời gian thuê",
+                "Cho thuê đất thu tiền thuê đất hằng năm"
+              ]
+            },
+            {
+              "key": "exemption_case",
+              "label": "Trường hợp được miễn tiền sử dụng đất / tiền thuê đất (nếu có)",
+              "word_key": "exemption_case",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "commitments",
+      "title": "Cam kết và tài liệu kèm theo",
+      "order": 5,
+      "blocks": [
+        {
+          "id": "commitment_info",
+          "instance_id": "commitment_info",
+          "block_key": "free_field",
+          "title": "Cam kết, tài liệu",
+          "order": 1,
+          "fields": [
+            {
+              "key": "other_commitments",
+              "label": "Cam kết khác (nếu có)",
+              "word_key": "other_commitments",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "attachments",
+              "label": "Tài liệu gửi kèm",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người ký",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa.",
+              "autofill": "profile.full_name"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

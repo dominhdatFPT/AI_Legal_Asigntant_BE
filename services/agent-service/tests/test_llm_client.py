@@ -190,6 +190,8 @@ def openrouter(monkeypatch, gemini):
     monkeypatch.setenv("LLM_PROVIDER", "openrouter")
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
     monkeypatch.setenv("OPENROUTER_MODEL", "recursive/flint-v1.0:free")
+    # Model suy luận bắt buộc cần chừa token suy nghĩ; mặc định của cấu hình là 0 nên các test dưới đây đặt tường minh 1024
+    monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "1024")
     get_settings.cache_clear()
 
     def install(outcomes):
@@ -443,3 +445,205 @@ def test_openrouter_review_options_apply_and_no_retry(openrouter, timeouts):
         asyncio.run(llm_client.generate("system prompt", [], "hỏi", **REVIEW))
     assert len(fake.calls) == 1 and openrouter.sleeps == []
     assert fake.calls[0]["max_tokens"] == 2000 + 1024 and timeouts == [40.0]
+
+
+# ── Lượt gọi phụ: reasoning_max_tokens tự chọn mức suy luận của OpenRouter ──
+
+
+def _run_aux(**kwargs):
+    return asyncio.run(llm_client.generate("system prompt", [], "hỏi", **kwargs))
+
+
+def test_openrouter_khong_truyen_reasoning_max_tokens_giu_nhu_cu(openrouter):
+    fake = openrouter([_or_resp(), _or_resp()])
+    _run_aux()
+    _run_aux(reasoning_max_tokens=None)
+    for call in fake.calls:
+        assert call["extra_body"] == {"reasoning": {"max_tokens": 1024}} and call["max_tokens"] == 800 + 1024
+
+
+def test_openrouter_khong_truyen_va_cau_hinh_chung_la_0_van_bo_tham_so(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "0")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    _run_aux()
+    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+
+
+def test_openrouter_truyen_0_tat_suy_luan_du_cau_hinh_chung_la_1024(openrouter):
+    fake = openrouter([_or_resp()])
+    _run_aux(reasoning_max_tokens=0)
+    call = fake.calls[0]
+    # enabled=false (không chỉ bỏ tham số) và không chừa token suy luận trong max_tokens
+    assert call["extra_body"] == {"reasoning": {"enabled": False}} and call["max_tokens"] == 800
+
+
+def test_openrouter_truyen_0_van_gui_enabled_false_khi_cau_hinh_chung_la_0(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "0")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    _run_aux(reasoning_max_tokens=0)
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"enabled": False}}
+
+
+def test_openrouter_truyen_so_duong_thay_cho_cau_hinh_chung(openrouter):
+    fake = openrouter([_or_resp()])
+    _run_aux(reasoning_max_tokens=300)
+    call = fake.calls[0]
+    assert call["extra_body"] == {"reasoning": {"max_tokens": 300}} and call["max_tokens"] == 800 + 300
+
+
+def test_openrouter_truyen_so_am_coi_nhu_0(openrouter):
+    fake = openrouter([_or_resp()])
+    _run_aux(reasoning_max_tokens=-5)
+    call = fake.calls[0]
+    assert call["extra_body"] == {"reasoning": {"enabled": False}} and call["max_tokens"] == 800
+
+
+def test_gemini_bo_qua_reasoning_max_tokens(gemini):
+    fake = gemini([_Resp("OK")])
+    assert _run_aux(reasoning_max_tokens=0) == ("OK", 321, "gemini-test")
+    config = fake.calls[0]["config"]
+    assert config.max_output_tokens == 800 and config.thinking_config.thinking_budget == 0
+
+
+def test_groq_bo_qua_reasoning_max_tokens(groq_only):
+    fake = groq_only([_GroqResp()])
+    assert _run_aux(reasoning_max_tokens=0)[0] == "Trả lời từ Groq"
+    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+
+
+def test_openrouter_loi_van_chuyen_sang_gemini_khi_co_reasoning_max_tokens(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter,gemini")
+    get_settings.cache_clear()
+    openrouter([_or_error(402)])
+    openrouter.gemini([_Resp("Gemini trả lời")])
+    assert _run_aux(reasoning_max_tokens=0) == ("Gemini trả lời", 321, "gemini-test")
+
+
+# ── Lượt gọi phụ: model OpenRouter riêng (tham số model, cấu hình OPENROUTER_AUX_MODEL) ──
+
+
+def test_openrouter_truyen_model_goi_bang_model_do_va_tra_ten_model_that(openrouter):
+    fake = openrouter([_or_resp("Chấm xong")])
+    assert _run_aux(model="x") == ("Chấm xong", 55, "x")
+    assert fake.calls[0]["model"] == "x"
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"model": None}, {"model": ""}])
+def test_openrouter_khong_truyen_model_dung_openrouter_model_nhu_cu(openrouter, kwargs):
+    fake = openrouter([_or_resp()])
+    assert _run_aux(**kwargs)[2] == "recursive/flint-v1.0:free"
+    assert fake.calls[0]["model"] == "recursive/flint-v1.0:free"
+
+
+def test_openrouter_model_phu_khong_doi_tham_so_khac(openrouter):
+    fake = openrouter([_or_resp(), _or_resp()])
+    _run_aux(reasoning_max_tokens=0)
+    _run_aux(reasoning_max_tokens=0, model="x")
+    a, b = fake.calls
+    assert {k: v for k, v in a.items() if k != "model"} == {k: v for k, v in b.items() if k != "model"}
+
+
+def test_openrouter_chua_cau_hinh_van_bao_loi_khi_truyen_model(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    with pytest.raises(llm_client.LLMError, match="OPENROUTER_API_KEY"):
+        _run_aux(model="x")
+    assert fake.calls == []
+
+
+def test_openrouter_thieu_openrouter_model_nhung_co_model_phu_van_goi_duoc(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_MODEL", "")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp(), _or_resp()])
+    assert _run_aux(model="x")[2] == "x"
+    with pytest.raises(llm_client.LLMError, match="OPENROUTER_MODEL"):
+        _run_aux()
+    assert len(fake.calls) == 1
+
+
+def test_gemini_bo_qua_model(gemini):
+    fake = gemini([_Resp("OK")])
+    assert _run_aux(model="x") == ("OK", 321, "gemini-test")
+    assert fake.calls[0]["model"] == "gemini-test"
+
+
+def test_groq_bo_qua_model(groq_only):
+    fake = groq_only([_GroqResp()])
+    assert _run_aux(model="x")[0] == "Trả lời từ Groq"
+    assert fake.calls[0]["model"] == "groq-test"
+
+
+def test_openrouter_model_phu_loi_thi_chuyen_sang_gemini_voi_ten_gemini(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter,gemini")
+    get_settings.cache_clear()
+    fake = openrouter([_or_error(404)])
+    openrouter.gemini([_Resp("Gemini trả lời")])
+    assert _run_aux(model="x") == ("Gemini trả lời", 321, "gemini-test")
+    assert len(fake.calls) == 1 and fake.calls[0]["model"] == "x"  # không thử lại bằng model chính
+
+
+def test_openrouter_model_phu_la_tham_so_rieng_cua_generate_khong_phai_cua_stream():
+    import inspect
+
+    assert "model" in inspect.signature(llm_client.generate).parameters
+    assert "model" not in inspect.signature(llm_client.generate_stream).parameters
+
+
+def test_openrouter_aux_model_trong_cau_hinh_khong_doi_model_cua_lan_goi_khong_truyen_model(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_AUX_MODEL", "model-phu")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    assert _run_aux()[2] == "recursive/flint-v1.0:free"  # llm_client không tự đọc OPENROUTER_AUX_MODEL, chỉ nơi gọi phụ mới truyền
+    assert fake.calls[0]["model"] == "recursive/flint-v1.0:free"
+
+
+# ── Mặc định OPENROUTER_REASONING_MAX_TOKENS = 0 (không gửi tham số reasoning cho câu trả lời chính) ──
+
+
+def test_mac_dinh_openrouter_reasoning_max_tokens_la_0(monkeypatch):
+    from app.core.config import Settings, get_settings
+
+    monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)
+    get_settings.cache_clear()
+    assert get_settings().openrouter_reasoning_max_tokens == 0
+    assert Settings().openrouter_reasoning_max_tokens == 0
+    assert Settings.model_fields["openrouter_reasoning_max_tokens"].default == 0
+
+
+def test_openrouter_mac_dinh_khong_gui_reasoning_va_khong_cong_token(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)  # bỏ giá trị 1024 của fixture: dùng mặc định
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    assert _run()[2] == "recursive/flint-v1.0:free"
+    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+
+
+def test_openrouter_van_dat_lai_1024_cho_model_suy_luan_bat_buoc(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)
+    get_settings.cache_clear()
+    monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "1024")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    _run()
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"max_tokens": 1024}} and fake.calls[0]["max_tokens"] == 800 + 1024

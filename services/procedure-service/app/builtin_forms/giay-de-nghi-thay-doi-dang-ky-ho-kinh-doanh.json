@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "name": "Giấy đề nghị đăng ký thay đổi nội dung đăng ký hộ kinh doanh",
+  "code": "",
+  "procedure_code": "HKD-002",
+  "domain": "ho_kinh_doanh",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Giấy đề nghị đăng ký thay đổi nội dung đăng ký hộ kinh doanh"
+  ],
+  "review_notice": "Bản Word điền được dựng theo tài liệu hiện có trong Kho mẫu. Hãy kiểm tra phiên bản mẫu, điều kiện và yêu cầu của cơ quan tiếp nhận trước khi ký hoặc nộp.",
+  "sections": [
+    {
+      "id": "hkd",
+      "title": "Hộ kinh doanh hiện tại",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "hkd_info",
+          "instance_id": "hkd_info",
+          "block_key": "free_field",
+          "title": "Thông tin đăng ký",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Cơ quan đăng ký kinh doanh cấp xã",
+              "word_key": "recipient",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "business_name",
+              "label": "Tên hộ kinh doanh hiện tại",
+              "word_key": "business_name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "business_code",
+              "label": "Mã số hộ kinh doanh / mã số thuế",
+              "word_key": "business_code",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "old_certificate_date",
+              "label": "Ngày cấp giấy chứng nhận hiện tại (nếu có)",
+              "word_key": "old_certificate_date",
+              "type": "date",
+              "required": false
+            },
+            {
+              "key": "owner_name",
+              "label": "Chủ hộ / người làm đơn",
+              "word_key": "owner_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_identity",
+              "label": "Số định danh cá nhân / CCCD",
+              "word_key": "owner_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "owner_address",
+              "label": "Địa chỉ thường trú",
+              "word_key": "owner_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Lấy từ hồ sơ CCCD; thông tin định danh không thể sửa trong đơn."
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập",
+              "word_key": "place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "signing_date",
+              "label": "Ngày lập",
+              "word_key": "signing_date",
+              "type": "date",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "changes",
+      "title": "Các nội dung thay đổi",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "changes",
+          "instance_id": "changes",
+          "block_key": "repeat_group",
+          "title": "Thêm từng nội dung thay đổi",
+          "order": 1,
+          "fields": [
+            {
+              "key": "kind",
+              "label": "Nội dung đăng ký thay đổi",
+              "word_key": "kind",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Thay đổi tên hộ kinh doanh",
+                "Thay đổi trụ sở / địa điểm kinh doanh",
+                "Thay đổi ngành, nghề kinh doanh",
+                "Thay đổi vốn kinh doanh",
+                "Thay đổi chủ hộ",
+                "Thay đổi thành viên hộ kinh doanh",
+                "Cập nhật / bổ sung / hiệu đính thông tin",
+                "Nội dung khác"
+              ]
+            },
+            {
+              "key": "before",
+              "label": "Nội dung hiện tại",
+              "word_key": "before",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "after",
+              "label": "Nội dung sau thay đổi",
+              "word_key": "after",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "changes",
+      "title": "changes",
+      "fields": [
+        {
+          "key": "kind",
+          "label": "Nội dung đăng ký thay đổi",
+          "word_key": "kind",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Thay đổi tên hộ kinh doanh",
+            "Thay đổi trụ sở / địa điểm kinh doanh",
+            "Thay đổi ngành, nghề kinh doanh",
+            "Thay đổi vốn kinh doanh",
+            "Thay đổi chủ hộ",
+            "Thay đổi thành viên hộ kinh doanh",
+            "Cập nhật / bổ sung / hiệu đính thông tin",
+            "Nội dung khác"
+          ]
+        },
+        {
+          "key": "before",
+          "label": "Nội dung hiện tại",
+          "word_key": "before",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "after",
+          "label": "Nội dung sau thay đổi",
+          "word_key": "after",
+          "type": "textarea",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

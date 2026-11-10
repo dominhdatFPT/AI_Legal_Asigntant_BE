@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị chuyển hình thức giao đất, cho thuê đất",
+  "code": "",
+  "procedure_code": "DD-017",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đề nghị chuyển hình thức giao đất, cho thuê đất (Mẫu số 02)",
+    "Đơn xin giao đất đối với cá nhân, tổ chức (Bản Word)"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "Thông tin người đề nghị",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người đề nghị / người đại diện",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ / trụ sở chính",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            },
+            {
+              "key": "contact",
+              "label": "Điện thoại, fax, email liên hệ",
+              "word_key": "applicant_contact",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "parcel",
+      "title": "Thông tin quyết định và khu đất",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "parcel_info",
+          "instance_id": "parcel_info",
+          "block_key": "free_field",
+          "title": "Quyết định đã đăng ký và khu đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "decision_details",
+              "label": "Thông tin quyết định giao đất / cho thuê đất / chuyển mục đích đã đăng ký",
+              "word_key": "decision_details",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Ghi số, ngày, cơ quan ban hành quyết định và thông tin thửa đất như trên quyết định."
+            },
+            {
+              "key": "parcel_number",
+              "label": "Số thửa đất (nếu có)",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "map_sheet_number",
+              "label": "Số tờ bản đồ (nếu có)",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "land_location",
+              "label": "Địa điểm thửa đất / khu đất",
+              "word_key": "land_location",
+              "type": "textarea",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "title": "Nội dung xin chuyển hình thức",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "request_info",
+          "instance_id": "request_info",
+          "block_key": "free_field",
+          "title": "Hình thức hiện tại và đề nghị",
+          "order": 1,
+          "fields": [
+            {
+              "key": "from_method",
+              "label": "Hình thức sử dụng đất hiện tại",
+              "word_key": "from_method",
+              "type": "text",
+              "required": true,
+              "help_text": "Ví dụ: Nhà nước giao đất có thu tiền, giao đất không thu tiền, thuê đất trả tiền hàng năm hoặc trả tiền một lần."
+            },
+            {
+              "key": "to_method",
+              "label": "Hình thức đề nghị chuyển sang",
+              "word_key": "to_method",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "legal_basis",
+              "label": "Căn cứ / lý do đề nghị (nếu có)",
+              "word_key": "legal_basis",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "other_commitments",
+              "label": "Cam kết khác (nếu có)",
+              "word_key": "other_commitments",
+              "type": "textarea",
+              "required": false
+            },
+            {
+              "key": "attachments",
+              "label": "Tài liệu gửi kèm",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Nơi nhận và ký đơn",
+      "order": 4,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Nơi lập đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Chủ tịch Ủy ban nhân dân cấp có thẩm quyền",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Người ký đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; người làm đơn không thể sửa thông tin gốc ở đây."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": []
+}

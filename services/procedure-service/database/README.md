@@ -11,7 +11,10 @@ Database riêng của Procedure Service, gồm thủ tục, yêu cầu hồ sơ,
 | `003_procedure_user_records.sql` | Bảng hồ sơ `land_procedure_records`, `business_procedure_records` |
 | `004_khoa_quyen_ho_so.sql` | **Bắt buộc nếu đã chạy 003 bản cũ**: gỡ quyền đọc/ghi hồ sơ của `anon`, thêm index "hồ sơ của tôi" |
 | `005_seed_demo_applications.sql` | (Tùy chọn) 8 hồ sơ ảo cho một tài khoản |
+| `008_custom_form_templates.sql` | Mẫu Word do admin cấu hình, tệp PDF tham khảo và hồ sơ tự điền (chỉ thêm bảng mới; không sửa `form_templates`) |
 | `check_demo_applications.sql` | Đếm hồ sơ ảo theo tài khoản/trạng thái, kèm lệnh xóa |
+
+Migration 008 đã được áp dụng vào database Procedure của project `qqwuhiymixomwrdunfkz` trong phiên làm việc này. Muốn bỏ riêng phần schema mới, sao lưu dữ liệu trước rồi chạy `rollback_008_custom_form_templates.sql`; thao tác đó xóa các mẫu tự cấu hình và hồ sơ lưu ở hai bảng mới, không ảnh hưởng `form_templates` hay hồ sơ cũ.
 
 ## Thêm dữ liệu ảo cho một tài khoản
 

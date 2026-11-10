@@ -1,0 +1,396 @@
+{
+  "schema_version": 1,
+  "name": "Đơn đề nghị tách thửa đất, hợp thửa đất",
+  "code": "",
+  "procedure_code": "DD-003",
+  "domain": "dat_dai",
+  "procedure_id": null,
+  "reference_catalog_names": [
+    "Đơn đề nghị tách thửa hoặc hợp thửa đất (Mẫu 11/ĐK - Bản Word)",
+    "Đơn đề nghị tách thửa hoặc hợp thửa đất (Mẫu 11/ĐK - Bản PDF gốc)"
+  ],
+  "sections": [
+    {
+      "id": "applicant",
+      "title": "I. Kê khai của người sử dụng đất",
+      "order": 1,
+      "blocks": [
+        {
+          "id": "applicant_info",
+          "instance_id": "applicant_info",
+          "block_key": "free_field",
+          "title": "Người sử dụng đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ và tên",
+              "word_key": "applicant_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh cá nhân",
+              "word_key": "applicant_identity",
+              "type": "cccd",
+              "required": true,
+              "autofill": "profile.cccd_number",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "applicant_address",
+              "type": "textarea",
+              "required": true,
+              "autofill": "profile.permanent_address",
+              "help_text": "Tự lấy địa chỉ thường trú; không thể sửa trong đơn."
+            },
+            {
+              "key": "phone",
+              "label": "Điện thoại liên hệ",
+              "word_key": "phone",
+              "type": "phone",
+              "required": false,
+              "autofill": "profile.phone"
+            },
+            {
+              "key": "email",
+              "label": "Hộp thư điện tử",
+              "word_key": "email",
+              "type": "email",
+              "required": false,
+              "autofill": "profile.email"
+            }
+          ]
+        },
+        {
+          "id": "co_users",
+          "instance_id": "co_users",
+          "block_key": "repeat_group",
+          "title": "Người cùng sử dụng đất (nếu có)",
+          "order": 1,
+          "fields": [
+            {
+              "key": "name",
+              "label": "Họ tên người cùng sử dụng",
+              "word_key": "co_user_name",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "identity",
+              "label": "Số CCCD / định danh",
+              "word_key": "co_user_identity",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ",
+              "word_key": "co_user_address",
+              "type": "textarea",
+              "required": false
+            }
+          ],
+          "help_text": "Thêm một dòng cho mỗi người cùng sử dụng đất cần ký đơn."
+        }
+      ]
+    },
+    {
+      "id": "operation",
+      "title": "2. Đề nghị tách thửa, hợp thửa đất",
+      "order": 2,
+      "blocks": [
+        {
+          "id": "operation_info",
+          "instance_id": "operation_info",
+          "block_key": "free_field",
+          "title": "Loại đề nghị và thông tin các thửa đất",
+          "order": 1,
+          "fields": [
+            {
+              "key": "operation_type",
+              "label": "Nội dung đề nghị",
+              "word_key": "operation_type",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Tách thửa đất",
+                "Hợp thửa đất",
+                "Tách đồng thời với hợp thửa đất"
+              ]
+            },
+            {
+              "key": "combined_details",
+              "label": "Mô tả chi tiết việc tách đồng thời với hợp thửa",
+              "word_key": "combined_details",
+              "type": "textarea",
+              "required": true,
+              "condition": {
+                "field": "operation_info.operation_type",
+                "equals": "Tách đồng thời với hợp thửa đất"
+              }
+            },
+            {
+              "key": "reason",
+              "label": "Lý do tách / hợp thửa đất",
+              "word_key": "operation_reason",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "attachments",
+              "label": "Giấy tờ nộp kèm theo đơn",
+              "word_key": "attachments",
+              "type": "textarea",
+              "required": true,
+              "help_text": "Theo mẫu nguồn, gồm Giấy chứng nhận và bản vẽ tách/hợp thửa."
+            },
+            {
+              "key": "new_certificate_request",
+              "label": "Đề nghị cấp Giấy chứng nhận (ghi có/không thay đổi người sử dụng đất)",
+              "word_key": "new_certificate_request",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Có thay đổi người sử dụng đất",
+                "Không thay đổi người sử dụng đất"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "parcels",
+          "instance_id": "parcels",
+          "block_key": "repeat_group",
+          "title": "Thửa đất gốc và thửa đất dự kiến sau tách / hợp",
+          "order": 1,
+          "fields": [
+            {
+              "key": "role",
+              "label": "Vai trò thửa đất",
+              "word_key": "parcel_role",
+              "type": "select",
+              "required": true,
+              "options": [
+                "Thửa đất gốc",
+                "Thửa đất mới sau tách",
+                "Thửa đất mới sau hợp"
+              ]
+            },
+            {
+              "key": "parcel_number",
+              "label": "Số thửa",
+              "word_key": "parcel_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "map_sheet_number",
+              "label": "Số tờ bản đồ",
+              "word_key": "map_sheet_number",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "area",
+              "label": "Diện tích (m²)",
+              "word_key": "parcel_area",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "land_type",
+              "label": "Loại đất",
+              "word_key": "land_type",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "address",
+              "label": "Địa chỉ thửa đất",
+              "word_key": "parcel_address",
+              "type": "textarea",
+              "required": true
+            },
+            {
+              "key": "certificate_number",
+              "label": "Số vào sổ cấp GCN",
+              "word_key": "certificate_number",
+              "type": "text",
+              "required": false
+            },
+            {
+              "key": "certificate_issue_date",
+              "label": "Ngày cấp GCN",
+              "word_key": "certificate_issue_date",
+              "type": "date",
+              "required": false
+            }
+          ],
+          "help_text": "Thêm một dòng cho mỗi thửa đất gốc và mỗi thửa đất mới; chọn vai trò tương ứng."
+        }
+      ]
+    },
+    {
+      "id": "closing",
+      "title": "Ngày lập đơn và người viết đơn",
+      "order": 3,
+      "blocks": [
+        {
+          "id": "closing_info",
+          "instance_id": "closing_info",
+          "block_key": "free_field",
+          "title": "Thông tin lập đơn",
+          "order": 1,
+          "fields": [
+            {
+              "key": "recipient",
+              "label": "Văn phòng / Chi nhánh Văn phòng Đăng ký đất đai",
+              "word_key": "recipient_unit",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "place",
+              "label": "Địa điểm lập đơn",
+              "word_key": "signing_place",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "day",
+              "label": "Ngày",
+              "word_key": "signing_day",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "month",
+              "label": "Tháng",
+              "word_key": "signing_month",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "year",
+              "label": "Năm",
+              "word_key": "signing_year",
+              "type": "number",
+              "required": true
+            },
+            {
+              "key": "signer",
+              "label": "Họ tên người viết đơn",
+              "word_key": "signer_name",
+              "type": "text",
+              "required": true,
+              "autofill": "profile.full_name",
+              "help_text": "Tự lấy từ hồ sơ CCCD; không thể sửa trong đơn."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "key": "parcels",
+      "title": "Thửa đất",
+      "fields": [
+        {
+          "key": "role",
+          "label": "Vai trò thửa đất",
+          "word_key": "parcel_role",
+          "type": "select",
+          "required": true,
+          "options": [
+            "Thửa đất gốc",
+            "Thửa đất mới sau tách",
+            "Thửa đất mới sau hợp"
+          ]
+        },
+        {
+          "key": "parcel_number",
+          "label": "Số thửa",
+          "word_key": "parcel_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "map_sheet_number",
+          "label": "Số tờ bản đồ",
+          "word_key": "map_sheet_number",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "area",
+          "label": "Diện tích (m²)",
+          "word_key": "parcel_area",
+          "type": "number",
+          "required": true
+        },
+        {
+          "key": "land_type",
+          "label": "Loại đất",
+          "word_key": "land_type",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ thửa đất",
+          "word_key": "parcel_address",
+          "type": "textarea",
+          "required": true
+        },
+        {
+          "key": "certificate_number",
+          "label": "Số vào sổ cấp GCN",
+          "word_key": "certificate_number",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "certificate_issue_date",
+          "label": "Ngày cấp GCN",
+          "word_key": "certificate_issue_date",
+          "type": "date",
+          "required": false
+        }
+      ]
+    },
+    {
+      "key": "co_users",
+      "title": "Người cùng sử dụng đất",
+      "fields": [
+        {
+          "key": "name",
+          "label": "Họ tên người cùng sử dụng",
+          "word_key": "co_user_name",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "identity",
+          "label": "Số CCCD / định danh",
+          "word_key": "co_user_identity",
+          "type": "text",
+          "required": false
+        },
+        {
+          "key": "address",
+          "label": "Địa chỉ",
+          "word_key": "co_user_address",
+          "type": "textarea",
+          "required": false
+        }
+      ]
+    }
+  ]
+}
