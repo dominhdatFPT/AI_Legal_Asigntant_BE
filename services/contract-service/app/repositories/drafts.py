@@ -71,8 +71,13 @@ class DraftRepository(CatalogRepository):
             return self.row(conn, row["id"], owner)
 
     def attach(self, conn, draft_id, owner, documents):
-        for document in sorted(documents):
-            conn.execute("INSERT INTO public.contract_draft_documents(draft_id,owner_user_id,document_id) VALUES(%s,%s,%s)", (draft_id, owner, document))
+        documents = sorted(documents)
+        if not documents:
+            return
+        # One multi-row INSERT in sorted key order (same lock order); duplicates still raise IntegrityError -> 409.
+        conn.execute("INSERT INTO public.contract_draft_documents(draft_id,owner_user_id,document_id) VALUES" +
+            ",".join(["(%s,%s,%s)"] * len(documents)),
+            [value for document in documents for value in (draft_id, owner, document)])
 
     def get(self, draft_id, owner):
         with self.transaction(read=True) as conn:
@@ -80,17 +85,25 @@ class DraftRepository(CatalogRepository):
 
     def list(self, owner, page, size):
         with self.transaction(read=True) as conn:
-            total = conn.execute("SELECT count(*) AS total FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL", (owner,)).fetchone()["total"]
+            count_sql = "SELECT count(*) AS total FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL"
             if self._connect:
+                total = conn.execute(count_sql, (owner,)).fetchone()["total"]
                 ids = conn.execute("SELECT id FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",
                     (owner, size, (page-1)*size)).fetchall()
                 return pagination([self.row(conn, row["id"], owner) for row in ids], total, page, size)
+            # count(*) OVER() is evaluated before LIMIT: page + total in one round trip.
             rows = conn.execute(
-                "SELECT " + DRAFT + ", COALESCE(ARRAY(SELECT document_id FROM public.contract_draft_documents d WHERE d.draft_id=public.contract_drafts.id AND d.owner_user_id=%s ORDER BY d.document_id), '{}') AS document_ids "
+                "SELECT " + DRAFT + ", count(*) OVER() AS total, COALESCE(ARRAY(SELECT document_id FROM public.contract_draft_documents d WHERE d.draft_id=public.contract_drafts.id AND d.owner_user_id=%s ORDER BY d.document_id), '{}') AS document_ids "
                 "FROM public.contract_drafts WHERE owner_user_id=%s AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT %s OFFSET %s",
                 (owner, owner, size, (page-1)*size),
             ).fetchall()
+            if rows:
+                total = rows[0]["total"]
+            else:
+                # Empty page past the end still reports the real total (same REPEATABLE READ snapshot).
+                total = conn.execute(count_sql, (owner,)).fetchone()["total"] if page > 1 else 0
             for row in rows:
+                row.pop("total", None)
                 row["document_ids"] = list(row.get("document_ids") or [])
             return pagination(rows, total, page, size)
 

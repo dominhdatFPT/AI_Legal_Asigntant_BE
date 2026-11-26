@@ -3,6 +3,7 @@ from functools import lru_cache
 from typing import Literal
 
 import jwt
+from common_auth import revocation
 from pydantic import BaseModel
 
 
@@ -57,5 +58,9 @@ def decode_access_token(token: str) -> TokenPayload:
 
     if raw.get("type") != "access":
         raise AuthError(code="UNAUTHORIZED", message="Chỉ access token được chấp nhận.")
+
+    revocation.ensure_started()
+    if revocation.is_revoked(raw):
+        raise AuthError(code="UNAUTHORIZED", message="Phiên đăng nhập đã bị thu hồi hoặc tài khoản đã bị khoá.")
 
     return TokenPayload(**raw)

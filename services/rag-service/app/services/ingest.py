@@ -6,7 +6,9 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.repositories import document as document_repo
+from app.services import corpus_version
 from app.services.chunking import DEFAULT_MAX_CHARS, chunk_legal_text, embedding_text
+from app.services.chunking import embedded_chunk
 from app.services.embedding import Embedder
 
 logger = logging.getLogger(__name__)
@@ -63,16 +65,15 @@ def ingest_document(
         document_repo.replace_chunks(
             db,
             doc,
-            [
-                {"content": c.content, "section_info": c.section_info, "embedding": v}
-                for c, v in zip(chunks, vectors)
-            ],
+            [embedded_chunk(c, v) for c, v in zip(chunks, vectors)],
             embedding_model=embedder.model_name,
         )
         db.commit()
     except Exception:
         db.rollback()
         raise
+    if status == "active":  # bản nháp chưa được tìm thấy nên không cần làm cache mất hiệu lực
+        corpus_version.bump_corpus_version()  # đã commit xong; không ném lỗi, REDIS_URL rỗng thì không làm gì
     return doc
 
 
@@ -86,14 +87,12 @@ def reembed_document(db: Session, embedder: Embedder, doc, max_chars: int = DEFA
         document_repo.replace_chunks(
             db,
             doc,
-            [
-                {"content": c.content, "section_info": c.section_info, "embedding": v}
-                for c, v in zip(chunks, vectors)
-            ],
+            [embedded_chunk(c, v) for c, v in zip(chunks, vectors)],
             embedding_model=embedder.model_name,
         )
         db.commit()
     except Exception:
         db.rollback()
         raise
+    corpus_version.bump_corpus_version()  # vector đổi nên kết quả tìm đổi; đã commit xong, không ném lỗi
     return doc

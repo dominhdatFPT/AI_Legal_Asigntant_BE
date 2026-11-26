@@ -20,9 +20,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 SERVICE_DIR = Path(__file__).resolve().parents[1]  # services/rag-service
-ROOT_DIR = SERVICE_DIR.parents[1]                  # legal-assistant-ai
+ROOT_DIR = SERVICE_DIR.parents[1] if len(SERVICE_DIR.parents) > 1 else SERVICE_DIR
 sys.path.insert(0, str(SERVICE_DIR))
-load_dotenv(ROOT_DIR / ".env")
+if (ROOT_DIR / ".env").exists():
+    load_dotenv(ROOT_DIR / ".env")
+elif (SERVICE_DIR / ".env").exists():
+    load_dotenv(SERVICE_DIR / ".env")
+else:
+    load_dotenv()
 
 
 def main() -> int:

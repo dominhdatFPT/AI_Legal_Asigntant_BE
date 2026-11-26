@@ -1,8 +1,12 @@
 """Authoritative values for account-bound fields; never trust submitted identity text."""
 import os
 
+from common_auth.context import request_id_var
 from fastapi import HTTPException
 import requests
+
+from app.services.http_session import session as http
+from app.services.submission_recipient import is_submission_recipient
 
 
 PROFILE_KEYS = {
@@ -36,16 +40,31 @@ def profile_values(profile):
 
 
 def load_profile_values(user_id):
+    from common_auth import breaker
+
     token = os.getenv('INTERNAL_TOKEN', '')
     if not token:
         raise HTTPException(503, 'Chưa cấu hình kết nối xác nhận hồ sơ cá nhân.')
     base = os.getenv('USER_SERVICE_URL', 'http://user-service:8000').rstrip('/')
+    gate = breaker.get("procedure:USER")
+    unavailable = 'Chưa xác nhận được hồ sơ cá nhân. Vui lòng thử lại.'
+    if not gate.allow():
+        raise HTTPException(503, unavailable)
     try:
-        response = requests.get(f'{base}/internal/v1/users/{user_id}/citizen-profile', headers={'X-Internal-Token': token}, timeout=8)
+        headers = {'X-Internal-Token': token, **({'X-Request-ID': rid} if (rid := request_id_var.get()) else {})}
+        response = http.get(f'{base}/internal/v1/users/{user_id}/citizen-profile', headers=headers, timeout=8)
+    except requests.RequestException as exc:
+        gate.failure()
+        raise HTTPException(503, unavailable) from exc
+    if isinstance(response.status_code, int) and response.status_code >= 500:
+        gate.failure()
+    else:
+        gate.success()
+    try:
         response.raise_for_status()
         profile = response.json().get('data')
     except (requests.RequestException, ValueError) as exc:
-        raise HTTPException(503, 'Chưa xác nhận được hồ sơ cá nhân. Vui lòng thử lại.') from exc
+        raise HTTPException(503, unavailable) from exc
     if not profile or not profile.get('id_number'):
         raise HTTPException(409, 'Vui lòng cập nhật hồ sơ CCCD trong Tài khoản trước khi tạo hồ sơ.')
     return profile_values(profile)
@@ -55,7 +74,8 @@ def bind_custom_profile(content, payload, user_id):
     bindings = [(f"{block['instance_id']}.{field['key']}", field['autofill'])
                 for section in content.get('sections', []) for block in section.get('blocks', [])
                 if block.get('block_key') != 'repeat_group' for field in block.get('fields', [])
-                if field.get('autofill') in PROFILE_KEYS]
+                if field.get('autofill') in PROFILE_KEYS
+                and not is_submission_recipient(field, block.get('block_key'))]
     if not bindings:
         return
     values = load_profile_values(user_id)

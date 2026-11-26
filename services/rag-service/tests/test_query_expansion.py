@@ -11,7 +11,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("query, term", [
-    ("sang tên sổ đỏ cần giấy tờ gì", "Giấy chứng nhận quyền sử dụng đất"),
+    ("làm sổ đỏ lần đầu cần giấy tờ gì", "Giấy chứng nhận quyền sử dụng đất"),  # sổ đỏ là mục chung: chỉ nối khi không có mục khác
     ("sang tên sổ đỏ cần giấy tờ gì", "đăng ký biến động"),
     ("mua đất thì cần làm những thủ tục gì", "chuyển nhượng quyền sử dụng đất"),
     ("MUA DAT can gi", "chuyển nhượng quyền sử dụng đất"),  # gõ hoa, không dấu
@@ -107,3 +107,56 @@ def test_bo_cau_hoi_danh_gia_hop_le():
 def test_moi_tu_dong_nghia_deu_co_thuat_ngu():
     for phrases, legal in query_expansion.SYNONYMS:
         assert phrases and legal
+
+
+GCN_DAI = "Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất"
+
+
+def test_so_do_la_muc_chung_chi_noi_khi_khong_co_muc_khac():
+    out = expand("làm sổ đỏ lần đầu cần giấy tờ gì")
+    assert GCN_DAI in out
+    assert "đăng ký lần đầu, cấp Giấy chứng nhận quyền sử dụng đất" in out
+    assert GCN_DAI in expand("sổ đỏ là gì")
+
+
+def test_so_do_bo_cum_giay_chung_nhan_dai_khi_co_muc_khac():
+    out = expand("tách sổ đỏ cho con được không")
+    assert "tách thửa đất" in out and GCN_DAI not in out
+    out = expand("thế chấp sổ đỏ vay ngân hàng cần điều kiện gì")
+    assert "thế chấp quyền sử dụng đất" in out and GCN_DAI not in out
+    out = expand("đất chưa có sổ đỏ thì có bán được không")
+    assert "điều kiện chuyển nhượng quyền sử dụng đất" in out and GCN_DAI not in out
+    # gõ không dấu cũng vậy
+    out = expand("tach so do cho con duoc khong")
+    assert "tách thửa đất" in out and GCN_DAI not in out
+
+
+@pytest.mark.parametrize("query, term", [
+    ("đất chưa có sổ thì bán được không", "điều kiện chuyển nhượng quyền sử dụng đất"),
+    ("dat chua co so thi ban duoc khong", "điều kiện chuyển nhượng quyền sử dụng đất"),
+    ("đất không giấy tờ có làm được gì không", "có Giấy chứng nhận"),
+    ("dat khong giay to co lam duoc gi khong", "có Giấy chứng nhận"),
+    ("tôi muốn sang nhượng đất", "chuyển nhượng quyền sử dụng đất"),
+    ("toi muon sang nhuong dat", "chuyển nhượng quyền sử dụng đất"),
+    ("công ty tôi chuyển văn phòng sang quận khác", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("cong ty toi chuyen van phong sang quan khac", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("công ty muốn dời trụ sở thì báo ai", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("cong ty muon doi van phong thi bao ai", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("công ty muốn chuyển địa chỉ công ty", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("cong ty muon chuyen dia chi cong ty", "thay đổi nội dung đăng ký doanh nghiệp"),
+    ("tôi muốn rút vốn khỏi công ty", "mua lại phần vốn góp"),
+    ("toi muon rut von khoi cong ty", "mua lại phần vốn góp"),
+    ("muốn lấy lại vốn góp thì sao", "chuyển nhượng phần vốn góp"),
+    ("muon lay lai von gop thi sao", "chuyển nhượng phần vốn góp"),
+    ("hàng xóm xây tường lấn sang đất nhà tôi", "tranh chấp đất đai"),
+    ("hang xom xay tuong lan sang dat nha toi", "tranh chấp đất đai"),
+    ("nhà bên xây lấn ranh thì sao", "hòa giải tranh chấp đất đai"),
+    ("nha ben lan qua dat nha toi", "hòa giải tranh chấp đất đai"),
+])
+def test_muc_moi_khop_co_dau_va_khong_dau(query, term):
+    assert any(term in t for t in legal_terms(query))
+
+
+def test_thue_dat_khong_khop_nham_thue():
+    assert legal_terms("thuê đất của nhà nước") == []
+    assert any("tiền thuê đất" in t for t in legal_terms("thuế đất phải đóng bao nhiêu"))

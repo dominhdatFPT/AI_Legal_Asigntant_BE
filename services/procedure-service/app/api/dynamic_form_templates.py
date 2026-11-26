@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse
 
 from common_auth.core import CurrentUser
 from common_auth.fastapi_dep import require_role
-from app.core.security import get_current_user
 from app.api.procedures import make_request_id
 from app.core.exceptions import TemplateNotFoundError
 from app.schemas.dynamic_form_template import (
@@ -16,6 +15,8 @@ from app.schemas.dynamic_form_template import (
     validate_for_publish,
 )
 from app.repositories.dynamic_form_template_repository import DynamicFormTemplateRepository
+from app.core.catalog_cache import catalog_cache
+from app.services.submission_recipient import optional_template_recipients
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +36,22 @@ def list_admin_templates(
     domain: Optional[DomainEnum] = Query(default=None),
     status_filter: Optional[TemplateStatus] = Query(default=None, alias="status"),
     include_deleted: bool = Query(default=False),
+    page: int = Query(default=1, ge=1, le=1000),
+    page_size: int = Query(default=200, ge=1, le=200),
     x_request_id: Optional[str] = Header(default=None),
     admin_user: CurrentUser = Depends(require_role("admin")),
 ):
     """Danh sách tất cả version, mọi trạng thái cho Admin."""
     req_id = make_request_id(x_request_id)
-    items, total = DynamicFormTemplateRepository.list_admin(
-        domain=domain.value if domain else None,
-        status=status_filter.value if status_filter else None,
-        include_deleted=include_deleted,
-    )
+    items, total = catalog_cache.get_or_load('dynamic_templates', ('admin', domain, status_filter, include_deleted), 30,
+        lambda: DynamicFormTemplateRepository.list_admin(
+            domain=domain.value if domain else None,
+            status=status_filter.value if status_filter else None,
+            include_deleted=include_deleted,
+        ))
+    page_items = items[(page - 1) * page_size:page * page_size]
     return {
-        "data": {"items": items, "total": total},
+        "data": {"items": page_items, "total": total},
         "error": None,
         "request_id": req_id,
     }
@@ -80,6 +85,7 @@ def create_template(
         content_dict=body.model_dump(),
         user_id=getattr(admin_user, "id", None),
     )
+    catalog_cache.invalidate('dynamic_templates')
     return {
         "data": created,
         "error": None,
@@ -101,6 +107,7 @@ def update_template(
         content_dict=body.model_dump(),
         user_id=getattr(admin_user, "id", None),
     )
+    catalog_cache.invalidate('dynamic_templates')
     return {
         "data": updated,
         "error": None,
@@ -155,6 +162,7 @@ def publish_template(
         template_id=str(template_id),
         user_id=getattr(admin_user, "id", None),
     )
+    catalog_cache.invalidate('dynamic_templates')
     return {
         "data": published,
         "error": None,
@@ -174,6 +182,7 @@ def hide_template(
         template_id=str(template_id),
         user_id=getattr(admin_user, "id", None),
     )
+    catalog_cache.invalidate('dynamic_templates')
     return {
         "data": hidden,
         "error": None,
@@ -197,6 +206,7 @@ def new_version_template(
         template_id=str(template_id),
         user_id=getattr(admin_user, "id", None),
     )
+    catalog_cache.invalidate('dynamic_templates')
     if already_existed:
         response.status_code = status.HTTP_200_OK
     else:
@@ -216,6 +226,7 @@ async def delete_template(
 ):
     """Xóa mềm mẫu đơn (ghi nhận deleted_at) và phát event RabbitMQ."""
     DynamicFormTemplateRepository.soft_delete(str(template_id))
+    catalog_cache.invalidate('dynamic_templates')
     try:
         from app.core.rabbitmq_procedure import procedure_mq
         await procedure_mq.publish_form_template_deleted(str(template_id), str(admin_user.id))
@@ -233,6 +244,7 @@ def restore_template(
     """Khôi phục mẫu đơn đã xóa mềm."""
     req_id = make_request_id(x_request_id)
     restored = DynamicFormTemplateRepository.restore(str(template_id))
+    catalog_cache.invalidate('dynamic_templates')
     return {
         "data": restored,
         "error": None,
@@ -248,16 +260,22 @@ def restore_template(
 def list_published_templates(
     domain: Optional[DomainEnum] = Query(default=None),
     procedure_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1, le=1000),
+    page_size: int = Query(default=200, ge=1, le=200),
     x_request_id: Optional[str] = Header(default=None),
 ):
     """Danh sách các mẫu đơn đang xuất bản (bản mới nhất mỗi nhóm)."""
     req_id = make_request_id(x_request_id)
-    items, total = DynamicFormTemplateRepository.list_published(
-        domain=domain.value if domain else None,
-        procedure_id=procedure_id,
-    )
+    items, total = catalog_cache.get_or_load('dynamic_templates', ('public', domain, procedure_id), 30,
+        lambda: DynamicFormTemplateRepository.list_published(
+            domain=domain.value if domain else None, procedure_id=procedure_id))
+    page_items = items[(page - 1) * page_size:page * page_size]
+    public_items = [
+        {**item, "content": optional_template_recipients(item["content"])}
+        for item in page_items
+    ]
     return {
-        "data": {"items": items, "total": total},
+        "data": {"items": public_items, "total": total},
         "error": None,
         "request_id": req_id,
     }
@@ -274,7 +292,7 @@ def get_published_template(
     if template.get("status") != "published":
         raise TemplateNotFoundError("Mẫu đơn không tồn tại hoặc đã ngừng sử dụng.")
     return {
-        "data": template,
+        "data": {**template, "content": optional_template_recipients(template["content"])},
         "error": None,
         "request_id": req_id,
     }

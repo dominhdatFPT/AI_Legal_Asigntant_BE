@@ -76,6 +76,19 @@ def test_muc_suy_luan_mac_dinh_la_0_lay_tu_cau_hinh(fake_llm):
     assert fake_llm["calls"][0]["reasoning_max_tokens"] == 0
 
 
+def test_twelve_candidates_use_previews_but_return_original_chunks(fake_llm, monkeypatch):
+    monkeypatch.delenv("RELEVANCE_CHUNK_CHARS", raising=False)
+    get_settings.cache_clear()
+    chunks = [{**CHUNKS[0], "id": f"long-{i}", "content": "x" * 2500} for i in range(12)]
+    reply_with(fake_llm, '{"relevant": [1, 12]}')
+    selected = grade(chunks)
+    assert selected[0] is chunks[0] and selected[1] is chunks[11]
+    assert len(selected[0]["content"]) == 2500
+    prompt = fake_llm["calls"][0]["system_prompt"]
+    assert prompt.count("x" * 800) == 12
+    assert "x" * 801 not in prompt
+
+
 def test_muc_suy_luan_doi_theo_cau_hinh(fake_llm, monkeypatch):
     monkeypatch.setenv("LLM_AUX_REASONING_MAX_TOKENS", "512")
     get_settings.cache_clear()
@@ -85,7 +98,7 @@ def test_muc_suy_luan_doi_theo_cau_hinh(fake_llm, monkeypatch):
     assert fake_llm["calls"][0]["reasoning_max_tokens"] == 512
 
 
-def test_qua_llm_client_that_openrouter_nhan_enabled_false(monkeypatch):
+def test_qua_llm_client_that_openrouter_nhan_effort_none(monkeypatch):
     """Không giả llm_client.generate: chỉ giả client OpenRouter, soi tham số thật gửi đi."""
     sent = []
     reply = type("R", (), {
@@ -106,17 +119,17 @@ def test_qua_llm_client_that_openrouter_nhan_enabled_false(monkeypatch):
     monkeypatch.setattr(llm_client, "_get_openrouter_client", lambda: fake_client)
 
     assert grade() == [CHUNKS[1]]
-    assert sent[0]["extra_body"] == {"reasoning": {"enabled": False}} and sent[0]["max_tokens"] == 100
+    assert sent[0]["extra_body"] == {"reasoning": {"effort": "none"}} and sent[0]["max_tokens"] == 100
 
 
-def test_prompt_danh_so_doan_va_cat_con_600_ky_tu(fake_llm):
-    long_chunk = {**CHUNKS[0], "content": "x" * 2000}
+def test_prompt_danh_so_doan_va_cat_con_800_ky_tu(fake_llm):
+    long_chunk = {**CHUNKS[0], "content": "x" * 3000}
 
     grade([long_chunk, CHUNKS[1], CHUNKS[2]])
 
     prompt = fake_llm["calls"][0]["system_prompt"]
-    assert "[1] Khoản 1 Điều 1, Luật Đất đai 2024 (31/2024/QH15)\n" + "x" * 600 in prompt
-    assert "x" * 601 not in prompt
+    assert "[1] Khoản 1 Điều 1, Luật Đất đai 2024 (31/2024/QH15)\n" + "x" * 800 in prompt
+    assert "x" * 801 not in prompt
     assert "[2] Khoản 1 Điều 2" in prompt and "[3] Khoản 1 Điều 3" in prompt
     assert '{"relevant"' in prompt  # dặn dạng JSON; dấu { } trong prompt không làm hỏng việc dựng prompt
 
@@ -222,9 +235,9 @@ def _chars_chunk(number, length, document_title="Luật Đất đai 2024"):
     }
 
 
-def _previous_relevance_prompt(chunks):
-    """build_relevance_prompt trước khi đọc cấu hình: cắt cứng 600 ký tự."""
-    short = [{**c, "content": (c.get("content") or "").strip()[:600]} for c in chunks]
+def _expected_relevance_prompt(chunks):
+    """Prompt tham chiếu độc lập với giới hạn mặc định 800 ký tự."""
+    short = [{**c, "content": (c.get("content") or "").strip()[:800]} for c in chunks]
     context = "\n\n".join(prompts.format_chunk(i, c) for i, c in enumerate(short, start=1))
     return prompts.RELEVANCE_PROMPT.replace("{context}", context)
 
@@ -234,13 +247,15 @@ def _set_chunk_chars(monkeypatch, value):
     get_settings.cache_clear()
 
 
-def test_relevance_chunk_chars_default_is_600_and_prompt_is_identical_to_before():
-    chunks = [_chars_chunk(1, 2000), _chars_chunk(2, 100), _chars_chunk(3, 600), _chars_chunk(4, 601)]
+def test_relevance_chunk_chars_default_is_800(monkeypatch):
+    monkeypatch.delenv("RELEVANCE_CHUNK_CHARS", raising=False)
+    get_settings.cache_clear()
+    chunks = [_chars_chunk(1, 3000), _chars_chunk(2, 100), _chars_chunk(3, 800), _chars_chunk(4, 801)]
 
-    assert get_settings().relevance_chunk_chars == 600 == prompts.RELEVANCE_CHUNK_CHARS
+    assert get_settings().relevance_chunk_chars == 800 == prompts.RELEVANCE_CHUNK_CHARS
     prompt = prompts.build_relevance_prompt(chunks)
-    assert prompt == _previous_relevance_prompt(chunks)
-    assert "x" * 600 in prompt and "x" * 601 not in prompt
+    assert prompt == _expected_relevance_prompt(chunks)
+    assert "x" * 800 in prompt and "x" * 801 not in prompt
 
 
 def test_relevance_chunk_chars_1200_cuts_long_chunk_to_1200_and_keeps_short_ones(monkeypatch):
@@ -252,15 +267,17 @@ def test_relevance_chunk_chars_1200_cuts_long_chunk_to_1200_and_keeps_short_ones
     first, second = prompt.split("\n\n[2] ")
     assert first.endswith("x" * 1200) and "x" * 1201 not in prompt
     assert second.endswith("x" * 800) and "x" * 801 not in second  # đoạn ngắn hơn 1200 giữ nguyên
-    assert prompt != _previous_relevance_prompt(chunks)
+    assert prompt != _expected_relevance_prompt(chunks)
 
 
-@pytest.mark.parametrize("value", [0, -1, -600])
-def test_relevance_chunk_chars_zero_or_negative_falls_back_to_600(monkeypatch, value):
+@pytest.mark.parametrize("value", [0, -1, -800])
+def test_relevance_chunk_chars_zero_or_negative_falls_back_to_800(monkeypatch, value):
     _set_chunk_chars(monkeypatch, value)
-    chunks = [_chars_chunk(1, 2000), _chars_chunk(2, 100)]
+    chunks = [_chars_chunk(1, 3000), _chars_chunk(2, 100)]
 
-    assert prompts.build_relevance_prompt(chunks) == _previous_relevance_prompt(chunks)
+    prompt = prompts.build_relevance_prompt(chunks)
+    assert prompt == _expected_relevance_prompt(chunks)
+    assert "x" * 800 in prompt and "x" * 801 not in prompt
 
 
 def test_relevance_chunk_chars_small_value_cuts_shorter(monkeypatch):

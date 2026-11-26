@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+from uuid import uuid4
 
 import pytest
 
@@ -60,34 +61,51 @@ def test_event_logout_toi_listener_va_handler_loi_vao_dlq(monkeypatch):
     monkeypatch.setenv("RABBITMQ_URL", BROKER)
 
     async def scenario():
+        queue_name = f"q.test.broken.{uuid4().hex}"
+
         async def broken(routing_key, event):
             raise RuntimeError("handler hỏng")
 
         listeners = [
             asyncio.create_task(events.consume_forever(None, ["user.logged_out"], revocation.apply_event)),
-            asyncio.create_task(events.consume_forever("q.test.broken", ["test.broken"], broken)),
+            asyncio.create_task(events.consume_forever(queue_name, ["test.broken"], broken)),
         ]
-        await asyncio.sleep(1)
-        connection = await aio_pika.connect(BROKER)
-        channel = await connection.channel()
-        dlq = await channel.declare_queue(events.DEAD_LETTER_QUEUE, passive=True)
-        await dlq.purge()
-
         publisher = events.EventPublisher()
-        assert await publisher.publish("user.logged_out", {"jti": "live-jti", "exp": time.time() + 60})
-        assert await publisher.publish("test.broken", {"n": 1})
-        await asyncio.sleep(1)
-        assert revocation.is_jti_revoked("live-jti")
+        try:
+            await asyncio.sleep(1)
+            async with await aio_pika.connect(BROKER) as connection:
+                channel = await connection.channel()
+                dlq = await channel.declare_queue(events.DEAD_LETTER_QUEUE, passive=True)
+                await dlq.purge()
+                try:
+                    assert await publisher.publish("user.logged_out", {"jti": "live-jti", "exp": time.time() + 60})
+                    failed = events.make_event("test.broken", {"n": 1})
+                    assert await publisher.publish_envelope("test.broken", failed)
+                    await asyncio.sleep(1)
+                    assert revocation.is_jti_revoked("live-jti")
 
-        dead = await dlq.get(no_ack=True, fail=False)
-        assert dead is not None and b"test.broken" in dead.body
+                    async with dlq.iterator() as messages:
+                        async def matching_delivery():
+                            async for message in messages:
+                                await message.ack()
+                                if message.message_id == failed["event_id"]:
+                                    return message
 
-        await publisher.close()
-        await channel.queue_delete("q.test.broken")
-        await connection.close()
-        for task in listeners:
-            task.cancel()
-        await asyncio.gather(*listeners, return_exceptions=True)
+                        # The three real retry queues have TTLs of 10, 60, and 300 seconds.
+                        dead = await asyncio.wait_for(matching_delivery(), timeout=400)
+                    assert dead is not None and b"test.broken" in dead.body
+                    assert dead.headers["x-retry-count"] == 3
+                finally:
+                    listeners[1].cancel()
+                    await asyncio.gather(listeners[1], return_exceptions=True)
+                    for attempt in range(1, 4):
+                        await channel.queue_delete(f"{queue_name}.retry.{attempt}")
+                    await channel.queue_delete(queue_name)
+        finally:
+            await publisher.close()
+            for task in listeners:
+                task.cancel()
+            await asyncio.gather(*listeners, return_exceptions=True)
 
     asyncio.run(scenario())
 

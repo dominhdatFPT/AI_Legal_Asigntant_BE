@@ -1,6 +1,7 @@
 import uuid
 from typing import Any
 
+from common_auth.context import sanitize_request_id
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -68,7 +69,7 @@ class ApiError(Exception):
 def request_id(request: Request) -> str:
     rid = getattr(request.state, "request_id", None)
     if rid is None:
-        rid = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+        rid = sanitize_request_id(request.headers.get("X-Request-ID")) or f"req-{uuid.uuid4()}"
         request.state.request_id = rid
     return rid
 

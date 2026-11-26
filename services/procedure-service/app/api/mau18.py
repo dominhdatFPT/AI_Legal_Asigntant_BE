@@ -3,7 +3,6 @@ from copy import deepcopy
 from datetime import date as Date
 from html import escape
 from io import BytesIO
-from pathlib import Path
 import re
 from docx import Document
 from docx.oxml.ns import qn
@@ -16,8 +15,6 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, PageBreak
 from sqlalchemy import text
 from app.core.security import get_current_user
@@ -48,7 +45,7 @@ class Person(CleanTextModel):
 
 class Submission(CleanTextModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
-    receiving_agency: str = Field(min_length=1, max_length=200)
+    receiving_agency: str = Field(default='', max_length=200)
     people: list[Person] = Field(min_length=1, max_length=20)
     phone: str = Field(default='', max_length=40)
     email: str = Field(default='', max_length=150)
@@ -142,12 +139,8 @@ def fill_template(source: bytes, submission: Submission) -> bytes:
 
 def render_preview(docx: bytes) -> bytes:
     """Render the same filled text in PDF; pagination may differ from Word."""
-    fonts = Path(__file__).resolve().parents[1] / 'fonts'
-    for name, file in [('M18', 'LiberationSerif-Regular.ttf'), ('M18-Bold', 'LiberationSerif-Bold.ttf'),
-                       ('M18-Italic', 'LiberationSerif-Italic.ttf'), ('M18-BoldItalic', 'LiberationSerif-BoldItalic.ttf')]:
-        if name not in pdfmetrics.getRegisteredFontNames():
-            pdfmetrics.registerFont(TTFont(name, str(fonts / file)))
-    pdfmetrics.registerFontFamily('M18', normal='M18', bold='M18-Bold', italic='M18-Italic', boldItalic='M18-BoldItalic')
+    from app.services.pdf_export_service import _ensure_fonts_registered
+    _ensure_fonts_registered()
     doc = Document(BytesIO(docx))
     story = []
     def para(p, size=11):
@@ -162,7 +155,7 @@ def render_preview(docx: bytes) -> bytes:
                 value = f'<super>{value}</super>'
             text_parts.append(value)
         alignment = {1: TA_CENTER, 2: TA_RIGHT}.get(p.alignment, TA_LEFT)
-        style = ParagraphStyle('m18', fontName='M18', fontSize=size, leading=size * 1.25,
+        style = ParagraphStyle('m18', fontName='LiberationSerif', fontSize=size, leading=size * 1.25,
                                alignment=alignment, spaceAfter=3, wordWrap='CJK')
         return Paragraph(''.join(text_parts) or ' ', style)
     for child in doc.element.body:

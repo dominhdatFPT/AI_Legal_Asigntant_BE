@@ -2,8 +2,8 @@
 
 Quy tắc chung:
 - Admin không tự khóa, tự xóa, tự đổi vai trò của mình (nên hệ thống luôn còn ít nhất 1 admin).
-- Khóa, xóa, đổi vai trò → thu hồi mọi refresh token: người đó không làm mới token được nữa, mọi API của
-  User Service kiểm tra trạng thái trong DB nên chặn ngay; access token ở service khác hết hạn sau tối đa 15 phút.
+- Khóa, xóa, đổi vai trò → thu hồi mọi refresh token. User Service kiểm tra trạng thái trong DB.
+- Endpoint phát sự kiện thu hồi access token cho service khác khi khóa, xóa hoặc bỏ vai trò admin hoặc luật sư.
 - Luật sư bị khóa / xóa / hạ vai trò → kết thúc các cuộc tư vấn đang mở (Consultation Service).
 """
 
@@ -124,22 +124,23 @@ def promote_to_lawyer(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
-def change_role(db: Session, admin: User, user_id: uuid.UUID, role: UserRole) -> User:
+def change_role(db: Session, admin: User, user_id: uuid.UUID, role: UserRole) -> tuple[User, bool]:
+    """Trả về người dùng và cờ thu hồi access token của vai trò admin hoặc luật sư cũ."""
     if user_id == admin.id:
         raise ApiError(409, CANNOT_CHANGE_OWN_ROLE)
     user = _get_not_deleted(db, user_id)
-    if user.role == role:
-        return user
+    previous_role = user.role
+    if previous_role == role:
+        return user, False
 
-    was_lawyer = user.role == UserRole.lawyer
     user.role = role
     # Token cũ mang vai trò cũ: thu hồi để người đó đăng nhập lại nhận vai trò mới.
     refresh_tokens.revoke_all_for_user(db, user.id)
     db.commit()
 
-    if was_lawyer:
+    if previous_role == UserRole.lawyer:
         consultation_client.close_lawyer_consultations(user.id, reason="role_changed")
-    return user
+    return user, previous_role in {UserRole.admin, UserRole.lawyer}
 
 
 def lock_user(db: Session, admin: User, user_id: uuid.UUID, reason: str, duration_days: int | None) -> User:

@@ -5,29 +5,33 @@ from app.services.procedure_form_service import (
     get_procedure_form_schema,
 )
 
-# 25 Mã thủ tục chi tiết
-ALL_25_CODES = [
-    # 12 Đất đai
+# 38 Mã thủ tục chi tiết (22 Đất đai + 16 Kinh doanh / HTX / BHXH)
+ALL_38_CODES = [
+    # 22 Đất đai & Xây dựng
     "DD-001", "DD-002", "DD-003", "DD-004", "DD-005", "DD-006",
     "DD-007", "DD-008", "DD-009", "DD-010", "DD-011", "DD-012",
-    # 13 Kinh doanh
-    "HKD-001", "HKD-002",
+    "DD-013", "DD-014", "DD-015", "DD-016", "DD-017", "DD-018",
+    "DD-019", "DD-020", "DD-021", "DD-022",
+    # 16 Kinh doanh / HTX / BHXH
+    "HKD-001", "HKD-002", "HKD-003",
     "DN-001", "DN-002", "DN-003", "DN-004", "DN-005",
-    "DN-006", "DN-007", "DN-008", "DN-009", "DN-010", "DN-011",
+    "DN-006", "DN-007", "DN-008", "DN-009", "DN-010", "DN-011", "DN-012",
+    "HTX-001", "BHXH-001",
 ]
+ALL_25_CODES = ALL_38_CODES
 
 
 def test_all_25_procedures_have_dispatchers():
-    """Kiểm tra có đầy đủ 25 hàm chi tiết được đăng ký trong Dispatcher"""
-    assert len(ALL_25_CODES) == 25
-    for code in ALL_25_CODES:
+    """Kiểm tra có đầy đủ 39 hàm chi tiết được đăng ký trong Dispatcher"""
+    assert len(ALL_38_CODES) == 39
+    for code in ALL_38_CODES:
         assert code in PROCEDURE_FIELD_DISPATCHER, f"Thiếu handler cho thủ tục {code}"
         assert code in PROCEDURE_METADATA, f"Thiếu metadata cho thủ tục {code}"
 
 
 def test_get_procedure_form_schema_all_25():
-    """Kiểm tra hàm trung gian điều phối chính xác cả 25 thủ tục"""
-    for code in ALL_25_CODES:
+    """Kiểm tra hàm trung gian điều phối chính xác cả 38 thủ tục"""
+    for code in ALL_38_CODES:
         schema = get_procedure_form_schema(code)
         assert schema.procedure_code == code
         assert len(schema.procedure_name) > 0

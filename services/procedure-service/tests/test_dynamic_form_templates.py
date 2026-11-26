@@ -198,8 +198,9 @@ def test_citizen_public_access(auth):
 def test_soft_delete_and_restore(auth):
     """Xóa mềm và khôi phục mẫu đơn."""
     headers = auth(role="admin")
-    created = client.post("/api/v1/procedures/admin/dynamic-form-templates", json=SAMPLE_DRAFT_CONTENT, headers=headers).json()["data"]
+    created = client.post("/api/v1/procedures/admin/dynamic-form-templates", json=SAMPLE_COMPLETE_CONTENT, headers=headers).json()["data"]
     tid = created["id"]
+    assert client.post(f"/api/v1/procedures/admin/dynamic-form-templates/{tid}/publish", headers=headers).status_code == 200
 
     # Xóa mềm -> 204
     del_res = client.delete(f"/api/v1/procedures/admin/dynamic-form-templates/{tid}", headers=headers)

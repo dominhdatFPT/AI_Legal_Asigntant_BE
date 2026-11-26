@@ -29,13 +29,6 @@ def renderer():
     return PersonalRenderer()
 
 
-def source_bytes(row,owner,store):
-    key=row["snapshot_storage_key"]
-    if not key.startswith(f"snapshots/{owner}/"):
-        raise ContractError("SOURCE_UNAVAILABLE","Snapshot không hợp lệ.")
-    return store.read(key,row["source_sha256"],row["source_size_bytes"])
-
-
 def preview_info(row,owner):
     try:
         info=row["extraction_snapshot"]["contract_import"]["preview"]

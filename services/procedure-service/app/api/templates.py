@@ -1,4 +1,3 @@
-import uuid
 from typing import Literal
 from urllib.parse import quote
 
@@ -39,11 +38,7 @@ def get_form_template_file(
 
     Xem mẫu Word thì trả bản PDF xem trước nếu có; tải về luôn trả file gốc.
     """
-    try:
-        template_id = str(uuid.UUID(template_id))
-    except ValueError:
-        template_id = None
-    file = TemplateRepository.get_file(template_id, preview=not download) if template_id else None
+    file = TemplateRepository.get_file(template_id, preview=not download)
     if file is None:
         return error_response(404, "TEMPLATE_NOT_FOUND", "Không tìm thấy mẫu đơn.", make_request_id(x_request_id))
     disposition = "attachment" if download else "inline"

@@ -11,7 +11,7 @@ MAX_DOCUMENTS = 3
 class SendMessageRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    content: str = Field(min_length=1, max_length=2000)
+    content: str = Field(min_length=1, max_length=20000)
     # Tài liệu đã upload ở document-service; document-service tự kiểm tra người dùng có phải chủ file
     document_ids: list[uuid.UUID] | None = Field(default=None, max_length=MAX_DOCUMENTS)
 

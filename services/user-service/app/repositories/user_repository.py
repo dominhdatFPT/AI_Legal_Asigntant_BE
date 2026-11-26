@@ -31,7 +31,13 @@ def get_by_email(db: Session, email: str) -> User | None:
 
 def get_by_username(db: Session, username: str) -> User | None:
     return db.scalar(
-        select(User).where(func.lower(User.username) == username.lower(), User.deleted_at.is_(None))
+        select(User).where(
+            or_(
+                func.lower(User.username) == username.lower(),
+                func.lower(User.email) == username.lower(),
+            ),
+            User.deleted_at.is_(None),
+        )
     )
 
 
@@ -62,6 +68,11 @@ def create(
 def get_by_id_including_deleted(db: Session, user_id: uuid.UUID) -> User | None:
     """Admin xem / khôi phục được cả tài khoản đã xóa mềm."""
     return db.get(User, user_id)
+
+
+def get_many_including_deleted(db: Session, user_ids: list[uuid.UUID]) -> list[User]:
+    stmt = select(User).where(User.id.in_(user_ids)).execution_options(populate_existing=True)
+    return list(db.scalars(stmt))
 
 
 def find_deleted(db: Session, *, firebase_uid: str | None = None, email: str | None = None) -> User | None:
@@ -153,10 +164,19 @@ def search(
 
 def count_summary(db: Session) -> dict:
     """Số đếm cho các tab trên màn hình quản lý (không tính tài khoản đã xóa, trừ ô `deleted`)."""
-    alive = User.deleted_at.is_(None)
-    by_role = dict(db.execute(select(User.role, func.count()).where(alive).group_by(User.role)).all())
-    by_status = dict(db.execute(select(User.status, func.count()).where(alive).group_by(User.status)).all())
-    deleted = db.scalar(select(func.count()).select_from(User).where(User.deleted_at.is_not(None))) or 0
+    # 1 câu GROUP BY thay cho 3 câu đếm riêng (DB cloud: bớt 2 lượt hỏi-đáp); cộng dồn ở Python.
+    is_deleted = User.deleted_at.is_not(None)
+    by_role: dict = {}
+    by_status: dict = {}
+    deleted = 0
+    for role, status, gone, count in db.execute(
+        select(User.role, User.status, is_deleted, func.count()).group_by(User.role, User.status, is_deleted)
+    ).all():
+        if gone:
+            deleted += count
+        else:
+            by_role[role] = by_role.get(role, 0) + count
+            by_status[status] = by_status.get(status, 0) + count
     return {
         "total": sum(by_role.values()),
         "by_role": {r.value: by_role.get(r, 0) for r in UserRole},

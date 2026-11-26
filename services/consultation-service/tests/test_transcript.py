@@ -115,3 +115,79 @@ def test_hai_ban_service_cung_tom_tat_mot_doan_chi_ghi_mot_lan(api, upstream, db
     assert repo.save_window_summary(db, cid, None, end, 1, {"x": 2}, 1, "v1") is False  # mốc đã bị đẩy
     db.rollback()
     assert len(rows(db)) == 1
+
+
+def _chat_with_tied_messages(db, count):
+    stamp = utcnow() - timedelta(minutes=12)
+    c = Consultation(citizen_user_id=uuid.uuid4(), lawyer_user_id=uuid.uuid4(), source="lobby",
+                     question="Hỏi về đất", status="in_progress", accepted_at=stamp, last_activity_at=stamp)
+    db.add(c)
+    db.flush()
+    ids = [uuid.UUID(int=i) for i in range(1, count + 1)]
+    db.add_all([
+        ConsultationMessage(id=mid, consultation_id=c.id, sender_id=c.citizen_user_id,
+                            content=f"Tin {mid.int}", created_at=stamp)
+        for mid in reversed(ids)
+    ])
+    cid = c.id
+    db.commit()
+    return cid, stamp, ids
+
+
+def test_cursor_khong_bo_sot_125_tin_cung_timestamp(db, upstream):
+    cid, stamp, ids = _chat_with_tied_messages(db, 125)
+    upstream.transcript_reply = lambda body: {
+        **minimal_transcript(body), "overview": body["messages"][-1]["id"],
+    }
+
+    assert ts.run_sweep(lambda: db) == 3
+    bodies = upstream.transcript_bodies
+    assert [len(body["messages"]) for body in bodies] == [50, 50, 25]
+    sent = [m["id"] for body in bodies for m in body["messages"]]
+    assert sent == [str(mid) for mid in ids]
+    assert len(set(sent)) == 125
+    assert bodies[1]["previous_summary"]["overview"] == str(ids[49])
+    assert bodies[2]["previous_summary"]["overview"] == str(ids[99])
+    assert repo.latest_summary(db, cid)["overview"] == str(ids[-1])
+    saved = rows(db)
+    assert len(saved) == 3 and sum(row.message_count for row in saved) == 125
+    assert {row.window_end_message_id for row in saved} == {ids[49], ids[99], ids[124]}
+    assert ts.run_sweep(lambda: db) == 0
+
+
+def test_cursor_cas_va_pending_phan_biet_id_cung_timestamp(db):
+    cid, stamp, ids = _chat_with_tied_messages(db, 3)
+    c = db.get(Consultation, cid)
+    c.last_activity_at = utcnow()
+    db.commit()
+    assert repo.save_window_summary(
+        db, cid, None, stamp, 1, {"overview": "first"}, 1, "v1", window_end_message_id=ids[0],
+    )
+    db.commit()
+    assert [m.id for m in repo.unsummarized_messages(db, cid, stamp, 50, ids[0])] == ids[1:]
+    assert repo.summary_candidates(db, utcnow(), timedelta(minutes=10), batch=2, limit=10) == [cid]
+    assert repo.save_window_summary(
+        db, cid, stamp, stamp, 1, {"overview": "second"}, 1, "v1",
+        since_message_id=ids[0], window_end_message_id=ids[1],
+    )
+    db.commit()
+    assert not repo.save_window_summary(
+        db, cid, stamp, stamp, 1, {"overview": "stale"}, 1, "v1",
+        since_message_id=ids[0], window_end_message_id=ids[2],
+    )
+    db.rollback()
+    assert [m.id for m in repo.unsummarized_messages(db, cid, stamp, 50, ids[1])] == ids[2:]
+    assert repo.summary_candidates(db, utcnow(), timedelta(minutes=10), batch=2, limit=10) == []
+    assert repo.latest_summary(db, cid)["overview"] == "second"
+    assert len(rows(db)) == 2
+
+
+def test_cursor_cu_doc_lai_ranh_gioi_mot_lan(db, upstream):
+    cid, stamp, ids = _chat_with_tied_messages(db, 3)
+    assert repo.save_window_summary(db, cid, None, stamp, 1, {"overview": "legacy"}, 1, "v1")
+    db.commit()
+    assert [m.id for m in repo.unsummarized_messages(db, cid, stamp, 50)] == ids
+    assert ts.run_sweep(lambda: db) == 1
+    assert len(rows(db)) == 2
+    assert repo.latest_summary(db, cid)["overview"] != "legacy"
+    assert ts.run_sweep(lambda: db) == 0

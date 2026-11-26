@@ -3,7 +3,6 @@ import io
 import pymupdf
 import docx
 from docx.shared import Inches
-from PIL import Image
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BIZ_DIR = os.path.join(BASE_DIR, "Template các thủ tục kinh doanh")

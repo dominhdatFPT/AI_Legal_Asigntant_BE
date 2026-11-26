@@ -9,12 +9,20 @@ Thêm cặp mới: thêm 1 dòng vào SYNONYMS, rồi chạy scripts/eval_retrie
 import re
 import unicodedata
 
+_GCN_DAI = "Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất"
+_CAP_SO_LAN_DAU = "đăng ký lần đầu, cấp Giấy chứng nhận quyền sử dụng đất"
+
+# Mục "chung": chỉ được nối khi câu không khớp mục nào khác. Cụm "Giấy chứng nhận..." trùng tên các Điều về cấp sổ
+# (Đ.137, Đ.146...) nên nối thêm vào câu về tách thửa, thế chấp, chuyển nhượng... sẽ kéo kết quả sang sai Điều.
+_MUC_CHUNG = {_GCN_DAI, _CAP_SO_LAN_DAU}
+
 # (các cách nói đời thường, thuật ngữ trong luật)
 SYNONYMS: list[tuple[tuple[str, ...], str]] = [
     # Đất đai
-    (("sổ đỏ", "sổ hồng", "bìa đỏ", "bìa hồng"),
-     "Giấy chứng nhận quyền sử dụng đất, quyền sở hữu tài sản gắn liền với đất"),
-    (("mua đất", "bán đất", "mua bán đất", "mua nhà đất", "bán nhà đất", "mua nhà", "bán nhà"),
+    (("sổ đỏ", "sổ hồng", "bìa đỏ", "bìa hồng"), _GCN_DAI),
+    (("chưa có sổ", "chưa có sổ đỏ", "chưa có sổ hồng", "không có sổ", "chưa được cấp sổ", "đất không giấy tờ"),
+     "điều kiện chuyển nhượng quyền sử dụng đất; có Giấy chứng nhận"),
+    (("mua đất", "bán đất", "mua bán đất", "mua nhà đất", "bán nhà đất", "mua nhà", "bán nhà", "sang nhượng đất"),
      "chuyển nhượng quyền sử dụng đất, nhận chuyển nhượng quyền sử dụng đất"),
     (("sang tên", "đổi tên chủ", "chuyển tên"),
      "đăng ký biến động, chuyển quyền sử dụng đất"),
@@ -24,8 +32,7 @@ SYNONYMS: list[tuple[tuple[str, ...], str]] = [
      "chuyển mục đích sử dụng đất sang đất ở"),
     (("thổ cư",), "đất ở"),
     (("đất ruộng", "đất vườn", "đất rẫy", "đất trồng lúa"), "đất nông nghiệp"),
-    (("làm sổ lần đầu", "làm sổ đỏ", "cấp sổ", "xin sổ"),
-     "đăng ký lần đầu, cấp Giấy chứng nhận quyền sử dụng đất"),
+    (("làm sổ lần đầu", "làm sổ đỏ", "cấp sổ", "xin sổ"), _CAP_SO_LAN_DAU),
     (("ghi sai", "sai tên", "sửa sổ", "sai thông tin"),
      "đính chính Giấy chứng nhận đã cấp"),
     (("vay ngân hàng", "cầm sổ", "thế chấp sổ"), "thế chấp quyền sử dụng đất"),
@@ -33,7 +40,8 @@ SYNONYMS: list[tuple[tuple[str, ...], str]] = [
     (("cho con đất", "cho đất", "tặng đất", "cho tặng"), "tặng cho quyền sử dụng đất"),
     (("đất ông bà để lại", "đất bố mẹ để lại", "chia thừa kế", "hưởng thừa kế"),
      "thừa kế quyền sử dụng đất"),
-    (("lấn đất", "lấn chiếm", "tranh chấp đất", "kiện đất", "cãi nhau về đất"),
+    (("lấn đất", "lấn chiếm", "tranh chấp đất", "kiện đất", "cãi nhau về đất",
+      "hàng xóm", "lấn sang", "xây lấn", "lấn ranh", "lấn qua"),
      "tranh chấp đất đai, hòa giải tranh chấp đất đai, thẩm quyền giải quyết tranh chấp đất đai"),
     (("đền bù", "giải tỏa", "bị lấy đất"),
      "bồi thường, hỗ trợ, tái định cư khi Nhà nước thu hồi đất"),
@@ -48,9 +56,11 @@ SYNONYMS: list[tuple[tuple[str, ...], str]] = [
     (("tnhh",), "công ty trách nhiệm hữu hạn"),
     (("đóng cửa công ty", "dẹp công ty", "đóng công ty", "giải tán công ty"),
      "giải thể doanh nghiệp"),
+    (("rút vốn", "lấy lại vốn góp", "rút phần vốn"), "mua lại phần vốn góp; chuyển nhượng phần vốn góp"),
     (("tạm nghỉ kinh doanh", "tạm nghỉ bán", "nghỉ kinh doanh"),
      "tạm ngừng kinh doanh"),
-    (("đổi địa chỉ công ty", "chuyển trụ sở", "đổi trụ sở", "thay đổi thông tin công ty"),
+    (("đổi địa chỉ công ty", "chuyển trụ sở", "đổi trụ sở", "thay đổi thông tin công ty",
+      "chuyển văn phòng", "dời văn phòng", "đổi văn phòng", "dời trụ sở", "chuyển địa chỉ công ty"),
      "thay đổi nội dung đăng ký doanh nghiệp"),
     (("đổi tên công ty", "đổi tên doanh nghiệp", "công ty đổi tên", "công ty muốn đổi tên",
       "công ty tôi muốn đổi tên", "thay tên công ty"),
@@ -94,6 +104,8 @@ def legal_terms(query: str) -> list[str]:
     for phrases, legal in _PATTERNS:
         if any(p in words for p in phrases[accent]) and _words(legal, accent) not in words and legal not in terms:
             terms.append(legal)
+    if any(t not in _MUC_CHUNG for t in terms):
+        terms = [t for t in terms if t not in _MUC_CHUNG]
     return terms
 
 

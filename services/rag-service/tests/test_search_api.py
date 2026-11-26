@@ -84,7 +84,7 @@ def test_server_chua_cau_hinh_token_500(client, monkeypatch):
     [
         ({"query": ""}, "query"),
         ({"query": "   "}, "query"),
-        ({"query": "x" * 1001}, "query"),
+        ({"query": "x" * 20001}, "query"),
         ({}, "query"),
         ({"query": "x", "top_k": 0}, "top_k"),
         ({"query": "x", "top_k": 21}, "top_k"),

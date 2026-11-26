@@ -152,17 +152,3 @@ def validate_for_publish(content: ContentIn) -> List[Dict[str, str]]:
                     })
 
     return errors
-
-
-class TemplateOut(BaseModel):
-    id: str
-    template_group_id: str
-    version: int
-    status: str
-    name: str
-    domain: str
-    procedure_id: Optional[str] = None
-    content: Dict[str, Any]
-    created_at: str
-    updated_at: str
-    deleted_at: Optional[str] = None

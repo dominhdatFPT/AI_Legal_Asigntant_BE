@@ -23,6 +23,7 @@ class FormField(BaseModel):
     label: str = Field(..., description="Nhãn tiếng Việt hiển thị trên giao diện form")
     field_type: FieldType = Field(default=FieldType.text, description="Loại ô nhập liệu")
     required: bool = Field(default=True, description="Trường bắt buộc hay không")
+    excluded_from_entry: bool = Field(default=False, exclude=True)
     placeholder: Optional[str] = Field(default=None, description="Gợi ý nhập liệu")
     default_value: Optional[Any] = Field(default=None, description="Giá trị mặc định ban đầu")
     options: Optional[List[FormFieldOption]] = Field(default=None, description="Danh sách lựa chọn nếu là select/radio")
@@ -72,35 +73,7 @@ class ApplicationSubmitRequest(BaseModel):
     extra_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Dữ liệu mở rộng bổ sung")
 
 
-class ApplicationRecordResponse(BaseModel):
-    id: str
-    application_code: Optional[str] = None
-    user_id: Optional[str] = None
-    procedure_code: str
-    procedure_name: Optional[str] = None
-    domain: str
-    target_table: Optional[str] = None
-    status: str
-    applicant_name: Optional[str] = None
-    form_data: Dict[str, Any]
-    extra_data: Optional[Dict[str, Any]] = None
-    created_at: str
-    updated_at: str
-
-
 class ApplicationUpdateRequest(BaseModel):
     status: Optional[Literal["draft"]] = Field(default=None, description="Chỉ cho phép cập nhật trạng thái draft (H7, C6)")
     form_data: Optional[Dict[str, Any]] = Field(default=None, description="Dữ liệu các biến theo form schema cần cập nhật")
     extra_data: Optional[Dict[str, Any]] = Field(default=None, description="Dữ liệu mở rộng bổ sung")
-
-
-class PaginationMetadata(BaseModel):
-    page: int
-    page_size: int
-    total: int
-    total_pages: int
-
-
-class ApplicationListResponse(BaseModel):
-    items: List[Dict[str, Any]]
-    pagination: PaginationMetadata

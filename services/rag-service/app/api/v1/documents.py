@@ -6,12 +6,13 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin, get_current_user
+from app.api.deps import require_admin
 from app.core.auth import TokenPayload
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models import LegalDocument
 from app.repositories import document as document_repo
+from app.rag_indexing_queue import publish_indexing_job
 from app.schemas.document import (
     DocStatus,
     DocumentCreateRequest,
@@ -282,7 +283,8 @@ def approve_document(
         "approve_requested", actor_user_id=user.sub, actor_role=user.role,
         document_id=document_id, doc_number=doc.doc_number, title=doc.title,
     )
-    background_tasks.add_task(approve_document_background, document_id, actor_user_id=user.sub, actor_role=user.role)
+    if not publish_indexing_job({"action": "approve", "document_id": str(document_id), "actor_user_id": user.sub, "actor_role": user.role}):
+        background_tasks.add_task(approve_document_background, document_id, actor_user_id=user.sub, actor_role=user.role)
     logger.info("Duyệt văn bản %s bởi %s", document_id, user.sub)
     db.expire_all()  # đọc lại dòng vừa bị UPDATE
     return {"data": _detail(*document_repo.get_document_with_length(db, document_id)), "error": None, "request_id": request_id}
@@ -357,9 +359,10 @@ def replace_document(
         "replace_requested", actor_user_id=user.sub, actor_role=user.role,
         document_id=document_id, doc_number=doc_number, title=title,
     )
-    background_tasks.add_task(
-        replace_document_background, document_id, body.content, actor_user_id=user.sub, actor_role=user.role
-    )
+    if not publish_indexing_job({"action": "replace", "document_id": str(document_id), "new_content": body.content, "actor_user_id": user.sub, "actor_role": user.role}):
+        background_tasks.add_task(
+            replace_document_background, document_id, body.content, actor_user_id=user.sub, actor_role=user.role
+        )
     logger.info("Thay nội dung văn bản %s bởi %s", document_id, user.sub)
     db.expire_all()  # đọc lại dòng vừa bị UPDATE
     return {"data": _detail(*document_repo.get_document_with_length(db, document_id)), "error": None, "request_id": request_id}

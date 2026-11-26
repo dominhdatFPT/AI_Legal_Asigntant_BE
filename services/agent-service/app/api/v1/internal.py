@@ -12,7 +12,7 @@ from app.core.internal_auth import require_internal_token
 from app.repositories import conversation as repo
 from app.schemas.minutes import MinutesOut, MinutesRequest
 from app.schemas.summary import SummaryOut, SummaryRequest
-from app.services import llm_client, minutes, minutes_prompt, summary
+from app.services import case_budget, llm_client, minutes, minutes_prompt, summary
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +25,15 @@ router = APIRouter(
 
 
 def _load_messages(db: Session, conversation_id: uuid.UUID, payload: SummaryRequest) -> list[tuple[str, str]] | None:
-    """(role, content) cũ → mới của các tin trước `until`; None nếu không có hội thoại của đúng chủ này."""
-    if repo.get_conversation_of_user(db, conversation_id, payload.user_id) is None:
-        return None
-    messages = repo.get_messages_before(db, conversation_id, payload.until, limit=summary.MAX_MESSAGES)
-    return [(m.role, m.content) for m in messages]
+    """(role, content) cũ → mới của các tin trước `until`; None nếu không có hội thoại của đúng chủ này.
+    Trả kết nối DB về pool ngay sau khi đọc xong để không giữ slot trong suốt thời gian chờ LLM tóm tắt."""
+    try:
+        if repo.get_conversation_of_user(db, conversation_id, payload.user_id) is None:
+            return None
+        messages = repo.get_messages_before(db, conversation_id, payload.until, limit=summary.MAX_MESSAGES)
+        return [(m.role, m.content) for m in messages]
+    finally:
+        db.close()
 
 
 @router.post("/{conversation_id}/summary")
@@ -55,7 +59,7 @@ async def summarize_conversation(
 
     try:
         text, model = await summary.summarize(transcript)
-    except llm_client.LLMError as e:
+    except (llm_client.LLMError, case_budget.BudgetExhaustedError) as e:
         # Chỉ ghi loại lỗi, không ghi chi tiết: không để lọt nội dung tin nhắn vào log
         logger.error(
             "agent tóm tắt hội thoại lỗi request_id=%s conversation_id=%s số_tin=%d thời_gian=%.2fs: %s",
@@ -87,7 +91,7 @@ async def summarize_transcript(payload: MinutesRequest, x_request_id: str | None
     started = time.monotonic()
     try:
         data, model = await minutes.summarize(payload)
-    except llm_client.LLMError as e:
+    except (llm_client.LLMError, case_budget.BudgetExhaustedError) as e:
         logger.error("agent biên bản lỗi request_id=%s consultation_id=%s số_tin=%d thời_gian=%.2fs: %s", request_id,
                      payload.consultation_id, len(payload.messages), time.monotonic() - started, type(e).__name__)
         raise _error(503, "AI_SERVICE_ERROR", "Dịch vụ AI đang gặp sự cố, vui lòng thử lại sau.")

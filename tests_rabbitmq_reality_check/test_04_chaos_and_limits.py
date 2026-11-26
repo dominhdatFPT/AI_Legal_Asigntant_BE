@@ -4,7 +4,7 @@ Tests:
 2. Broker Outage / Timeout & 10s Circuit-Breaker Backoff Verification.
 3. Sudden TCP Disconnect & Auto-Recovery.
 4. Queue x-max-length Overflow Protection Behavior.
-5. Windows host IPv6 vs IPv4 Configuration Reality Check (BE/.env vs Docker bind).
+5. Connection using the configured broker address.
 """
 import asyncio
 import logging
@@ -169,30 +169,30 @@ async def run_chaos_and_limits():
     await channel.queue_delete(small_q_name)
 
     # =========================================================================
-    # 5. Reality Check: BE/.env (localhost) vs 127.0.0.1 on Windows Host
+    # 5. Confirm the configured endpoint accepts a connection.
     # =========================================================================
-    print("\n--- 5. Reality Check: Hostname Resolution (BE/.env 'localhost' vs '127.0.0.1') ---")
-    env_url = config.ENV_CONFIGURED_URL  # from BE/.env with localhost
+    print("\n--- 5. Reality Check: Configured Broker Address ---")
+    env_url = config.ENV_CONFIGURED_URL
     t0 = time.perf_counter()
-    localhost_connected = False
+    configured_connected = False
     try:
         c = await aio_pika.connect(env_url, timeout=2)
         await c.close()
-        localhost_connected = True
+        configured_connected = True
     except Exception as e:
-        localhost_error = type(e).__name__
-    elapsed_localhost = time.perf_counter() - t0
+        configured_error = type(e).__name__
+    elapsed = time.perf_counter() - t0
 
-    print(f"  • Connecting with BE/.env value ({events.masked(env_url)}):")
-    if localhost_connected:
-        print(f"    -> Connected in {elapsed_localhost:.3f}s")
+    print(f"  • Connecting with configured address ({events.masked(env_url)}):")
+    if configured_connected:
+        print(f"    -> Connected in {elapsed:.3f}s")
     else:
-        print(f"    -> FAILED with {localhost_error} in {elapsed_localhost:.3f}s (IPv6 loopback mismatch on Windows)")
+        print(f"    -> FAILED with {configured_error} in {elapsed:.3f}s")
 
     results.append((
-        "Host IPv6/IPv4 Resolution Reality Check",
-        localhost_connected,
-        f"{'Connected' if localhost_connected else 'FAIL: ' + localhost_error + ' (localhost -> ::1 mismatch)'}"
+        "Configured Broker Connectivity",
+        configured_connected,
+        "Connected" if configured_connected else f"FAIL: {configured_error}",
     ))
 
     await connection.close()
@@ -202,7 +202,8 @@ async def run_chaos_and_limits():
     for name, status, detail in results:
         print(f"  - {name:<45}: {'PASS' if status else 'FAIL'} ({detail})")
     print("=" * 80)
+    return all(status for _, status, _ in results)
 
 
 if __name__ == "__main__":
-    asyncio.run(run_chaos_and_limits())
+    sys.exit(0 if asyncio.run(run_chaos_and_limits()) else 1)

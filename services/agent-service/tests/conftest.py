@@ -21,9 +21,23 @@ def settings_env(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
     monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    # Existing regression fixtures exercise the legacy rollout profile.
+    # test_adaptive_rag explicitly enables the production-default adaptive profile.
+    monkeypatch.setenv("ADAPTIVE_RAG_ENABLED", "false")
+    monkeypatch.setenv("OPENROUTER_AUX_MODEL", "")  # test chung dùng fallback; test model phụ tự đặt rõ
     # Test thử lại / timeout tính theo 15 giây và 1 lần thử lại, không theo mặc định thật trong config.py
     monkeypatch.setenv("GEMINI_TIMEOUT_SECONDS", "15")
     monkeypatch.setenv("GEMINI_MAX_RETRIES", "1")
+    # Hai cache (tìm luật, lịch sử) BẬT mặc định trong code; test chung chạy với cache tắt cho độc lập nhau, test cache tự bật rõ ràng
+    # Trần $0.01 mặc định BẬT trong code (10000 micro-USD); các test cũ chạy với provider giả nên tắt trần, test cost gate tự bật rõ ràng
+    monkeypatch.setenv("CASE_COST_BUDGET_MICRO_USD", "0")
+    monkeypatch.setenv("MINUTES_COST_BUDGET_MICRO_USD", "0")
+    # Mặc định production mới (chấm liên quan + dedup bật, cap 3500...) không áp cho ~1.100 test cũ: chúng chạy profile cũ
+    monkeypatch.setenv("RELEVANCE_CHECK", "false")
+    monkeypatch.setenv("CASE_RELEVANCE_DEDUP_ENABLED", "false")
+    monkeypatch.setenv("DAILY_TOKEN_QUOTA_ENABLED", "false")
+    monkeypatch.setenv("RAG_CACHE_ENABLED", "false")
+    monkeypatch.setenv("HISTORY_CACHE_ENABLED", "false")  # cache lịch sử cũng bật mặc định; test cache lịch sử tự bật rõ ràng
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
@@ -40,13 +54,25 @@ def reset_rag_breaker():
 
 
 @pytest.fixture(autouse=True)
-def reset_answer_cache():
-    """Cache câu trả lời của responder giữ trạng thái ở cấp module: mỗi test bắt đầu và kết thúc với cache trống."""
-    from app.services import responder
+def reset_cache_state():
+    """Trạng thái cache giữ ở cấp module (số phiên bản kho luật, ngắt mạch, cache lịch sử): mỗi test bắt đầu và kết thúc sạch."""
+    from common_auth import revocation
+    from app.api.v1 import conversations
+    from app.services import cache, history_cache, quota
 
-    responder.clear_answer_cache()
+    conversations.reset_idempotency()
+    cache.reset_corpus_version()
+    cache.reset_breakers()
+    history_cache.reset()
+    quota.reset_local_state()
+    revocation.clear()
     yield
-    responder.clear_answer_cache()
+    conversations.reset_idempotency()
+    cache.reset_corpus_version()
+    cache.reset_breakers()
+    history_cache.reset()
+    quota.reset_local_state()
+    revocation.clear()
 
 
 @pytest.fixture

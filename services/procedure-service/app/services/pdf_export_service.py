@@ -12,12 +12,11 @@ from datetime import datetime
 import html
 from io import BytesIO
 import os
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
@@ -46,18 +45,23 @@ def _ensure_fonts_registered():
     italic_path = os.path.join(FONT_DIR, "LiberationSerif-Italic.ttf")
     bold_italic_path = os.path.join(FONT_DIR, "LiberationSerif-BoldItalic.ttf")
 
-    if not os.path.isfile(regular_path):
-        sys_font_dir = "/usr/share/fonts/truetype/liberation"
-        if os.path.isfile(os.path.join(sys_font_dir, "LiberationSerif-Regular.ttf")):
-            regular_path = os.path.join(sys_font_dir, "LiberationSerif-Regular.ttf")
-            bold_path = os.path.join(sys_font_dir, "LiberationSerif-Bold.ttf")
-            italic_path = os.path.join(sys_font_dir, "LiberationSerif-Italic.ttf")
-            bold_italic_path = os.path.join(sys_font_dir, "LiberationSerif-BoldItalic.ttf")
+    if not all(os.path.isfile(p) for p in (regular_path, bold_path, italic_path, bold_italic_path)):
+        candidates = [
+            ("/usr/share/fonts/truetype/liberation", ("LiberationSerif-Regular.ttf", "LiberationSerif-Bold.ttf", "LiberationSerif-Italic.ttf", "LiberationSerif-BoldItalic.ttf")),
+            ("/usr/share/fonts/truetype/liberation2", ("LiberationSerif-Regular.ttf", "LiberationSerif-Bold.ttf", "LiberationSerif-Italic.ttf", "LiberationSerif-BoldItalic.ttf")),
+            (os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"), ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf")),
+        ]
+        for directory, names in candidates:
+            paths = [os.path.join(directory, name) for name in names]
+            if all(os.path.isfile(path) for path in paths):
+                regular_path, bold_path, italic_path, bold_italic_path = paths
+                break
 
     pdfmetrics.registerFont(TTFont("LiberationSerif", regular_path))
     pdfmetrics.registerFont(TTFont("LiberationSerif-Bold", bold_path))
     pdfmetrics.registerFont(TTFont("LiberationSerif-Italic", italic_path))
     pdfmetrics.registerFont(TTFont("LiberationSerif-BoldItalic", bold_italic_path))
+    pdfmetrics.registerFontFamily("LiberationSerif", normal="LiberationSerif", bold="LiberationSerif-Bold", italic="LiberationSerif-Italic", boldItalic="LiberationSerif-BoldItalic")
     _FONTS_REGISTERED = True
 
 
@@ -150,10 +154,7 @@ def generate_application_dossier_pdf(application_data: Dict[str, Any]) -> bytes:
     procedure = application_data.get("procedure") or {}
 
     # Trích xuất dữ liệu biểu mẫu chuẩn Mẫu số 18
-    receiving_agency = (
-        form_data.get("receiving_agency")
-        or "Chi nhánh Văn phòng Đăng ký Đất đai"
-    )
+    receiving_agency = str(form_data.get("receiving_agency") or "").strip()
 
     applicant_name = (
         form_data.get("applicant_name")
@@ -331,10 +332,11 @@ def generate_application_dossier_pdf(application_data: Dict[str, Any]) -> bytes:
     )
     story.append(Spacer(1, 12))
 
-    # 3. KÍNH GỬI
-    kinh_gui_text = f"<b>Kính gửi:</b> {html.escape(receiving_agency)}"
-    story.append(Paragraph(kinh_gui_text, ParagraphStyle("KinhGui", parent=body_style, fontSize=11, leading=16, leftIndent=16)))
-    story.append(Spacer(1, 12))
+    # 3. KÍNH GỬI — chỉ in khi hồ sơ có dữ liệu đã lưu.
+    if receiving_agency:
+        kinh_gui_text = f"<b>Kính gửi:</b> {html.escape(receiving_agency)}"
+        story.append(Paragraph(kinh_gui_text, ParagraphStyle("KinhGui", parent=body_style, fontSize=11, leading=16, leftIndent=16)))
+        story.append(Spacer(1, 12))
 
     # 4. MỤC I: NGƯỜI SỬ DỤNG ĐẤT, CHỦ SỞ HỮU TÀI SẢN GẮN LIỀN VỚI ĐẤT
     story.append(Paragraph("<b>I. Người sử dụng đất, chủ sở hữu tài sản gắn liền với đất:</b>", section_head_style))

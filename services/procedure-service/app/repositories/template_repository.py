@@ -1,22 +1,18 @@
 import logging
+import mimetypes
 import os
-import unicodedata
+import re
+from collections import OrderedDict
+from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, List, Optional
-import requests
-from requests.adapters import HTTPAdapter
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, OperationalError
+from uuid import UUID
 
-from app.database import get_engine, get_supabase_config, is_postgres_circuit_open, mark_postgres_failed
+from sqlalchemy import text
+
 from app.repositories.procedure_repository import ProcedureDbUnavailable, db_connection, remove_accents
 
 logger = logging.getLogger(__name__)
-
-# Connection pool session
-_session = requests.Session()
-_adapter = HTTPAdapter(pool_connections=10, pool_maxsize=20, max_retries=1)
-_session.mount("http://", _adapter)
-_session.mount("https://", _adapter)
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 BIZ_DIR = os.path.join(BASE_DIR, "Template các thủ tục kinh doanh")
@@ -29,16 +25,6 @@ DOMAIN_LABELS = {
     "land": "Đất đai & Bất động sản",
     "business": "Doanh nghiệp & Hộ kinh doanh",
 }
-
-
-def _supabase_headers() -> dict:
-    _, anon_key = get_supabase_config()
-    return {
-        "apikey": anon_key,
-        "Authorization": f"Bearer {anon_key}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation",
-    }
 
 
 def _domain_label(domain: str) -> str:
@@ -55,7 +41,9 @@ def _local_disk_fallback_list(
     procedure_code: Optional[str] = None,
     q: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """Fallback quét trực tiếp từ đĩa khi không thể kết nối tới Database."""
+    """Liệt kê các mẫu đi kèm bản cài đặt cục bộ."""
+    if procedure_code and not re.fullmatch(r"(?:DD|HKD|DN|HTX|BHXH)-[0-9]+", procedure_code):
+        return []
     folders = []
     if domain in (None, "", "all", "land"):
         folders.append(("land", LAND_DIR))
@@ -100,12 +88,45 @@ def _local_disk_fallback_list(
     return results
 
 
-_METADATA_BY_ID: Dict[str, Dict[str, Any]] = {}
-_FILE_CACHE: Dict[str, Dict[str, Any]] = {}
+_FILE_CACHE_MAX = 64
+_FILE_CACHE: OrderedDict[str, tuple[str, dict]] = OrderedDict()
+_FILE_CACHE_LOCK = Lock()
+
+
+def _allow_local_assets() -> bool:
+    return os.getenv("ENVIRONMENT", "").strip().lower() != "production"
+
+
+def _read_local_file(template_id: str) -> Optional[Dict[str, Any]]:
+    if not _allow_local_assets():
+        return None
+    parts = template_id.split("-", 2)
+    if len(parts) != 3 or parts[0] != "local":
+        return None
+    _, domain, filename = parts
+    if not filename or filename.startswith((".", "~$")) or any(char in filename for char in "/\\:"):
+        return None
+
+    folders = {
+        "land": (PREVIEW_LAND_DIR, LAND_DIR),
+        "business": (PREVIEW_BIZ_DIR, BIZ_DIR),
+    }
+    for folder in folders.get(domain, ()):
+        path = Path(folder) / filename
+        if path.is_file():
+            return {
+                "id": template_id,
+                "file_name": filename,
+                "media_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                "format": path.suffix.lstrip(".").upper(),
+                "file_bytes": path.read_bytes(),
+                "preview_pdf": None,
+            }
+    return None
 
 
 class TemplateRepository:
-    """Repository chuyên trách quản lý và phục vụ biểu mẫu (Kho mẫu đơn tham khảo)."""
+    """Đọc danh mục và tệp của kho mẫu đơn tham khảo."""
 
     @staticmethod
     def list_templates(
@@ -113,280 +134,147 @@ class TemplateRepository:
         procedure_code: Optional[str] = None,
         q: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Lấy danh sách biểu mẫu có lọc theo lĩnh vực, mã thủ tục và từ khóa."""
-        items = TemplateRepository._do_list_templates(domain=domain, procedure_code=procedure_code, q=q)
-        for it in items:
-            _METADATA_BY_ID[it["id"]] = it
-        return items
-
-    @staticmethod
-    def _do_list_templates(
-        domain: Optional[str] = None,
-        procedure_code: Optional[str] = None,
-        q: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
         clean_domain = domain.strip().lower() if domain else None
+        clean_code = procedure_code.strip().upper() if procedure_code else None
         if clean_domain == "all":
             clean_domain = None
-        clean_code = procedure_code.strip().upper() if procedure_code else None
         if clean_code == "ALL":
             clean_code = None
 
-        # 1. Thử qua SQLAlchemy Engine trực tiếp
-        if not is_postgres_circuit_open():
-            engine = get_engine()
-            if engine:
-                try:
-                    where_clauses = ["is_active = true"]
-                    params: Dict[str, Any] = {}
-                    if clean_domain:
-                        where_clauses.append("domain = :domain")
-                        params["domain"] = clean_domain
-                    if clean_code:
-                        where_clauses.append("UPPER(procedure_code) = :code")
-                        params["code"] = clean_code
+        clauses = ["t.is_active = true"]
+        params = {}
+        if clean_domain:
+            clauses.append("t.domain = :domain")
+            params["domain"] = clean_domain
+        if clean_code:
+            clauses.append("UPPER(t.procedure_code) = :code")
+            params["code"] = clean_code
+        where_sql = " AND ".join(clauses)
+        try:
+            with db_connection() as conn:
+                rows = conn.execute(
+                    text(f"""
+                        SELECT t.id, t.procedure_code, t.procedure_name, t.domain, t.name,
+                               t.file_name, t.format, t.media_type, t.file_size, t.order_index,
+                               t.is_active, d.name AS domain_label,
+                               t.preview_pdf IS NOT NULL AS has_preview
+                        FROM public.form_templates t
+                        LEFT JOIN public.procedure_domains d ON d.code = t.domain
+                        WHERE {where_sql}
+                        ORDER BY d.order_index, t.order_index, t.name
+                    """),
+                    params,
+                ).mappings().all()
+        except ProcedureDbUnavailable:
+            if not _allow_local_assets():
+                raise
+            logger.warning("Không đọc được kho mẫu từ cơ sở dữ liệu. Đang dùng mẫu cục bộ.")
+            return _local_disk_fallback_list(clean_domain, clean_code, q)
 
-                    where_sql = " AND ".join(where_clauses)
-                    sql = (
-                        f"SELECT id, procedure_code, procedure_name, domain, name, file_name, "
-                        f"format, media_type, file_size, order_index, is_active "
-                        f"FROM public.form_templates WHERE {where_sql} ORDER BY order_index, name"
-                    )
-                    with db_connection() as conn:
-                        rows = conn.execute(text(sql), params).mappings().all()
-                        items = []
-                        for r in rows:
-                            d = dict(r)
-                            d["id"] = str(d["id"])
-                            d["domain_label"] = _domain_label(d["domain"])
-                            d["size"] = d.get("file_size", 0)
-                            d["viewable"] = _is_viewable(d.get("format", ""))
-                            items.append(d)
-
-                        if q:
-                            words = remove_accents(q.strip().casefold()).split()
-                            items = [
-                                it for it in items
-                                if all(w in remove_accents(f"{it['name']} {it.get('procedure_name','')} {it.get('procedure_code','')}").casefold() for w in words)
-                            ]
-                        return items
-                except (OperationalError, DBAPIError, ProcedureDbUnavailable) as exc:
-                    logger.warning(f"Lỗi truy vấn SQL form_templates: {exc}. Chuyển hướng PostgREST.")
-                    mark_postgres_failed(60.0)
-                except Exception as exc:
-                    logger.warning(f"Lỗi không xác định khi query form_templates: {exc}")
-
-        # 2. Thử qua Supabase PostgREST Fallback
-        supabase_url, _ = get_supabase_config()
-        if supabase_url:
-            try:
-                query_parts = ["select=id,procedure_code,procedure_name,domain,name,file_name,format,media_type,file_size,order_index,is_active", "is_active=eq.true"]
-                if clean_domain:
-                    query_parts.append(f"domain=eq.{clean_domain}")
-                if clean_code:
-                    query_parts.append(f"procedure_code=eq.{clean_code}")
-                query_parts.append("order=order_index.asc,name.asc")
-
-                rest_url = f"{supabase_url}/rest/v1/form_templates?{'&'.join(query_parts)}"
-                res = _session.get(rest_url, headers=_supabase_headers(), timeout=5)
-                if res.status_code == 200:
-                    items = res.json()
-                    for it in items:
-                        it["domain_label"] = _domain_label(it["domain"])
-                        it["size"] = it.get("file_size", 0)
-                        it["viewable"] = _is_viewable(it.get("format", ""))
-
-                    if q:
-                        words = remove_accents(q.strip().casefold()).split()
-                        items = [
-                            it for it in items
-                            if all(w in remove_accents(f"{it['name']} {it.get('procedure_name','')} {it.get('procedure_code','')}").casefold() for w in words)
-                        ]
-                    return items
-            except Exception as e:
-                logger.warning(f"Lỗi gọi Supabase PostgREST form_templates: {e}")
-
-        # 3. Fallback đọc từ đĩa (chống sập hệ thống)
-        logger.info("Sử dụng fallback danh sách biểu mẫu từ thư mục cục bộ.")
-        return _local_disk_fallback_list(clean_domain, clean_code, q)
+        items = []
+        words = remove_accents(q.strip().casefold()).split() if q else []
+        for row in rows:
+            item = dict(row)
+            searchable = remove_accents(
+                f"{item['name']} {item['procedure_name'] or ''} {item['procedure_code'] or ''}"
+            ).casefold()
+            if not all(word in searchable for word in words):
+                continue
+            item["id"] = str(item["id"])
+            item["domain_label"] = item["domain_label"] or _domain_label(item["domain"])
+            item["size"] = item["file_size"]
+            has_preview = item.pop("has_preview")
+            item["viewable"] = bool(has_preview) or _is_viewable(item["format"])
+            items.append(item)
+        return items
 
     @staticmethod
     def get_file(template_id: str, preview: bool = True) -> Optional[Dict[str, Any]]:
-        """Adapter cho endpoint tra cứu /templates/{id}/file."""
         file_info = TemplateRepository.get_template_file(template_id)
-        if not file_info or not file_info.get("file_bytes"):
+        if file_info is None:
             return None
+        if preview and file_info.get("preview_pdf"):
+            return {
+                "content": file_info["preview_pdf"],
+                "file_name": f"{Path(file_info['file_name']).stem}.pdf",
+                "media_type": "application/pdf",
+            }
         return {
             "content": file_info["file_bytes"],
-            "media_type": file_info["media_type"],
             "file_name": file_info["file_name"],
+            "media_type": file_info["media_type"],
         }
 
     @staticmethod
     def get_template_file(template_id: str) -> Optional[Dict[str, Any]]:
-        """Lấy nội dung binary của biểu mẫu theo ID (ưu tiên Database đã chuẩn hóa, sau đó fallback đĩa cục bộ)."""
-        clean_id = template_id.strip()
+        clean_id = str(template_id).strip()
+        try:
+            clean_id = str(UUID(clean_id))
+        except ValueError:
+            return _read_local_file(clean_id)
 
-        # 0. Kiểm tra RAM cache
-        if clean_id in _FILE_CACHE:
-            return _FILE_CACHE[clean_id]
+        with _FILE_CACHE_LOCK:
+            cached = _FILE_CACHE.get(clean_id)
 
-        # 1. Thử qua SQLAlchemy (Ưu tiên lấy nội dung đã chuẩn hóa lưu trong Database)
-        if not is_postgres_circuit_open():
-            engine = get_engine()
-            if engine:
-                try:
-                    from uuid import UUID
-                    try:
-                        clean_uuid = str(UUID(clean_id))
-                        where_tpl = "id = :id"
-                    except Exception:
-                        clean_uuid = clean_id
-                        where_tpl = "CAST(id AS TEXT) = :id"
-                    with db_connection() as conn:
-                        row = conn.execute(
-                            text(f"SELECT id, name, file_name, format, media_type, file_data, domain FROM public.form_templates WHERE {where_tpl} LIMIT 1"),
-                            {"id": clean_uuid},
-                        ).mappings().fetchone()
-                        if row and row["file_data"] is not None:
-                            raw_data = row["file_data"]
-                            if isinstance(raw_data, memoryview):
-                                raw_bytes = raw_data.tobytes()
-                            elif isinstance(raw_data, str) and raw_data.startswith("\\x"):
-                                raw_bytes = bytes.fromhex(raw_data[2:])
-                            elif isinstance(raw_data, bytes):
-                                raw_bytes = raw_data
-                            else:
-                                raw_bytes = b""
+        with db_connection() as conn:
+            version_sql = "CAST(xmin AS text)" if conn.dialect.name == "postgresql" else "CAST(NULL AS text)"
+            row = conn.execute(
+                text(f"""
+                    SELECT file_name, media_type, format, {version_sql} AS version,
+                           CASE WHEN {version_sql} = :cached_version THEN NULL ELSE file_data END AS file_data,
+                           CASE WHEN {version_sql} = :cached_version THEN NULL ELSE preview_pdf END AS preview_pdf
+                    FROM public.form_templates
+                    WHERE id = :id AND is_active = true
+                """),
+                {"id": clean_id, "cached_version": cached[0] if cached else None},
+            ).mappings().first()
 
-                            if raw_bytes:
-                                res = {
-                                    "id": str(row["id"]),
-                                    "file_name": row["file_name"],
-                                    "media_type": row["media_type"],
-                                    "format": row["format"],
-                                    "file_bytes": raw_bytes,
-                                }
-                                _FILE_CACHE[clean_id] = res
-                                return res
-                except (OperationalError, DBAPIError, ProcedureDbUnavailable) as exc:
-                    logger.warning(f"Lỗi lấy file_data từ DB: {exc}. Chuyển sang PostgREST.")
-                    mark_postgres_failed(60.0)
-                except Exception as exc:
-                    logger.warning(f"Lỗi không xác định khi query get_template_file: {exc}")
+        if row is None:
+            with _FILE_CACHE_LOCK:
+                _FILE_CACHE.pop(clean_id, None)
+            return None
 
-        # 2. Thử qua PostgREST (Supabase fallback)
-        supabase_url, _ = get_supabase_config()
-        if supabase_url:
-            try:
-                rest_url = f"{supabase_url}/rest/v1/form_templates?id=eq.{clean_id}&select=id,name,file_name,format,media_type,file_data,domain&limit=1"
-                res = _session.get(rest_url, headers=_supabase_headers(), timeout=10)
-                if res.status_code == 200 and res.json():
-                    row = res.json()[0]
-                    raw_data = row.get("file_data") or ""
-                    if raw_data.startswith("\\x"):
-                        raw_bytes = bytes.fromhex(raw_data[2:])
-                    else:
-                        raw_bytes = raw_data.encode("latin1") if isinstance(raw_data, str) else b""
+        version = row["version"]
+        if cached is not None and version == cached[0]:
+            file_info = cached[1]
+        else:
+            if not row["file_data"]:
+                return None
+            file_info = {
+                "id": clean_id,
+                "file_name": row["file_name"],
+                "media_type": row["media_type"],
+                "format": row["format"],
+                "file_bytes": bytes(row["file_data"]),
+                "preview_pdf": bytes(row["preview_pdf"]) if row["preview_pdf"] else None,
+            }
 
-                    if raw_bytes:
-                        res = {
-                            "id": str(row["id"]),
-                            "file_name": row["file_name"],
-                            "media_type": row["media_type"],
-                            "format": row["format"],
-                            "file_bytes": raw_bytes,
-                        }
-                        _FILE_CACHE[clean_id] = res
-                        return res
-            except Exception as e:
-                logger.warning(f"Lỗi lấy file qua PostgREST: {e}")
-
-        # 3. Fallback tìm file trên đĩa (ưu tiên thư mục preview đã chuẩn hóa)
-        meta = _METADATA_BY_ID.get(clean_id)
-        candidate_folders = [PREVIEW_LAND_DIR, PREVIEW_BIZ_DIR, LAND_DIR, BIZ_DIR]
-        if meta and meta.get("file_name"):
-            fname = meta["file_name"]
-            for folder in candidate_folders:
-                if not os.path.exists(folder):
-                    continue
-                p = os.path.join(folder, fname)
-                if os.path.exists(p):
-                    try:
-                        with open(p, "rb") as f:
-                            b = f.read()
-                        res = {
-                            "id": clean_id,
-                            "file_name": fname,
-                            "media_type": meta.get("media_type") or ("application/pdf" if meta.get("format") == "PDF" else "application/octet-stream"),
-                            "format": meta.get("format") or "PDF",
-                            "file_bytes": b,
-                        }
-                        _FILE_CACHE[clean_id] = res
-                        return res
-                    except Exception as err:
-                        logger.warning(f"Lỗi đọc file fallback từ đĩa {p}: {err}")
-
-        # 4. Fallback quét theo token nếu không có metadata
-        target_token = clean_id
-        for prefix in ("local-land-", "local-business-", "local-"):
-            if target_token.startswith(prefix):
-                target_token = target_token[len(prefix):]
-                break
-
-        for folder in candidate_folders:
-            if not os.path.exists(folder):
-                continue
-            for fname in os.listdir(folder):
-                if fname.startswith("~$") or fname.startswith("."):
-                    continue
-                if target_token == fname or target_token in fname or fname.startswith(target_token):
-                    full_p = os.path.join(folder, fname)
-                    with open(full_p, "rb") as f:
-                        b = f.read()
-                    ext = os.path.splitext(fname)[1].lower().replace(".", "").upper()
-                    if ext == "PDF":
-                        mtype = "application/pdf"
-                    elif ext == "DOCX":
-                        mtype = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    elif ext == "DOC":
-                        mtype = "application/msword"
-                    elif ext in ("PNG", "JPG", "JPEG"):
-                        mtype = f"image/{ext.lower() if ext != 'JPG' else 'jpeg'}"
-                    else:
-                        mtype = "application/octet-stream"
-
-                    return {
-                        "id": clean_id,
-                        "file_name": fname,
-                        "media_type": mtype,
-                        "format": ext,
-                        "file_bytes": b,
-                    }
-        return None
+        if version is not None:
+            with _FILE_CACHE_LOCK:
+                _FILE_CACHE[clean_id] = (version, file_info)
+                _FILE_CACHE.move_to_end(clean_id)
+                if len(_FILE_CACHE) > _FILE_CACHE_MAX:
+                    _FILE_CACHE.popitem(last=False)
+        return dict(file_info)
 
     @staticmethod
     def get_template_by_procedure_code(procedure_code: str, preferred_format: str = "DOCX") -> Optional[Dict[str, Any]]:
-        """Lấy biểu mẫu Word hoặc PDF chuẩn theo mã thủ tục (ví dụ: DD-001, DN-003)."""
         clean_code = procedure_code.strip().upper()
-        templates = TemplateRepository.list_templates(procedure_code=clean_code)
-        if not templates:
+        with db_connection() as conn:
+            row = conn.execute(text("""
+                SELECT id, file_name, media_type, format, file_data, preview_pdf
+                FROM public.form_templates
+                WHERE upper(procedure_code) = :code AND is_active = true
+                ORDER BY CASE
+                    WHEN :prefer_pdf = 1 AND upper(format) = 'PDF' THEN 0
+                    WHEN upper(format) = 'DOCX' THEN 1
+                    WHEN upper(format) = 'DOC' THEN 2 ELSE 3 END,
+                    order_index, id
+                LIMIT 1
+            """), {"code": clean_code, "prefer_pdf": int(preferred_format.upper() == "PDF")}).mappings().first()
+        if row is None or not row["file_data"]:
             return None
-
-        pref = preferred_format.upper()
-        if pref == "PDF":
-            pdf_match = next((t for t in templates if t.get("format") == "PDF"), None)
-            if pdf_match:
-                return TemplateRepository.get_template_file(pdf_match["id"])
-
-        # Ưu tiên lấy file Word (DOCX trước, sau đó DOC)
-        docx_match = next((t for t in templates if t.get("format") == "DOCX"), None)
-        if docx_match:
-            return TemplateRepository.get_template_file(docx_match["id"])
-
-        doc_match = next((t for t in templates if t.get("format") == "DOC"), None)
-        if doc_match:
-            return TemplateRepository.get_template_file(doc_match["id"])
-
-        # Lấy file đầu tiên nếu không có Word
-        return TemplateRepository.get_template_file(templates[0]["id"])
+        return {"id": str(row["id"]), "file_name": row["file_name"],
+                "media_type": row["media_type"], "format": row["format"],
+                "file_bytes": bytes(row["file_data"]),
+                "preview_pdf": bytes(row["preview_pdf"]) if row["preview_pdf"] else None}

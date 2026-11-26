@@ -1,5 +1,5 @@
 # README-RAG: rag-service
-Cập nhật: 02/11/2026 | Nhánh: `feature/agent-conversation-summary` | Test: 295 đạt, 2 bỏ qua (pgvector cần DB thật)
+Cập nhật: 13/11/2026 | Nhánh: `feature/redis-cache` | Test: 373 đạt, 2 bỏ qua (pgvector cần DB thật)
 
 > **TRƯỚC KHI BUILD LẠI rag-service: chạy `database/002_ingest_status.sql`, `database/003_ingest_log.sql` rồi `database/004_document_versions.sql` trên Supabase (SQL Editor), đúng thứ tự.** Code mới truy vấn hai cột `ingest_status`, `ingest_error` ở mọi nơi, kể cả tìm kiếm; chưa chạy 002 mà build lại thì tìm kiếm lỗi và agent báo 503. File 003 tạo bảng `ingest_log` (nhật ký nạp): chưa chạy thì việc nạp vẫn chạy bình thường (ghi nhật ký chỉ cảnh báo trong log) nhưng nhật ký trống và `GET /documents/logs` trả 500. File 004 tạo bảng `document_versions` (bản nội dung cũ khi thay) và thêm ba giá trị `replace_*` vào ràng buộc `action` của `ingest_log`; chưa chạy thì `POST /documents/{id}/replace` thất bại ở giai đoạn ghi (bản cũ giữ nguyên, `ingest_status=failed`) và nhật ký `replace_*` không ghi được (chỉ cảnh báo).
 
@@ -45,8 +45,9 @@ Tìm đoạn luật (`api/v1/internal.py:semantic_search`):
    2. `query_expansion.py:expand` (tắt bằng `QUERY_EXPANSION_ENABLED=false`): **thêm** thuật ngữ luật vào cuối từng câu, không xóa từ gốc.
    3. `search.py:_embed_query_cached` (Gemini, task `RETRIEVAL_QUERY`, `lru_cache` 1024 câu); nhiều câu thì gọi song song bằng `ThreadPoolExecutor`.
    4. `repositories/document.py:semantic_search` cho từng vector: lấy `top_k x OVERFETCH(5)` đoạn gần nhất theo cosine (`<=>`, index HNSW); chỉ văn bản `status='active'`, `is_processed=true`, cùng `embedding_model`; có `doc_types` thì lọc thêm.
+   4a. **Chỉ khi `HYBRID_ENABLED=true`** (mặc định tắt: các bước còn lại chạy y như cũ): `hybrid.py:rerank_with_db` cho từng câu tìm, ngay sau bước 4 và trước bước 5, **sắp lại** ứng viên của vector theo điểm cuối = điểm vector + `HYBRID_ALPHA` x (BM25 / BM25 lớn nhất trong ứng viên của câu đó). Không thêm, không bớt đoạn nào của tập ứng viên. Điểm cuối được **gắn vào từng dòng** (`hybrid.ScoredRow.rank_distance` = 1 - điểm cuối; phần tử `[2]` vẫn là khoảng cách vector gốc) nên đi tiếp qua bước 5 và 6: việc chọn đoạn (tối đa 2 đoạn mỗi Điều) lẫn **thứ tự cuối cùng** đều theo điểm hybrid, đoạn cao nhất đứng đầu. `score` trả ra vẫn là `1 - khoảng cách vector`. Dòng không có điểm hybrid (hybrid tắt, hybrid lỗi, câu không khớp từ nào, đoạn ngoài `HYBRID_POOL`) thì xếp theo khoảng cách vector như cũ.
    5. `search.py:_interleave` xếp xen kẽ kết quả các câu (1 đoạn câu gốc, 1 đoạn ý 1...), bỏ đoạn trùng.
-   6. `search.py:_diversify`: mỗi (văn bản, Điều) tối đa `MAX_PER_DIEU = 2` đoạn; thiếu `top_k` thì bù bằng đoạn đã bỏ, **không bao giờ trả ít hơn**.
+   6. `search.py:_diversify`: mỗi (văn bản, Điều) tối đa `MAX_PER_DIEU = 2` đoạn; thiếu `top_k` thì bù bằng đoạn đã bỏ, **không bao giờ trả ít hơn**. Thứ tự cuối: theo khoảng cách vector tăng dần (hybrid tắt), hoặc theo điểm hybrid giảm dần (hybrid bật, xem 4a).
    7. `score = 1 - khoảng cách cosine`, kẹp 0 đến 1.
 3. Lỗi: `EmbeddingError` -> 503 `EMBEDDING_SERVICE_UNAVAILABLE`; `SQLAlchemyError` -> 503 `RAG_DATABASE_UNAVAILABLE`.
 
@@ -67,11 +68,13 @@ Quy tắc tách câu (`query_split.py`): cắt ở `? ; !`, xuống dòng, dấu
 | `app/services/ingest_log.py` | `record(action, ...)`: ghi một dòng `ingest_log` bằng session riêng, commit riêng, **nuốt mọi lỗi** (chỉ cảnh báo); `mask_secrets(text)`: che khóa API, token, chuỗi kết nối (dùng chung với `ingest_error` của `document_approval`) |
 | `app/services/document_preview.py` | Hàm thuần `analyze_document(text, title)`: chạy `chunk_legal_text` rồi thống kê (số Điều, cấp cắt, Điều bị tách, cảnh báo, ước tính embedding, 3 đoạn đầu); không đụng DB, không embedding |
 | `app/services/search.py` | Luồng tìm kiếm, `_diversify`, `_interleave`, cache embedding |
+| `app/services/hybrid.py` | Hybrid cơ bản: `tokenize` (âm tiết đơn lẻ + bigram, giữ dấu, ~12 từ dừng), `Bm25Index` (BM25 tự viết, k1=1.2, b=0.75, IDF trên mọi đoạn active), `get_index` (dựng lần đầu từ `document_chunks`, làm mới theo dấu vân tay = số đoạn active + `max(created_at)`, đối chiếu DB tối đa 60 giây một lần; ứng viên chưa có trong chỉ mục thì đối chiếu ngay), `rerank` / `rerank_with_db` (sắp lại ứng viên và gắn `ScoredRow.rank_distance` để `_diversify` xếp thứ tự cuối theo điểm hybrid; lỗi thì giữ thứ tự vector). Chỉ SELECT `id` + `content` (repository: `active_chunks_fingerprint`, `active_chunk_texts`), không thêm cột/bảng |
 | `app/services/query_split.py` | Tách câu nhiều ý |
 | `app/services/query_expansion.py` | Bảng `SYNONYMS` (~30 nhóm đất đai + kinh doanh): từ đời thường -> thuật ngữ luật |
 | `app/services/chunking.py` | Cắt văn bản theo Điều/Khoản/Điểm, `embedding_text` |
 | `app/services/embedding.py` | `GeminiEmbedder`, `FakeEmbedder`, `get_embedder()`, `EmbeddingError` |
-| `app/services/ingest.py` | `ingest_document`, `reembed_document` (chưa có script gọi) |
+| `app/services/ingest.py` | `ingest_document` (xong thì tăng số phiên bản kho luật nếu `status=active`), `reembed_document` (chưa có script gọi; xong cũng tăng số phiên bản) |
+| `app/services/corpus_version.py` | `bump_corpus_version()`: tăng số phiên bản kho luật trong Redis bằng MỘT lệnh `INCR` trên khoá `CORPUS_VERSION_KEY`; `REDIS_URL` rỗng thì không làm gì (trả `None`); mọi lỗi Redis bị bắt, ghi cảnh báo (không kèm URL) và trả `None`, KHÔNG BAO GIỜ ném lỗi (không làm hỏng việc duyệt/thay luật). Gọi ở cuối `approve_document_background`, `replace_document_background` (nhánh thành công, sau commit), `ingest_document`, `reembed_document` và `scripts/replace_document.py`. agent-service đọc số này để cache cũ tự mất hiệu lực |
 | `app/services/batch_ingest.py` | Nạp nhiều văn bản theo CSV |
 | `app/repositories/document.py` | Truy vấn DB: tạo văn bản, thay chunk, `list_documents` (có `defer` `content`), `semantic_search` |
 | `app/models/`, `app/schemas/` | `LegalDocument`, `DocumentChunk`, `IngestLog`, `DocumentVersion`; `SearchRequest`, `ChunkResult`; `DocumentListItem`, `DocumentList`, `DocumentPreviewRequest`, `IngestLogItem`, `IngestLogList`, `IngestAction`, `DocumentReplaceRequest` (`schemas/document.py`) |
@@ -104,6 +107,9 @@ Giá trị mặc định lấy từ `app/core/config.py`. Trong Docker chỉ cá
 | `DB_CONNECT_TIMEOUT_SECONDS` | `10` | có | `database.engine_options`: `connect_args={"connect_timeout": N}`, chờ tối đa khi mở kết nối mới. `<= 0` = bỏ giới hạn (hành vi cũ) |
 | `DB_COMMAND_TIMEOUT_SECONDS` | `20` | có | `database._apply_statement_timeout`: mỗi kết nối mới chạy `SET statement_timeout = N*1000` (sự kiện `connect`, có commit), truy vấn quá giờ bị server huỷ -> `psycopg.errors.QueryCanceled` -> `OperationalError` -> 503 `RAG_DATABASE_UNAVAILABLE`. `<= 0` = bỏ giới hạn. Dùng `SET` sau khi kết nối thay vì tham số `options` lúc mở kết nối vì pooler (pgbouncer, Supavisor) có thể từ chối tham số khởi động lạ |
 | `DB_POOL_RECYCLE_SECONDS` | `300` | có | `database.engine_options`: `pool_recycle`, kết nối trong pool quá tuổi này thì bỏ và tạo lại. `<= 0` = không recycle. `pool_pre_ping=True` luôn bật (không có biến) |
+| `REDIS_URL` | trống (= không dùng Redis) | có (mặc định compose `redis://redis:6379/0`) | `Settings.redis_url`. Dùng để tăng số phiên bản kho luật (`corpus_version.py`) cho cache của agent-service; cache embedding của rag-service vẫn là `lru_cache` trong process. Redis là service `redis` trong compose, chỉ làm cache, không mở cổng ra host, không lưu ra đĩa, không `depends_on`. Trần RAM đặt bằng `REDIS_MAXMEMORY` (mặc định `128mb`, đọc ở compose, không phải biến của rag-service), đầy thì bỏ khoá dùng lâu nhất (`allkeys-lru`). Để trống = bỏ Redis |
+| `REDIS_TIMEOUT_SECONDS` | `0.2` | có | `corpus_version.bump_corpus_version`: chờ Redis tối đa chừng này giây (kết nối, gọi); quá giờ thì cảnh báo và bỏ qua, việc duyệt/thay luật vẫn thành công |
+| `CORPUS_VERSION_KEY` | `legal:corpus_version` | có | `corpus_version.bump_corpus_version`: tên khoá Redis giữ số phiên bản kho luật. PHẢI GIỐNG `CORPUS_VERSION_KEY` của agent-service (compose truyền cùng một biến cho cả hai, cùng mặc định) |
 | `INTERNAL_TOKEN` | trống | có | `api/deps.py`, khớp agent-service |
 | `GEMINI_API_KEY` | trống | có | `embedding.py` |
 | `EMBEDDING_PROVIDER` | `gemini` | có | `get_embedder()`; `fake` để thử không gọi mạng |
@@ -113,6 +119,9 @@ Giá trị mặc định lấy từ `app/core/config.py`. Trong Docker chỉ cá
 | `EMBEDDING_TOKENS_PER_MINUTE` | `25000` | không | giảm tốc khi nạp (gói free), 0 = tắt |
 | `QUERY_EXPANSION_ENABLED` | `true` | không | `search.py` |
 | `QUERY_SPLIT_ENABLED` | `true` | không | `search.py` |
+| `HYBRID_ENABLED` | `false` | có | `search.py` bật lớp sắp lại bằng BM25 (`hybrid.py`); tắt = tìm kiếm giống hệt trước khi có hybrid |
+| `HYBRID_ALPHA` | `0.05` | có | hệ số của BM25 đã chuẩn hoá 0..1 trong ứng viên; điểm vector chỉ nằm trong khoảng hẹp 0,65-0,79 nên phải nhỏ; `0` = vector thuần |
+| `HYBRID_POOL` | `0` | có | số ứng viên đầu (theo vector) được chấm và sắp lại; `0` = tất cả (`top_k x 5`); phần ngoài pool giữ thứ tự và đứng sau |
 | `WARMUP_ON_STARTUP` | `true` | không | `main.py:lifespan` |
 | `JWT_PUBLIC_KEY_PATH` | `keys/jwt_public.pem` | có | `core/auth.py`, kiểm JWT của endpoint admin `/api/v1/rag/documents` |
 | `top_k` | do agent gửi (4) | | `SearchRequest`: 1 đến 20, mặc định 5 |
@@ -160,6 +169,7 @@ docker compose up -d --force-recreate rag-service
 docker compose logs -f rag-service
 python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --top-k 5
 python services/rag-service/scripts/search_cli.py "Chuyển nhượng đất cần giấy tờ gì?" --max-chars 0   # in đủ nội dung đoạn (mặc định chỉ in 300 ký tự đầu, chunk không bị cắt)
+python services/rag-service/scripts/search_cli.py "tách sổ đỏ cho con" --explain   # bật hybrid và in điểm vector, BM25 thô/chuẩn hoá, điểm cuối, hạng trước->sau của từng ứng viên, rồi thứ tự cuối cùng (không đổi kết quả)
 ```
 Nạp và đo xem mục 13 và 14.
 
@@ -175,11 +185,13 @@ Nạp và đo xem mục 13 và 14.
 5a2. Nhật ký nạp (`ingest_log.py`) là việc PHỤ: `record` dùng session riêng, commit riêng và nuốt mọi lỗi (chưa chạy `003_ingest_log.sql`, DB chết...) chỉ ghi cảnh báo `Không ghi được nhật ký nạp ...` (không kèm thông báo lỗi gốc để khỏi lộ chuỗi kết nối), nên có thể thiếu dòng nhật ký mà việc chính vẫn xong. Mỗi lần ghi mở thêm một kết nối ngắn. Chưa có xóa hay lưu trữ nhật ký cũ (bảng chỉ lớn thêm). Giai đoạn ghi của việc duyệt (`SET LOCAL statement_timeout = 0`, một giao dịch) mới kiểm bằng SQLite và giả lập dialect: chưa chạy trên Postgres/Supabase thật, chưa thử với bộ luật dài thật (hàng trăm vector) nên chưa biết một lần ghi mất bao lâu và pooler (pgbouncer, Supavisor) có chấp nhận `SET LOCAL` như mong đợi không.
 5b. Xem trước dùng `get_by_doc_number` nên kéo cả cột `content` của văn bản trùng số hiệu (một dòng, chưa `defer`). Thiếu header `Authorization` trả 401 mã `ERROR` (từ `HTTPBearer` của FastAPI, không phải `UNAUTHORIZED`).
 6. Cache embedding riêng từng tiến trình, mất khi restart; chuyển Redis nếu chạy nhiều bản.
-7. Chưa có tìm theo từ khóa (hybrid); đã bỏ `min_score` vì điểm đúng/sai quá sát nhau (0.65 đến 0.79).
+7. Hybrid BM25 (`HYBRID_ENABLED`, mặc định tắt) **chưa đo chất lượng** bằng `eval_retrieval.py` (hết quota Gemini lúc viết); chưa biết bật có tốt hơn không. Bản đầu (`feature/rag-hybrid-bm25`) chỉ đổi đoạn nào lọt top_k vì `_diversify` xếp lại theo vector; bản này (`feature/rag-hybrid-v2`) giữ điểm hybrid đến thứ tự cuối nên MRR mới có thể đổi. Câu nhiều ý: điểm hybrid của mỗi dòng tính theo câu tìm sinh ra dòng đó (dòng trùng giữ lần xuất hiện đầu, như `_interleave` vốn làm), nên xếp hạng cuối giữa các câu tìm chỉ so điểm cùng thang chứ không chuẩn hoá lại. Chỉ mục BM25 nằm trong bộ nhớ từng tiến trình (~10 MB cho 2080 đoạn), lần tìm đầu tiên sau khi khởi động phải dựng (~1 giây, `warmup` chưa dựng sẵn); sau khi nạp/thay luật, tối đa 60 giây mới thấy thay đổi (hoặc ngay khi ứng viên chưa có trong chỉ mục). Chỉ mục gồm cả đoạn của mọi `embedding_model` đang active. Tiêu đề Điều đã nằm sẵn trong `content`; tên văn bản không được đưa vào. Đã bỏ `min_score` vì điểm đúng/sai quá sát nhau (0.65 đến 0.79); không có chỗ nào dùng điểm làm ngưỡng.
 8. Chữ "và" trong cụm danh từ cũng bị cắt thành 2 ý (tốn thêm 1 lần tìm, không làm kết quả kém đi). `query_split.py`.
 9. Comment cũ trong `search.py` và `embedding.py` ghi "agent chỉ chờ rag 10 giây"; hiện agent chờ 30 giây (`RAG_TIMEOUT_SECONDS`).
 10. Luật Đất đai nạp là bản gốc, chưa cập nhật Luật 43/2024 (còn nhắc "cấp huyện"); Luật Doanh nghiệp chưa có sửa đổi 2022, 2025.
 11. Chống treo DB (`DB_*`, `core/database.py`) mới kiểm bằng mock, chưa thử với Supabase thật nên chưa biết có hết treo không. `statement_timeout` do SERVER thực thi: nếu kết nối chết ngầm ở tầng TCP (không còn gói tin nào), server không báo được và client vẫn chờ socket; khi đó chỉ `connect_timeout` (kết nối mới), `pool_recycle` (bỏ kết nối cũ trước khi chết) và `pool_pre_ping` giúp, còn kết nối đã chết mà đang dùng thì vẫn có thể treo tới khi TCP tự báo lỗi. Muốn chặn hẳn cần TCP keepalive hoặc `tcp_user_timeout` của libpq (chưa làm). Cũng chưa kiểm `SET statement_timeout` có chạy được qua pooler Supabase (session mode, cổng 5432) hay không; qua transaction mode (cổng 6543) thì `SET` ở mức session không đáng tin. Lỗi quá giờ chỉ được báo 503, không thử lại.
+
+12. Số phiên bản kho luật cho cache của agent-service (13/11/2026, `corpus_version.py`): sau khi dữ liệu mà tìm kiếm thấy đổi xong (duyệt bản nháp, thay nội dung, `ingest_document` cho văn bản `active`, `reembed_document`, `scripts/replace_document.py`), rag-service `INCR` khoá `CORPUS_VERSION_KEY`; agent-service đưa số này vào khoá cache tìm luật và cache câu trả lời nên cache cũ tự không được dùng nữa (README-AGENT mục 11 điều 28). Chỉ tăng ở nhánh thành công và SAU khi đã commit; không tăng ở endpoint HTTP (trả 202 trước khi xong việc), khi việc thất bại, khi tạo hay xoá bản nháp (bản nháp chưa được tìm thấy), hay khi phục hồi `processing` → `failed` lúc khởi động. **Giới hạn:** Redis chết (hoặc `REDIS_URL` rỗng) đúng lúc duyệt/thay luật thì không tăng được: có cảnh báo trong log và cache của agent-service còn bản cũ tới hết TTL (24 giờ tìm luật, 6 giờ câu trả lời); script nạp luật chạy ngoài Docker (`ingest_file.py`, `ingest_batch.py`) thường không có `REDIS_URL` nên không tăng được, còn `replace_document.py` in nhắc lệnh tăng tay; tăng tay: `docker compose exec redis redis-cli INCR legal:corpus_version` (hoặc xoá hết cache `docker compose exec redis redis-cli FLUSHDB`); với `CACHE_BACKEND=memory` bên agent-service số này không có tác dụng (agent luôn dùng `0`) nên vẫn phải restart agent-service khi đổi luật; thay đổi cờ hay code của riêng rag-service (`HYBRID_*`, `search.py`, mở rộng câu hỏi) CHƯA được theo dõi bằng số phiên bản: đổi chúng thì tăng tay hoặc xoá cache. Chưa kiểm trong stack compose thật.
 
 ## 12. Sửa xong phải cập nhật gì
 

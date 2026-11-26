@@ -24,13 +24,24 @@ class OfficeTests(unittest.TestCase):
         doc.add_paragraph('Original {{name}}')
         doc.save(stream)
         self.original = stream.getvalue()
-        self.row = dict(status='draft', word_data=self.original, word_filename='test.docx')
+        self.row = dict(status='draft', has_word_file=True, word_data=self.original, word_filename='test.docx')
         self.updates = []
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        for mocked in [patch.dict('os.environ', {'ONLYOFFICE_JWT_SECRET': 'test-only-' + 'x' * 40, 'ONLYOFFICE_BACKUP_DIR': self.tmp.name}),
-                       patch.object(office, '_row', side_effect=lambda *args, **kwargs: dict(self.row)),
-                       patch.object(office, 'db_connection', self.connection)]:
+        for mocked in [
+            patch.dict('os.environ', {
+                'ONLYOFFICE_JWT_SECRET': 'test-only-' + 'x' * 40,
+                'ONLYOFFICE_BACKUP_DIR': self.tmp.name,
+            }),
+            patch.object(office, '_row', side_effect=lambda *args, **kwargs: dict(self.row)),
+            patch.object(office, '_read_template_bytea', side_effect=lambda *args, **kwargs: self.row['word_data']),
+            patch.object(
+                office,
+                '_template_word_sha256',
+                side_effect=lambda *args, **kwargs: sha256(self.row['word_data']).hexdigest(),
+            ),
+            patch.object(office, 'db_connection', self.connection),
+        ]:
             mocked.start()
             self.addCleanup(mocked.stop)
         office.sessions.clear()

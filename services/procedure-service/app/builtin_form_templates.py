@@ -372,14 +372,34 @@ BUILTIN_ROWS = (
 def seed_builtin_form_templates(conn) -> None:
     """Insert built-in forms once; never overwrite a version an admin changed."""
     all_builtin_ids = [item["id"] for item in BUILTIN_ROWS]
-    try:
-        res = conn.execute(
-            text("SELECT id::text FROM public.custom_form_templates WHERE id = ANY(:ids)"),
-            {"ids": all_builtin_ids},
-        )
-        existing_ids = set(res.scalars().all())
-    except Exception:
-        existing_ids = set()
+    conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('procedure_builtin_templates'))"))
+    res = conn.execute(
+        text("SELECT id::text FROM public.custom_form_templates WHERE id = ANY(:ids)"),
+        {"ids": all_builtin_ids},
+    )
+    existing_ids = set(res.scalars().all())
+
+    batch = []
+    batch_bytes = 0
+
+    def flush():
+        if not batch:
+            return
+        params = {}
+        values = []
+        for i, row in enumerate(batch):
+            params.update({f"{key}_{i}": value for key, value in row.items()})
+            values.append(
+                f"(:id_{i},:group_id_{i},1,'published',:name_{i},:domain_{i},"
+                f"COALESCE(:procedure_id_{i}, (SELECT id FROM public.procedures WHERE upper(code)=upper(:procedure_code_{i}) LIMIT 1)),"
+                f"CAST(:content_{i} AS jsonb),:word_data_{i},:word_filename_{i})"
+            )
+        conn.execute(text(
+            "INSERT INTO public.custom_form_templates "
+            "(id,template_group_id,version,status,name,domain,procedure_id,content,word_data,word_filename) VALUES "
+            + ",".join(values) + " ON CONFLICT DO NOTHING"
+        ), params)
+        batch.clear()
 
     for item in BUILTIN_ROWS:
         if item["id"] in existing_ids:
@@ -387,57 +407,18 @@ def seed_builtin_form_templates(conn) -> None:
         content = json.loads((BUILTIN_DIR / item["content_file"]).read_text(encoding="utf-8"))
         content.setdefault("reference_catalog_names", item.get("reference_catalog_names", []))
         word_data = (BUILTIN_DIR / item["word_file"]).read_bytes()
-        procedure_id = item["procedure_id"]
-        procedure_code = content.get("procedure_code")
-        if not procedure_id and procedure_code:
-            procedure_id = conn.execute(
-                text("SELECT id FROM public.procedures WHERE upper(code)=upper(:code) LIMIT 1"),
-                {"code": procedure_code},
-            ).scalar_one_or_none()
-        conn.execute(
-            text(
-                """INSERT INTO public.custom_form_templates
-                  (id,template_group_id,version,status,name,domain,procedure_id,content,word_data,word_filename)
-                  VALUES (:id,:group_id,1,'published',:name,:domain,:procedure_id,CAST(:content AS jsonb),:word_data,:word_filename)
-                  ON CONFLICT DO NOTHING"""
-            ),
-            {
-                "id": item["id"],
-                "group_id": item["group_id"],
-                "name": item["name"],
-                "domain": item["domain"],
-                "procedure_id": procedure_id,
-                "content": json.dumps(content, ensure_ascii=False),
-                "word_data": word_data,
-                "word_filename": item["word_file"],
-            },
-        )
-        aliases = item.get("reference_catalog_names", [])
-        if aliases:
-            conn.execute(
-                text(
-                    """UPDATE public.custom_form_templates
-                       SET content = jsonb_set(
-                           COALESCE(content, '{}'::jsonb),
-                           '{reference_catalog_names}',
-                           COALESCE((
-                               SELECT jsonb_agg(alias_value ORDER BY alias_value)
-                               FROM (
-                                   SELECT DISTINCT value AS alias_value
-                                   FROM jsonb_array_elements_text(
-                                       COALESCE(content->'reference_catalog_names', '[]'::jsonb)
-                                       || CAST(:aliases AS jsonb)
-                                   ) AS aliases(value)
-                               ) AS merged_aliases
-                           ), '[]'::jsonb),
-                           true
-                       )
-                       WHERE id = :id
-                         AND EXISTS (
-                             SELECT 1
-                             FROM jsonb_array_elements_text(CAST(:aliases AS jsonb)) AS requested(value)
-                             WHERE NOT (COALESCE(content->'reference_catalog_names', '[]'::jsonb) ? requested.value)
-                         )"""
-                ),
-                {"id": item["id"], "aliases": json.dumps(aliases, ensure_ascii=False)},
-            )
+        content_json = json.dumps(content, ensure_ascii=False)
+        size = len(word_data) + len(content_json.encode("utf-8"))
+        if size > 2 * 1024 * 1024:
+            raise ValueError(f"Built-in template {item['id']} exceeds batch byte limit")
+        if batch and (len(batch) == 4 or batch_bytes + size > 2 * 1024 * 1024):
+            flush()
+            batch_bytes = 0
+        batch.append({
+            "id": item["id"], "group_id": item["group_id"], "name": item["name"],
+            "domain": item["domain"], "procedure_id": item["procedure_id"],
+            "procedure_code": content.get("procedure_code"), "content": content_json,
+            "word_data": word_data, "word_filename": item["word_file"],
+        })
+        batch_bytes += size
+    flush()

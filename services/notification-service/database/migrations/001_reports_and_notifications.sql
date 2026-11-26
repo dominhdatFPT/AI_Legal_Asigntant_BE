@@ -187,6 +187,8 @@ CREATE TABLE IF NOT EXISTS public.broadcasts (
     scheduled_at          timestamptz,
     sent_at               timestamptz,
     expires_at            timestamptz,
+    recipient_id          varchar(255),
+    personal_notification_id varchar(64) REFERENCES public.notifications(id) ON DELETE SET NULL,
     group_notification_id varchar(64) REFERENCES public.group_notifications(id) ON DELETE SET NULL,
     stats_json            text NOT NULL DEFAULT '{}',
     created_by            varchar(64) NOT NULL,

@@ -83,6 +83,19 @@ def close_open(db: Session, consultation_id: uuid.UUID, reason: str, closed_by: 
         .execution_options(**_NO_SYNC)).rowcount
 
 
+def close_open_by_lawyer(
+    db: Session, lawyer_id: uuid.UUID, reason: str, now: datetime, *, blocked_at: datetime | None = None,
+) -> list[uuid.UUID]:
+    stmt = (
+        update(Consultation).where(Consultation.lawyer_user_id == lawyer_id, Consultation.status == IN_PROGRESS)
+        .values(status=CLOSED, close_reason=reason, closed_by=None, closed_at=now, updated_at=now)
+        .returning(Consultation.id).execution_options(**_NO_SYNC)
+    )
+    if blocked_at is not None:
+        stmt = stmt.where(func.coalesce(Consultation.accepted_at, Consultation.created_at) <= blocked_at)
+    return list(db.scalars(stmt))
+
+
 def touch_open(db: Session, consultation_id: uuid.UUID, now: datetime) -> int:
     """Cập nhật last_activity_at khi có tin mới. 0 dòng = cuộc không còn in_progress.
 
@@ -96,9 +109,16 @@ def touch_open(db: Session, consultation_id: uuid.UUID, now: datetime) -> int:
 
 # ---------------------------------------------------------------- Danh sách
 def _page(db: Session, stmt, order, page: int, page_size: int) -> tuple[list[Consultation], int]:
-    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-    rows = db.scalars(stmt.order_by(*order).offset((page - 1) * page_size).limit(page_size)).all()
-    return list(rows), total
+    # 1 câu: trang + tổng (window count tính trước LIMIT); chỉ đếm riêng khi trang vượt cuối danh sách.
+    rows = db.execute(stmt.add_columns(func.count().over().label("total"))
+                      .order_by(*order).offset((page - 1) * page_size).limit(page_size)).all()
+    if rows:
+        total = rows[0].total
+    elif page > 1:
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    else:
+        total = 0
+    return [row[0] for row in rows], total
 
 
 def list_mine(db: Session, user_id: uuid.UUID, status: str | None, now: datetime, page: int, page_size: int):
@@ -211,8 +231,18 @@ def save_summary(db: Session, consultation_id: uuid.UUID, text_: str) -> int:
 
 # ---------------------------------------------------------------- Tóm tắt hội thoại
 def _unsummarized():
-    return and_(ConsultationMessage.consultation_id == Consultation.id,
-                or_(Consultation.summarized_until.is_(None), ConsultationMessage.created_at > Consultation.summarized_until))
+    return and_(
+        ConsultationMessage.consultation_id == Consultation.id,
+        or_(
+            Consultation.summarized_until.is_(None),
+            and_(
+                Consultation.summarized_until_message_id.is_(None),
+                ConsultationMessage.created_at >= Consultation.summarized_until,
+            ),
+            tuple_(ConsultationMessage.created_at, ConsultationMessage.id)
+            > tuple_(Consultation.summarized_until, Consultation.summarized_until_message_id),
+        ),
+    )
 
 
 def summary_candidates(db: Session, now: datetime, idle: timedelta, batch: int, limit: int) -> list[uuid.UUID]:
@@ -225,30 +255,40 @@ def summary_candidates(db: Session, now: datetime, idle: timedelta, batch: int, 
 
 
 def unsummarized_messages(db: Session, consultation_id: uuid.UUID, since: datetime | None,
-                          limit: int) -> list[ConsultationMessage]:
+                          limit: int, since_message_id: uuid.UUID | None = None) -> list[ConsultationMessage]:
     stmt = select(ConsultationMessage).where(ConsultationMessage.consultation_id == consultation_id)
     if since is not None:
-        stmt = stmt.where(ConsultationMessage.created_at > since)
+        if since_message_id is None:
+            # Cursor cũ chỉ có thời gian: đọc lại ranh giới một lần để không bỏ sót tin.
+            stmt = stmt.where(ConsultationMessage.created_at >= since)
+        else:
+            stmt = stmt.where(
+                tuple_(ConsultationMessage.created_at, ConsultationMessage.id) > (since, since_message_id))
     return list(db.scalars(stmt.order_by(ConsultationMessage.created_at, ConsultationMessage.id).limit(limit)))
 
 
 def latest_summary(db: Session, consultation_id: uuid.UUID) -> dict | None:
     return db.scalar(select(ConsultationSummary.summary).where(ConsultationSummary.consultation_id == consultation_id)
-                     .order_by(ConsultationSummary.window_end.desc()).limit(1))
+                     .order_by(ConsultationSummary.window_end.desc(),
+                               ConsultationSummary.window_end_message_id.desc().nulls_last()).limit(1))
 
 
 def save_window_summary(db: Session, consultation_id: uuid.UUID, since: datetime | None, window_end: datetime,
-                        message_count: int, summary: dict, schema_version: int, prompt_version: str | None) -> bool:
-    """Ghi biên bản và đẩy mốc `summarized_until` trong cùng transaction. False = mốc đã bị bản khác đẩy trước
-    (hai bản service cùng tóm tắt một đoạn): không ghi gì, người gọi rollback."""
+                        message_count: int, summary: dict, schema_version: int, prompt_version: str | None,
+                        *, since_message_id: uuid.UUID | None = None,
+                        window_end_message_id: uuid.UUID | None = None) -> bool:
+    """Ghi biên bản và đẩy cursor (thời gian, ID) trong cùng transaction.
+    False = cursor đã bị bản khác đẩy trước: không ghi gì, người gọi rollback."""
     moved = db.execute(update(Consultation).where(
         Consultation.id == consultation_id, Consultation.purged_at.is_(None),
         Consultation.summarized_until.is_not_distinct_from(since),
-    ).values(summarized_until=window_end).execution_options(**_NO_SYNC)).rowcount
+        Consultation.summarized_until_message_id.is_not_distinct_from(since_message_id),
+    ).values(summarized_until=window_end, summarized_until_message_id=window_end_message_id)
+        .execution_options(**_NO_SYNC)).rowcount
     if moved == 0:
         return False
     db.add(ConsultationSummary(consultation_id=consultation_id, window_start=since, window_end=window_end,
-                               message_count=message_count, summary=summary, schema_version=schema_version,
-                               prompt_version=prompt_version))
+                               window_end_message_id=window_end_message_id, message_count=message_count,
+                               summary=summary, schema_version=schema_version, prompt_version=prompt_version))
     db.flush()
     return True

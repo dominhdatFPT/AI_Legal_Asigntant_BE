@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, FastAPI, Request
 
-from common_auth import CurrentUser
+from common_auth import CurrentUser, revocation
 
 from app.core.errors import install_error_handlers, success
 from app.core.security import document_user
@@ -13,6 +13,7 @@ from app.api.processing import router as processing_router
 
 app = FastAPI(title="Document Service", version="0.9.0")
 install_error_handlers(app)
+revocation.ensure_started()
 authenticated_router = APIRouter(prefix="/api/v1/documents", dependencies=[Depends(document_user)])
 
 

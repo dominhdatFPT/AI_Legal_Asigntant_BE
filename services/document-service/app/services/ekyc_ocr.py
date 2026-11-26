@@ -15,6 +15,7 @@ from uuid import uuid4
 import httpx
 
 from app.core.errors import DocumentError
+from app.core.http import http_client
 from app.services.identity_card_match import mrz_candidates
 from app.services.identity_parser import folded
 
@@ -88,14 +89,14 @@ class EkycFirstOcr:
     def _vnpt(self, image, deadline):
         headers = {"Authorization": "bearer " + self.settings.access_token, "Token-id": self.settings.token_id,
                    "Token-key": self.settings.token_key, "mac-address": "LEGAL-AI-BE", "Accept": "application/json"}
-        with httpx.Client(base_url=BASE_URL, headers=headers, transport=self.transport,
-                          follow_redirects=False, trust_env=False) as client:
+        # Credentials per request (not on the shared client) so no other caller ever sends them.
+        with http_client(self.transport, base_url=BASE_URL, follow_redirects=False, trust_env=False) as client:
             def call(path, **kwargs):
                 remaining = deadline - time.monotonic()
                 if remaining < 2:
                     raise DocumentError("EKYC_TIMEOUT", "VNPT quá thời gian phản hồi.", 504)
                 try:
-                    return _object(client.post(path, timeout=min(15, remaining), **kwargs))
+                    return _object(client.post(path, headers=headers, timeout=min(15, remaining), **kwargs))
                 except httpx.TimeoutException:
                     raise DocumentError("EKYC_TIMEOUT", "VNPT quá thời gian phản hồi.", 504) from None
                 except httpx.HTTPError:

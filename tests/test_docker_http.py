@@ -32,9 +32,12 @@ def test_chat(client,message,found):
 
 @pytest.mark.parametrize('path', ['/api/procedures','/api/procedures/'])
 def test_list(client,path):
-    r=client.get(path)
+    r=client.get(path, params={'page_size': 100})
     assert r.status_code==200
-    assert r.json()['data']['items'][0]['code']=='HKD-001'
+    procedures = {item['code']: item for item in r.json()['data']['items']}
+    assert {'BHXH-001', 'DD-001', 'DN-001', 'HKD-001'} <= procedures.keys()
+    assert procedures['DD-001']['domain'] == 'land'
+    assert procedures['HKD-001']['domain'] == 'business'
 
 def test_rag(client):
     r=client.post('/api/rag/search',json={'query':'hồ sơ'})
@@ -67,6 +70,7 @@ def test_cors(client):
     assert r.headers['access-control-allow-origin']=='http://localhost:3000'
 
 def test_cors_error(client):
-    r=client.post('/api/agent/chat',json={'message':''},headers={'Origin':'http://localhost:3000'})
+    r=client.post('/api/procedures/search',json={'query':''},headers={'Origin':'http://localhost:3000'})
     assert r.status_code==422
+    assert r.json()['error']['code']=='VALIDATION_ERROR'
     assert r.headers['access-control-allow-origin']=='http://localhost:3000'

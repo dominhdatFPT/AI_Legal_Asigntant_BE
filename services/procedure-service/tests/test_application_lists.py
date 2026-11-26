@@ -12,15 +12,15 @@ USER_C = "33333333-3333-4333-8333-333333333333"
 ADMIN = "99999999-9999-4999-8999-999999999999"
 CCCD_B = "079198004521"
 
-ITEM_KEYS = {"id", "domain", "procedure_code", "procedure_name", "status", "applicant_name", "applicant_id_number",
+ITEM_KEYS = {"id", "application_code", "domain", "procedure_code", "procedure_name", "status", "applicant_name", "applicant_id_number",
              "address", "fee", "receiving_agency_level", "created_at", "due_date"}
 
 
 @pytest.fixture
 def seeded(auth):
+    from app.repositories.procedure_record_repository import save_procedure_record
     def submit(user, payload):
-        res = client.post("/api/v1/procedures/applications", json=payload, headers=auth(user))
-        assert res.status_code == 200, res.text
+        assert save_procedure_record(user_id=user, **payload) is not None
 
     submit(USER_A, {"procedure_code": "DD-001", "status": "submitted",
                     "form_data": valid_form("DD-001", applicant_name="Nguyễn Văn An", applicant_id_number="001095012849",

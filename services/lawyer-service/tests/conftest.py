@@ -46,6 +46,15 @@ def env(monkeypatch, key_pair):
     monkeypatch.setenv("LAWYER_REAPPLY_COOLDOWN_HOURS", "24")
 
 
+@pytest.fixture(autouse=True)
+def reset_http_breakers():
+    from common_auth import breaker
+
+    breaker.reset_all()
+    yield
+    breaker.reset_all()
+
+
 @pytest.fixture
 def db():
     from app.core.database import Base

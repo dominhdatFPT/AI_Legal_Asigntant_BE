@@ -182,16 +182,20 @@ def test_facts_short_document_has_no_truncation_sentence():
 
 
 def test_facts_long_document_says_how_much_was_read():
-    text = "abcd " * 4000  # sau strip còn 19999 ký tự; ký tự thứ 12000 là dấu cách nên phần giữ lại bị rstrip còn 11999
+    limit = prompts.MAX_DOCUMENT_CHARS
+    text = "abcd " * (limit // 5 + 1000)  # tại giới hạn là dấu cách, rstrip bỏ thêm một ký tự
+    total = len(text.strip())
 
     assert document_gate.facts([doc(text)]) == [
-        "Hệ thống chỉ đọc 11999 trên 19999 ký tự của tài liệu, phần còn lại không được xem xét.",
+        f"Hệ thống chỉ đọc {limit - 1} trên {total} ký tự của tài liệu, phần còn lại không được xem xét.",
     ]
 
 
 def test_facts_long_document_without_trailing_space_reads_exactly_the_limit():
-    assert document_gate.facts([doc("a" * 15000)]) == [
-        "Hệ thống chỉ đọc 12000 trên 15000 ký tự của tài liệu, phần còn lại không được xem xét.",
+    limit = prompts.MAX_DOCUMENT_CHARS
+    total = limit + 3000
+    assert document_gate.facts([doc("a" * total)]) == [
+        f"Hệ thống chỉ đọc {limit} trên {total} ký tự của tài liệu, phần còn lại không được xem xét.",
     ]
 
 
@@ -206,11 +210,13 @@ def test_facts_two_documents_share_the_limit_and_name_the_document():
 
 
 def test_facts_document_between_half_and_full_limit_is_cut_only_when_two_documents():
-    text = "a" * 8000  # dưới 12000 nhưng trên một nửa
+    half = prompts.MAX_DOCUMENT_CHARS // 2
+    total = half + 2000
+    text = "a" * total
 
     assert document_gate.facts([doc(text)]) == []
     assert document_gate.facts([doc(text), doc(CONTRACT_TEXT)]) == [
-        "Hệ thống chỉ đọc 6000 trên 8000 ký tự của tài liệu số 1, phần còn lại không được xem xét.",
+        f"Hệ thống chỉ đọc {half} trên {total} ký tự của tài liệu số 1, phần còn lại không được xem xét.",
     ]
 
 
@@ -246,13 +252,15 @@ def test_facts_chars_read_equal_what_format_documents_keeps(count):
 def test_facts_logs_one_info_line_per_document(caplog):
     caplog.set_level(logging.INFO, logger="app.services.document_gate")
 
-    document_gate.facts([blank_doc(7), doc("a" * 20000)], request_id="req-facts")
+    total = prompts.MAX_DOCUMENT_CHARS + 8000
+    document_gate.facts([blank_doc(7), doc("a" * total)], request_id="req-facts")
 
     lines = [r.getMessage() for r in caplog.records if "agent dữ kiện tài liệu" in r.getMessage()]
     assert len(lines) == 2 and all("request_id=req-facts" in line for line in lines)
     assert "số=1" in lines[0] and "chỗ_trống=7" in lines[0]
     assert f"ký_tự_đọc={len(blank_doc(7)['text'].strip())}" in lines[0]
-    assert "số=2" in lines[1] and "chỗ_trống=0" in lines[1] and "ký_tự_đọc=6000 tổng=20000" in lines[1]
+    assert "số=2" in lines[1] and "chỗ_trống=0" in lines[1]
+    assert f"ký_tự_đọc={prompts.MAX_DOCUMENT_CHARS // 2} tổng={total}" in lines[1]
 
 
 # ── ask_contract_type: hỏi lại khi không nhận ra loại hợp đồng (DOCUMENT_ASK_TYPE_ENABLED) ──

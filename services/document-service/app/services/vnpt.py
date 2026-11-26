@@ -15,6 +15,7 @@ import httpx
 
 from app.core.config import ConfigurationError
 from app.core.errors import DocumentError
+from app.core.http import http_client
 
 MAX_PROVIDER_JSON = 1024 * 1024
 
@@ -51,9 +52,9 @@ class Vnpt:
         if remaining <= 0:
             raise DocumentError("EKYC_TIMEOUT", "VNPT quá thời gian phản hồi.", 504)
         try:
-            with httpx.Client(transport=self.transport, timeout=min(20, remaining),
-                              follow_redirects=False, trust_env=False) as client:
-                with client.stream("POST", self.settings.base_url + "/v1/ocr/id-card",
+            # Timeout per request: it depends on the remaining deadline, the pooled client is shared.
+            with http_client(self.transport, follow_redirects=False, trust_env=False) as client:
+                with client.stream("POST", self.settings.base_url + "/v1/ocr/id-card", timeout=min(20, remaining),
                                    headers={"Token": self.settings.token_key, "TokenId": self.settings.token_id,
                                             "Accept": "application/json", "Accept-Encoding": "identity"},
                                    json={"img": base64.b64encode(image.content).decode("ascii")}) as response:

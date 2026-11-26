@@ -8,7 +8,7 @@ from app.services.procedure_form_service import PROCEDURE_FIELD_DISPATCHER, get_
 client = TestClient(app)
 
 
-def submit(headers, code="DD-001", status="submitted", **form):
+def submit(headers, code="DD-002", status="submitted", **form):
     payload = {"procedure_code": code, "status": status, "form_data": valid_form(code, **form)}
     return client.post("/api/v1/procedures/applications", json=payload, headers=headers)
 
@@ -40,9 +40,12 @@ def test_option_outside_list_rejected(auth):
     assert error_fields(submit(auth(), land_use_purpose="Đất ở")) == {"land_use_purpose"}
 
 
-def test_regex_number_date_rejected(auth):
-    res = submit(auth(), applicant_phone="09-0123", land_area="85,5", transfer_contract_date="14/10/2026")
-    assert error_fields(res) == {"applicant_phone", "land_area", "transfer_contract_date"}
+def test_regex_number_date_rejected(auth, monkeypatch):
+    from app.services import profile_binding
+    load = profile_binding.load_profile_values
+    monkeypatch.setattr(profile_binding, "load_profile_values", lambda user_id: {**load(user_id), "profile.phone": "09-0123"})
+    res = submit(auth(), applicant_phone="09-0123", land_area="85,5", certificate_issue_date="14/10/2026")
+    assert error_fields(res) == {"applicant_phone", "land_area", "certificate_issue_date"}
 
 
 def test_required_checkbox_must_be_ticked():

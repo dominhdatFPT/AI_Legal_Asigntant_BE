@@ -1,6 +1,28 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def use_bundled_templates(monkeypatch, db_engine):
+    import uuid
+    from sqlalchemy import text
+    from scripts.seed_form_templates import collect_templates
+
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    with db_engine.begin() as conn:
+        conn.execute(text("UPDATE public.procedure_domains SET name = CASE WHEN code = 'land' THEN :land ELSE :business END"),
+                     {"land": "Đất đai & Bất động sản", "business": "Doanh nghiệp & Hộ kinh doanh"})
+        for row in collect_templates():
+            row["id"] = str(uuid.uuid4())
+            row["procedure_code"] = "DD-001" if row["domain"] == "land" else "DN-003"
+            conn.execute(text("""INSERT INTO public.form_templates
+                (id, domain, name, procedure_code, procedure_name, file_name, format, media_type,
+                 file_size, file_data, preview_pdf, order_index)
+                VALUES (:id, :domain, :name, :procedure_code, :procedure_name, :file_name, :format,
+                        :media_type, :file_size, :file_data, :preview_pdf, :order_index)"""), row)
+
 
 client = TestClient(app)
 

@@ -1,0 +1,40 @@
+# ==============================================================================
+# Shared Base Image: legal-python-base
+# Mục đích: Đóng gói toàn bộ thư viện cốt lõi dùng chung giữa 10 microservices
+#           (FastAPI, Uvicorn, SQLAlchemy, Pydantic, Psycopg, Pika, Redis, common_auth)
+#           Giúp tối ưu hóa Docker Layer Caching, tốc độ build và kích thước đĩa.
+# ==============================================================================
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Cài đặt tiện ích hệ thống tối thiểu
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cài đặt thư viện xác thực nội bộ dùng chung
+COPY libs/common_auth /libs/common_auth
+RUN pip install --no-cache-dir /libs/common_auth
+
+# Cài đặt các dependencies giao thoa chung giữa các microservices
+RUN pip install --no-cache-dir \
+    "fastapi>=0.115,<1" \
+    "uvicorn[standard]>=0.30,<1" \
+    "httpx>=0.27,<1" \
+    "pydantic>=2,<3" \
+    "pydantic-settings>=2,<3" \
+    "SQLAlchemy>=2.0,<3" \
+    "psycopg[binary]>=3.1,<4" \
+    "aio-pika>=9.4,<11" \
+    "pika>=1.3,<2" \
+    "redis>=5,<8" \
+    "PyJWT>=2.8,<3" \
+    "python-dotenv>=1,<2" \
+    "python-multipart>=0.0.20,<1"

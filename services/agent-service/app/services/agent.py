@@ -4,7 +4,7 @@
 import logging
 
 from app.core.config import get_settings
-from app.services import document_gate, qa_agent, query_filter, responder, review_agent
+from app.services import admission, document_gate, qa_agent, query_filter, responder, review_agent
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +27,28 @@ def _check_documents(documents: list[dict], request_id: str | None) -> str | Non
         return None
 
 
-async def prepare(user_content: str, history: list[dict], request_id: str | None = None) -> dict | responder.LLMCall:
+def _ensure_budget(user_content, history, documents, budget):
+    """Mọi nhánh chạy dưới một CaseBudget đã admission. Endpoint đã chạy cổng thì truyền vào; nơi gọi khác (không qua endpoint)
+    thì cổng chạy ở đây, nên không thể đi vòng qua trần $0.01. Trần tắt (chỉ test) thì không có budget."""
+    if budget is not None:
+        return budget, history
+    settings = get_settings()
+    if not settings.admission_gate_enabled or settings.case_cost_budget_micro_usd <= 0:
+        return None, history
+    decision = admission.admit(user_content, history, documents=documents)
+    return decision.budget, decision.history
+
+
+async def prepare(user_content: str, history: list[dict], request_id: str | None = None, *, owner_scope: str | None = None,
+                  budget=None) -> dict | responder.LLMCall:
     """Nhánh không có tài liệu, dừng trước bước gọi LLM để endpoint stream tự phát chữ. Trả về dict {"content",
     "metadata"} khi xong luôn (câu vô nghĩa, ngoài phạm vi, LLM_BYPASS) hoặc responder.LLMCall khi cần gọi LLM.
     Ném rag_client.RAGError khi rag lỗi."""
     if query_filter.is_meaningless(user_content):
         return _meaningless_result(request_id)
-    return await qa_agent.prepare(user_content, history, request_id=request_id)
+    budget, history = _ensure_budget(user_content, history, None, budget)
+    return await qa_agent.prepare(user_content, history, request_id=request_id, **({"owner_scope": owner_scope} if owner_scope is not None else {}),
+                                  **({"budget": budget} if budget is not None else {}))
 
 
 async def process_message(
@@ -41,6 +56,8 @@ async def process_message(
     history: list[dict],
     request_id: str | None = None,
     documents: list[dict] | None = None,
+    *, owner_scope: str | None = None,
+    budget=None,
 ) -> dict:
     """
     history: [{"role": "user" | "assistant", "content": "..."}] (cũ → mới)
@@ -51,6 +68,7 @@ async def process_message(
     # Có tài liệu thì câu ngắn như "check" vẫn là yêu cầu rà soát, không phải gõ bừa
     if not documents and query_filter.is_meaningless(user_content):
         return _meaningless_result(request_id)
+    budget, history = _ensure_budget(user_content, history, documents, budget)
 
     if documents:
         settings = get_settings()
@@ -61,5 +79,8 @@ async def process_message(
                     "content": unreadable,
                     "metadata": {"rag_chunk_ids": [], "model": None, "tokens_used": None, "type": "document_unreadable"},
                 }
-        return await review_agent.review(user_content, history, documents, request_id=request_id)
-    return await qa_agent.answer(user_content, history, request_id=request_id)
+        return await review_agent.review(user_content, history, documents, request_id=request_id,
+                                         **({"owner_scope": owner_scope} if owner_scope is not None else {}),
+                                         **({"budget": budget} if budget is not None else {}))
+    return await qa_agent.answer(user_content, history, request_id=request_id, **({"owner_scope": owner_scope} if owner_scope is not None else {}),
+                                 **({"budget": budget} if budget is not None else {}))

@@ -6,7 +6,7 @@ from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app.api.mau18 import Submission, fill_template
+from app.api.mau18 import Submission
 from app.core.security import get_current_user
 from app.main import app
 
@@ -24,9 +24,7 @@ def payload():
 def test_mau18_api_creates_docx_from_database(db_engine):
     data = (ROOT / 'database/mau18-two-person.docx').read_bytes()
     with db_engine.begin() as conn:
-        conn.execute(text('CREATE TABLE public.form_templates (id TEXT, domain TEXT, file_name TEXT, is_active BOOLEAN, file_data BLOB, preview_pdf BLOB)'))
-        conn.execute(text('CREATE TABLE public.form_template_preview_pages (template_id TEXT, page_number INTEGER, image_data BLOB)'))
-        conn.execute(text('INSERT INTO public.form_templates VALUES (:id,:domain,:filename,:active,:data,:preview)'),
+        conn.execute(text('INSERT INTO public.form_templates (id, domain, file_name, is_active, file_data, preview_pdf) VALUES (:id,:domain,:filename,:active,:data,:preview)'),
                      {'id':'pilot','domain':'land','filename':'mau18-hai-nguoi.docx','active':True,'data':data,'preview':b'%PDF-1.4 preview'})
         conn.execute(text('INSERT INTO public.form_template_preview_pages VALUES (:id,1,:image)'), {'id':'pilot', 'image':b'fake-png'})
     app.dependency_overrides[get_current_user] = lambda: object()

@@ -11,27 +11,33 @@ import uuid
 import jwt
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from common_auth.core import CurrentUser
 from common_auth.fastapi_dep import require_role
-from app.api.custom_form_templates import MAX_WORD, _row, _validate_upload
+from app.api.custom_form_templates import (
+    MAX_WORD,
+    _invalidate_template_caches,
+    _read_template_bytea,
+    _row,
+    _template_word_sha256,
+    _validate_upload,
+)
 from app.repositories.procedure_repository import db_connection
+from app.services.http_session import session as http
 
 router = APIRouter()
 sessions = {}
 lock = RLock()
 
 
-def secret():
-    value = os.getenv('ONLYOFFICE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
-    if not value:  # mặc định dẫn xuất từ khoá RS256 sẵn có; compose của onlyoffice tính cùng công thức (sha256 hex)
-        key = Path(os.getenv('JWT_PRIVATE_KEY_PATH', '/run/keys/jwt_private.pem'))
-        value = sha256(key.read_bytes()).hexdigest() if key.is_file() else ''
+def secret() -> str:
+    value = os.getenv('ONLYOFFICE_JWT_SECRET', '').strip()
     if len(value) < 32:
-        value = '795c0dd657f0025e70bae6b58bbab940befb3213452906daf4927e51d74a4c07'
+        raise HTTPException(503, 'Cấu hình ONLYOFFICE chưa sẵn sàng.')
     return value
 
 
@@ -65,15 +71,18 @@ def backup_path(digest):
 
 @router.post('/admin/form-templates/{template_id}/office/config')
 def config(template_id: str, user: CurrentUser = Depends(require_role('admin'))):
+    signing_secret = secret()
     try:
-        health = requests.get(office_url() + '/healthcheck', timeout=4)
+        health = http.get(office_url() + '/healthcheck', timeout=4)
         if not health.ok or health.text.strip().lower() != 'true':
             raise requests.RequestException()
     except requests.RequestException as exc:
         raise HTTPException(503, 'ONLYOFFICE đang khởi động. Vui lòng mở lại sau ít phút.') from exc
     with db_connection() as conn:
         row = _row(conn, template_id)
-    original = bytes(row.get('word_data') or b'')
+    if not row.get('has_word_file'):
+        raise HTTPException(404, 'Tải file Word lên trước khi mở trình soạn.')
+    original = _read_template_bytea(template_id, 'word_data') or b''
     if not original:
         raise HTTPException(404, 'Tải file Word lên trước khi mở trình soạn.')
     digest = sha256(original).hexdigest()
@@ -96,7 +105,7 @@ def config(template_id: str, user: CurrentUser = Depends(require_role('admin')))
                              original=digest, latest=digest, revision=0)
     base = os.getenv('ONLYOFFICE_CALLBACK_BASE', 'http://procedure-service:8000/api/v1/procedures').rstrip('/')
     def url(action):
-        token = jwt.encode(dict(template_id=template_id, sid=sid, purpose=action, exp=expires), secret(), algorithm='HS256')
+        token = jwt.encode(dict(template_id=template_id, sid=sid, purpose=action, exp=expires), signing_secret, algorithm='HS256')
         return f'{base}/office/{template_id}/{action}?' + urlencode({'ticket': token})
     document = {'fileType': 'docx', 'key': key, 'title': row.get('word_filename') or 'mau-don.docx',
                 'url': url('source'), 'permissions': {'edit': True, 'download': True, 'print': True}}
@@ -105,7 +114,7 @@ def config(template_id: str, user: CurrentUser = Depends(require_role('admin')))
                      'customization': {'forcesave': True, 'autosave': True}}
     editor = {'document': document, 'documentType': 'word', 'editorConfig': editor_config,
               'width': '100%', 'height': '100%', 'type': 'desktop'}
-    editor['token'] = jwt.encode(editor, secret(), algorithm='HS256')
+    editor['token'] = jwt.encode(editor, signing_secret, algorithm='HS256')
     public = os.getenv('ONLYOFFICE_PUBLIC_URL', 'http://localhost:8082').rstrip('/')
     return {'data': {'session': sid, 'revision': 0, 'script': public + '/web-apps/apps/api/documents/api.js', 'config': editor}, 'error': None}
 
@@ -123,9 +132,18 @@ def source(template_id: str, ticket: str):
 
 @router.post('/office/{template_id}/callback')
 async def callback(template_id: str, ticket: str, request: Request):
-    session = ticket_session(template_id, ticket, 'callback')
-    body = await request.json()
+    session = await run_in_threadpool(ticket_session, template_id, ticket, 'callback')
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(400, 'Nội dung callback Word không hợp lệ.') from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, 'Nội dung callback Word không hợp lệ.')
     token = body.get('token') or request.headers.get('authorization', '').removeprefix('Bearer ')
+    return await run_in_threadpool(_process_callback, template_id, session, body, token)
+
+
+def _process_callback(template_id: str, session: dict, body: dict, token: str):
     try:
         signed = jwt.decode(token, secret(), algorithms=['HS256'])
     except jwt.InvalidTokenError as exc:
@@ -145,7 +163,7 @@ async def callback(template_id: str, ticket: str, request: Request):
         raise HTTPException(400, 'Địa chỉ lưu Word không hợp lệ.')
     download = office_url() + target.path + ('?' + target.query if target.query else '')
     try:
-        with requests.get(download, timeout=20, stream=True, allow_redirects=False) as response:
+        with http.get(download, timeout=20, stream=True, allow_redirects=False) as response:
             if response.status_code != 200:
                 raise requests.RequestException()
             data = bytearray()
@@ -157,11 +175,16 @@ async def callback(template_id: str, ticket: str, request: Request):
         raise HTTPException(503, 'Không nhận được file Word từ trình soạn.') from exc
     updated = bytes(data)
     _validate_upload(SimpleNamespace(filename='mau.docx'), updated)
-    with lock, db_connection(write=True) as conn:
-        row = _row(conn, template_id, lock=True)
-        if sha256(bytes(row.get('word_data') or b'')).hexdigest() != session['latest']:
-            raise HTTPException(409, 'File đã thay đổi ở phiên khác; không ghi đè.')
-        conn.execute(text('UPDATE public.custom_form_templates SET word_data=:data,updated_at=now() WHERE id=:id'), {'data': updated, 'id': template_id})
+    with lock:
+        with db_connection(write=True) as conn:
+            row = _row(conn, template_id, lock=True)
+            if _template_word_sha256(conn, template_id, has_word_file=bool(row.get('has_word_file'))) != session['latest']:
+                raise HTTPException(409, 'File đã thay đổi ở phiên khác; không ghi đè.')
+            conn.execute(
+                text('UPDATE public.custom_form_templates SET word_data=:data,updated_at=now() WHERE id=:id'),
+                {'data': updated, 'id': template_id},
+            )
+        _invalidate_template_caches()
         session['latest'] = sha256(updated).hexdigest()
         session['revision'] += 1
     return {'error': 0}
@@ -173,16 +196,18 @@ class SaveCommand(BaseModel):
 
 @router.post('/admin/form-templates/{template_id}/office/save')
 def force_save(template_id: str, body: SaveCommand, user: CurrentUser = Depends(require_role('admin'))):
+    signing_secret = secret()
     with db_connection() as conn:
         row = _row(conn, template_id)
+        current_hash = _template_word_sha256(conn, template_id, has_word_file=bool(row.get('has_word_file')))
     session = session_for(template_id, body.session)
-    if sha256(bytes(row.get('word_data') or b'')).hexdigest() != session['latest']:
+    if current_hash != session['latest']:
         raise HTTPException(409, 'File Word đã thay đổi ở phiên khác. Hãy mở lại trước khi lưu.')
     command = {'c': 'forcesave', 'key': session['key']}
     revision = session['revision']
-    command['token'] = jwt.encode(command, secret(), algorithm='HS256')
+    command['token'] = jwt.encode(command, signing_secret, algorithm='HS256')
     try:
-        response = requests.post(office_url() + '/command', json=command, timeout=8)
+        response = http.post(office_url() + '/command', json=command, timeout=8)
         response.raise_for_status()
         error = response.json().get('error')
     except (requests.RequestException, ValueError) as exc:

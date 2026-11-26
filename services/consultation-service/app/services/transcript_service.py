@@ -37,12 +37,14 @@ def summarize_next_batch(consultation_id: uuid.UUID, session_factory=None) -> bo
         if c is None:
             return False
         since = as_utc(c.summarized_until)
-        messages = repo.unsummarized_messages(db, c.id, since, SUMMARY_BATCH)
+        since_message_id = c.summarized_until_message_id
+        messages = repo.unsummarized_messages(db, c.id, since, SUMMARY_BATCH, since_message_id=since_message_id)
         if not messages:
             return False
         sent = [{"id": str(m.id), "role": "CITIZEN" if m.sender_id == c.citizen_user_id else "LAWYER",
                  "time": _iso(m.created_at), "content": mask_pii(m.content)} for m in messages]
         window_end = as_utc(messages[-1].created_at)
+        window_end_message_id = messages[-1].id
         previous = repo.latest_summary(db, c.id)
         payload = {
             "consultation_id": str(c.id), "window_start": since.isoformat() if since else None,
@@ -61,7 +63,8 @@ def summarize_next_batch(consultation_id: uuid.UUID, session_factory=None) -> bo
                            _failures[consultation_id], type(e).__name__)
             return False
         if not repo.save_window_summary(db, c.id, since, window_end, len(messages), summary, SCHEMA_VERSION,
-                                        prompt_version):
+                                        prompt_version, since_message_id=since_message_id,
+                                        window_end_message_id=window_end_message_id):
             db.rollback()
             return False
         db.commit()

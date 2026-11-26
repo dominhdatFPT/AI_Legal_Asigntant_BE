@@ -1,33 +1,44 @@
+import logging
 import math
 import uuid
 from typing import Literal, Optional
 from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from fastapi.responses import JSONResponse, Response
+from common_auth import outbox
+from common_auth.context import request_id_var, sanitize_request_id
 from common_auth.core import CurrentUser
 from common_auth.fastapi_dep import get_current_user, require_role
+from app.core import event_outbox
 from app.core.exceptions import (
     ApplicationLockedError,
     ApplicationNotFoundError,
     ApplicationPermissionError,
     ApplicationValidationError,
 )
-from app.core.security import get_optional_user
 from app.schemas.procedure import ProcedureSearchRequest
 from app.schemas.form_schema import ApplicationSubmitRequest, ApplicationUpdateRequest
 from app.repositories import procedure_record_repository
 from app.repositories.template_repository import TemplateRepository
 from app.services.procedure_catalog_service import ProcedureCatalogService
 from app.services.procedure_application_service import ProcedureApplicationService
-from app.services.procedure_service import ProcedureService
+from app.services.procedure_service import (
+    ProcedureService,
+    cleanup_purged_procedure_contract_uploads,
+    invalidate_procedure_caches,
+    purge_procedure,
+)
+from app.repositories.procedure_repository import ProcedureDbUnavailable, ProcedureInvalidData, db_connection
 from app.core.rabbitmq_procedure import procedure_mq
 from app.services import procedure_form_service
+from sqlalchemy.exc import SQLAlchemyError
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 def make_request_id(header_id: str | None) -> str:
-    return header_id or f"req-{uuid.uuid4()}"
+    return sanitize_request_id(header_id) or sanitize_request_id(request_id_var.get()) or f"req-{uuid.uuid4()}"
 
 
 def error_response(status_code: int, code: str, message: str, request_id: str) -> JSONResponse:
@@ -40,6 +51,59 @@ def error_response(status_code: int, code: str, message: str, request_id: str) -
 @router.get("/health")
 def health():
     return {"status": "ok", "service": "procedure-service"}
+
+
+@router.delete("/admin/{procedure_id_or_code}")
+def admin_purge_procedure(
+    procedure_id_or_code: str,
+    user: CurrentUser = Depends(require_role("admin")),
+):
+    event_id = None
+    with db_connection(write=True) as conn:
+        result = purge_procedure(conn, procedure_id_or_code)
+        if outbox.enabled():
+            plan = result["_contract_cleanup"]
+            event_id = outbox.enqueue(conn, event_outbox.EVENT_OUTBOX, "procedure.purged", {
+                "procedure_id": plan["proc_id_str"], "code": plan["code"],
+                "keys": plan["keys"], "identifier": plan["identifier"], "actor_id": str(user.id),
+            })
+
+    # This point is reached only after the Procedure DB commit succeeds.
+    invalidate_procedure_caches()
+    cleanup = cleanup_purged_procedure_contract_uploads(result, queued_event_id=event_id)
+    if event_id:
+        event_outbox.relay.kick()
+
+    status = "success"
+    warning = None
+    message = (
+        "Đã xóa vĩnh viễn thủ tục và toàn bộ tệp đính kèm liên quan."
+    )
+    if cleanup["status"] == "failed":
+        status = "partial_success"
+        warning = (
+            "Thủ tục và biểu mẫu trong Procedure DB đã xóa vĩnh viễn, "
+            "nhưng dọn tệp Contract DB thất bại: "
+            + cleanup["error"]
+        )
+        message = warning
+    elif cleanup["status"] == "skipped":
+        warning = (
+            "Thủ tục và biểu mẫu trong Procedure DB đã xóa vĩnh viễn; "
+            "contract cleanup skipped: "
+            + cleanup["reason"]
+        )
+        message = warning
+    elif cleanup["status"] == "queued":
+        message = "Đã xóa vĩnh viễn thủ tục. Yêu cầu dọn dữ liệu Contract đang chờ xử lý."
+
+    return {
+        "success": True,
+        "status": status,
+        "message": message,
+        "warning": warning,
+        "data": result,
+    }
 
 
 @router.get("/domains")
@@ -240,36 +304,20 @@ def get_procedure_form_schema(
     """
     req_id = make_request_id(x_request_id)
     try:
-        schema = procedure_form_service.get_procedure_form_schema(procedure_code)
+        schema = procedure_form_service.get_entry_form_schema(procedure_code)
         return {
             "data": schema.model_dump(),
             "error": None,
             "request_id": req_id,
         }
-    except ValueError as e:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "data": None,
-                "error": {
-                    "code": "SCHEMA_NOT_FOUND",
-                    "message": str(e),
-                },
-                "request_id": req_id,
-            },
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "data": None,
-                "error": {
-                    "code": "INTERNAL_SERVER_ERROR",
-                    "message": f"Lỗi xử lý schema: {str(e)}",
-                },
-                "request_id": req_id,
-            },
-        )
+    except (ProcedureDbUnavailable, ProcedureInvalidData, SQLAlchemyError):
+        raise
+    except ValueError:
+        logger.warning("Không tìm thấy cấu hình biểu mẫu cho yêu cầu %s.", req_id)
+        return error_response(404, "SCHEMA_NOT_FOUND", "Không tìm thấy cấu hình biểu mẫu.", req_id)
+    except Exception:
+        logger.exception("Không thể xử lý cấu hình biểu mẫu cho yêu cầu %s.", req_id)
+        return error_response(500, "INTERNAL_SERVER_ERROR", "Không thể xử lý cấu hình biểu mẫu.", req_id)
 
 
 ApplicationDomain = Literal["land", "business"]
@@ -299,7 +347,7 @@ def list_my_applications(
     domain: ApplicationDomain | None = None,
     status: ApplicationStatus | None = None,
     q: str | None = Query(default=None, max_length=100),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1000),
     page_size: int = Query(default=10, ge=1, le=50),
     current_user: CurrentUser = Depends(get_current_user),
     x_request_id: str | None = Header(default=None),
@@ -326,7 +374,7 @@ def list_all_applications(
     domain: ApplicationDomain | None = None,
     status: ApplicationStatus | None = None,
     q: str | None = Query(default=None, max_length=100),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=1000),
     page_size: int = Query(default=10, ge=1, le=50),
     _: CurrentUser = Depends(require_role("admin")),
     x_request_id: str | None = Header(default=None),
@@ -530,68 +578,22 @@ def update_application(
             "error": None,
             "request_id": req_id,
         }
-    except (ApplicationPermissionError, PermissionError) as pe:
-        return JSONResponse(
-            status_code=403,
-            content={
-                "data": None,
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": str(pe),
-                },
-                "request_id": req_id,
-            },
-        )
-    except ApplicationNotFoundError as ne:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "data": None,
-                "error": {
-                    "code": ne.code,
-                    "message": ne.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except (ApplicationLockedError, ApplicationValidationError) as ce:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "data": None,
-                "error": {
-                    "code": ce.code,
-                    "message": ce.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except ValueError as ve:
-        err_msg = str(ve)
-        status_code = 404 if "APPLICATION_NOT_FOUND" in err_msg else 400
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "data": None,
-                "error": {
-                    "code": "APPLICATION_NOT_FOUND" if status_code == 404 else "BAD_REQUEST",
-                    "message": err_msg,
-                },
-                "request_id": req_id,
-            },
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "data": None,
-                "error": {
-                    "code": "APPLICATION_UPDATE_ERROR",
-                    "message": f"Không thể cập nhật hồ sơ: {str(e)}",
-                },
-                "request_id": req_id,
-            },
-        )
+    except (ProcedureDbUnavailable, ProcedureInvalidData, SQLAlchemyError):
+        raise
+    except ApplicationPermissionError as exc:
+        return error_response(403, exc.code, exc.message, req_id)
+    except ApplicationNotFoundError as exc:
+        return error_response(404, exc.code, exc.message, req_id)
+    except ApplicationLockedError as exc:
+        return error_response(409, exc.code, exc.message, req_id)
+    except ApplicationValidationError as exc:
+        return error_response(400, exc.code, exc.message, req_id)
+    except ValueError:
+        logger.warning("Dữ liệu cập nhật hồ sơ không hợp lệ cho yêu cầu %s.", req_id, exc_info=True)
+        return error_response(400, "BAD_REQUEST", "Dữ liệu cập nhật hồ sơ không hợp lệ.", req_id)
+    except Exception:
+        logger.exception("Không thể cập nhật hồ sơ cho yêu cầu %s.", req_id)
+        return error_response(500, "APPLICATION_UPDATE_ERROR", "Không thể cập nhật hồ sơ.", req_id)
 
 
 @router.delete("/applications/{domain}/{record_id}")
@@ -631,68 +633,19 @@ def delete_application(
             "error": None,
             "request_id": req_id,
         }
-    except (ApplicationPermissionError, PermissionError) as pe:
-        return JSONResponse(
-            status_code=403,
-            content={
-                "data": None,
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": str(pe),
-                },
-                "request_id": req_id,
-            },
-        )
-    except ApplicationNotFoundError as ne:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "data": None,
-                "error": {
-                    "code": ne.code,
-                    "message": ne.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except (ApplicationLockedError, ApplicationValidationError) as ce:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "data": None,
-                "error": {
-                    "code": ce.code,
-                    "message": ce.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except ValueError as ve:
-        err_msg = str(ve)
-        status_code = 404 if "APPLICATION_NOT_FOUND" in err_msg else 400
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "data": None,
-                "error": {
-                    "code": "APPLICATION_NOT_FOUND" if status_code == 404 else "BAD_REQUEST",
-                    "message": err_msg,
-                },
-                "request_id": req_id,
-            },
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "data": None,
-                "error": {
-                    "code": "APPLICATION_DELETE_ERROR",
-                    "message": f"Không thể xóa hồ sơ: {str(e)}",
-                },
-                "request_id": req_id,
-            },
-        )
+    except (ProcedureDbUnavailable, ProcedureInvalidData, SQLAlchemyError):
+        raise
+    except ApplicationPermissionError as exc:
+        return error_response(403, exc.code, exc.message, req_id)
+    except ApplicationNotFoundError as exc:
+        return error_response(404, exc.code, exc.message, req_id)
+    except ApplicationLockedError as exc:
+        return error_response(409, exc.code, exc.message, req_id)
+    except ApplicationValidationError as exc:
+        return error_response(400, exc.code, exc.message, req_id)
+    except Exception:
+        logger.exception("Không thể xóa hồ sơ cho yêu cầu %s.", req_id)
+        return error_response(500, "APPLICATION_DELETE_ERROR", "Không thể xóa hồ sơ.", req_id)
 
 
 @router.post("/applications/{domain}/{record_id}/submit")
@@ -728,88 +681,48 @@ def submit_draft_application(
             record_id=record_id,
             user_id=current_user.id,
         )
-        # Route là `def` (chạy trong threadpool, không có event loop) nên không dùng asyncio.create_task;
-        # BackgroundTasks chạy coroutine trên event loop sau khi trả response.
-        background_tasks.add_task(
-            procedure_mq.publish_application_submitted,
-            record_id=str(record_id),
-            domain=domain_clean,
-            user_id=str(current_user.id),
-        )
+        submitted_event = {"record_id": str(record_id), "domain": domain_clean, "user_id": str(current_user.id)}
+        queued = False
+        if outbox.enabled():
+            try:
+                with db_connection(write=True) as conn:
+                    outbox.enqueue(conn, event_outbox.EVENT_OUTBOX, "procedure.application.submitted",
+                                   submitted_event, request_id=req_id)
+            except Exception as exc:
+                logger.warning("Không ghi được outbox cho hồ sơ đã nộp (%s)", type(exc).__name__)
+            else:
+                queued = True
+                try:
+                    event_outbox.relay.kick()
+                except RuntimeError:
+                    logger.warning("Không đánh thức được relay; sự kiện đã lưu để relay đọc ở lượt tiếp theo")
+        if not queued:
+            background_tasks.add_task(procedure_mq.publish_application_submitted, **submitted_event)
         return {
             "data": submitted,
             "error": None,
             "request_id": req_id,
         }
-    except (ApplicationPermissionError, PermissionError) as pe:
-        return JSONResponse(
-            status_code=403,
-            content={
-                "data": None,
-                "error": {
-                    "code": "FORBIDDEN",
-                    "message": str(pe),
-                },
-                "request_id": req_id,
-            },
-        )
-    except ApplicationNotFoundError as ne:
-        return JSONResponse(
-            status_code=404,
-            content={
-                "data": None,
-                "error": {
-                    "code": ne.code,
-                    "message": ne.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except (ApplicationLockedError, ApplicationValidationError) as ce:
-        return JSONResponse(
-            status_code=400,
-            content={
-                "data": None,
-                "error": {
-                    "code": ce.code,
-                    "message": ce.message,
-                },
-                "request_id": req_id,
-            },
-        )
-    except ValueError as ve:
-        err_msg = str(ve)
-        status_code = 404 if "APPLICATION_NOT_FOUND" in err_msg else 400
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "data": None,
-                "error": {
-                    "code": "VALIDATION_ERROR" if "VALIDATION_ERROR" in err_msg else ("APPLICATION_NOT_FOUND" if status_code == 404 else "BAD_REQUEST"),
-                    "message": err_msg,
-                },
-                "request_id": req_id,
-            },
-        )
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "data": None,
-                "error": {
-                    "code": "APPLICATION_SUBMIT_ERROR",
-                    "message": f"Không thể nộp hồ sơ: {str(e)}",
-                },
-                "request_id": req_id,
-            },
-        )
+    except (ProcedureDbUnavailable, ProcedureInvalidData, SQLAlchemyError):
+        raise
+    except ApplicationPermissionError as exc:
+        return error_response(403, exc.code, exc.message, req_id)
+    except ApplicationNotFoundError as exc:
+        return error_response(404, exc.code, exc.message, req_id)
+    except ApplicationLockedError as exc:
+        return error_response(409, exc.code, exc.message, req_id)
+    except ApplicationValidationError as exc:
+        return error_response(400, exc.code, exc.message, req_id)
+    except Exception:
+        logger.exception("Không thể nộp hồ sơ cho yêu cầu %s.", req_id)
+        return error_response(500, "APPLICATION_SUBMIT_ERROR", "Không thể nộp hồ sơ.", req_id)
 
 
 
 @router.get("")
 def list_procedures(
     domain: str | None = Query(default=None, description="Lọc theo lĩnh vực: 'business', 'land'"),
-    page: int = Query(default=1, ge=1, description="Số trang (bắt đầu từ 1)"),
+    page: int = Query(default=1, ge=1, le=1000, description="Số trang (bắt đầu từ 1)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Số lượng phần tử mỗi trang"),
     q: str | None = Query(default=None, description="Từ khóa tìm kiếm nhanh"),
     search: str | None = Query(default=None, description="Từ khóa tìm kiếm (tùy chọn)"),

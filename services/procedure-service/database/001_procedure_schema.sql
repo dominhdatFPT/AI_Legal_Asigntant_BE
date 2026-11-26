@@ -49,10 +49,13 @@ CREATE TABLE IF NOT EXISTS procedure_fees (
     amount BIGINT CHECK (amount >= 0),
     unit VARCHAR(50) NOT NULL DEFAULT 'ho_so',
     is_exemptible BOOLEAN NOT NULL DEFAULT false,
+    note TEXT,
     order_index INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_procedure_fees UNIQUE (procedure_id, fee_type, name)
 );
+
+ALTER TABLE procedure_fees ADD COLUMN IF NOT EXISTS note TEXT;
 
 CREATE TABLE IF NOT EXISTS procedure_legal_bases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,6 +73,7 @@ CREATE TABLE IF NOT EXISTS procedure_requirements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     procedure_id UUID NOT NULL REFERENCES procedures(id) ON DELETE CASCADE,
     name VARCHAR(500) NOT NULL,
+    description TEXT,
     is_required BOOLEAN NOT NULL DEFAULT true,
     copies INTEGER NOT NULL DEFAULT 1,
     document_form VARCHAR(50) NOT NULL DEFAULT 'original' CHECK (document_form IN ('original', 'certified_copy', 'copy', 'electronic')),
@@ -79,6 +83,8 @@ CREATE TABLE IF NOT EXISTS procedure_requirements (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT uq_procedure_requirements UNIQUE (procedure_id, name)
 );
+
+ALTER TABLE procedure_requirements ADD COLUMN IF NOT EXISTS description TEXT;
 
 -- Immutable wrapper for unaccent to ensure index expressions are valid
 CREATE OR REPLACE FUNCTION f_unaccent(text) RETURNS text AS $$

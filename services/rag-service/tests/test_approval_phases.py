@@ -90,6 +90,10 @@ def test_ghi_chunk_dung_sau_khi_embed(db, opened, monkeypatch):
     assert state(db, document_id) == ("active", "done", None, expected, True)
     assert chunk_total(db) == expected
     assert {m for (m,) in db.execute(select(DocumentChunk.embedding_model))} == {FakeEmbedder(768).model_name}
+    assert all(
+        c.section_info["_embedding_format_version"] == "v2_breadcrumb"
+        for c in db.scalars(select(DocumentChunk))
+    )
     assert [c.chunk_index for c in db.scalars(select(DocumentChunk).order_by(DocumentChunk.chunk_index))] == list(range(expected))
 
 

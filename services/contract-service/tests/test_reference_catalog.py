@@ -1,17 +1,32 @@
 """Public blank library must stay separate from private contract storage/auth."""
 import hashlib
 import json
-import unittest
 from pathlib import Path
+import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from app.main import app
+from app.api import reference_catalog
 from app.api.reference_catalog import ROOT, snapshot
 
 
 class ReferenceCatalogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # The reviewed catalog was moved to PostgreSQL. Replay its repository rows
+        # on hosts without that database while exercising the real routes and assets.
+        path = Path(__file__).with_name("fixtures") / "reference_catalog.json"
+        inventory = json.loads(path.read_text(encoding="utf-8"))
+        cls.enterClassContext(patch.dict(reference_catalog._CACHE, data=None, timestamp=0, search_index={}))
+        cls.enterClassContext(patch.multiple(
+            reference_catalog,
+            _resolve_contract_db_url=lambda: "catalog-fixture",
+            _load_classifications=lambda url: inventory["classifications"],
+            _load_catalog_rows_chunked=lambda url: inventory["items"],
+            _hydrate_catalog_item_text=lambda item: item,
+            list_uploads=lambda **options: [],
+        ))
         cls.client = TestClient(app)
 
     def test_complete_read_only_inventory_and_domains(self):

@@ -34,7 +34,7 @@ def test_search_sends_contract_request_and_returns_chunks(chunk):
     assert chunks == [chunk]
 
 
-def test_search_truncates_long_query():
+def test_search_keeps_long_query():
     seen = {}
 
     def handler(request: httpx.Request):
@@ -43,8 +43,8 @@ def test_search_truncates_long_query():
 
     run_search(handler, query="a" * 1500)
 
-    assert '"' + "a" * 1000 + '"' in seen["body"]
-    assert "a" * 1001 not in seen["body"]
+    assert '"' + "a" * 1500 + '"' in seen["body"]
+    assert "a" * 1501 not in seen["body"]
 
 
 def test_search_empty_result():
@@ -200,11 +200,16 @@ def set_cache(monkeypatch, on=True, **env):
     rag_client.clear_cache()
 
 
-def test_cache_off_by_default_calls_rag_every_time(chunk):
+def test_cache_on_by_default_calls_rag_once(chunk, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.delenv("RAG_CACHE_ENABLED", raising=False)  # conftest đặt false cho test chung; bỏ để thấy mặc định thật
+    get_settings.cache_clear()
+    rag_client.clear_cache()
     rag = Rag(chunk)
     run_search(rag)
     run_search(rag)
-    assert rag.calls == 2
+    assert rag.calls == 1
 
 
 def test_cache_explicitly_off_calls_rag_every_time_and_never_touches_cache(chunk, monkeypatch):
@@ -320,13 +325,13 @@ def test_cache_hit_logs_request_id_and_top_k_but_not_the_question(chunk, monkeyp
     assert "riêng tư" not in caplog.text
 
 
-def test_cache_key_uses_query_truncated_to_max_length(chunk, monkeypatch):
+def test_cache_key_keeps_tail_of_long_query(chunk, monkeypatch):
     set_cache(monkeypatch)
     rag = Rag(chunk)
-    base = "a" * rag_client.MAX_QUERY_LENGTH
+    base = "a" * 1500
     run_search(rag, query=base + "đuôi một")
-    run_search(rag, query=base + "đuôi hai")  # sau khi cắt 1000 ký tự thì giống nhau
-    assert rag.calls == 1
+    run_search(rag, query=base + "đuôi hai")  # different tails must remain different cache keys
+    assert rag.calls == 2
 
 
 def test_cache_expires_after_ttl(chunk, monkeypatch):
@@ -396,8 +401,32 @@ def test_cache_write_error_still_returns_result(chunk, monkeypatch, caplog):
     assert "rag cache lỗi khi ghi" in caplog.text
 
 
-def test_cache_flag_default_values():
+def test_cache_flag_default_values(monkeypatch):
     from app.core.config import get_settings
 
+    monkeypatch.delenv("RAG_CACHE_ENABLED", raising=False)
+    get_settings.cache_clear()
     s = get_settings()
-    assert (s.rag_cache_enabled, s.rag_cache_ttl_seconds, s.rag_cache_max_items) == (False, 86400, 1000)
+    assert (s.rag_cache_enabled, s.rag_cache_ttl_seconds, s.rag_cache_max_items) == (True, 86400, 1000)
+
+
+def test_planned_queries_have_separate_cache_keys_and_payload(chunk, monkeypatch):
+    import json
+
+    set_cache(monkeypatch)
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.read()))
+        return httpx.Response(200, json={"data": {"chunks": [chunk]}})
+
+    run_search(handler, query="same query", planned=True)
+    run_search(handler, query="same query", planned=False)
+    run_search(handler, query="same query", planned=True)
+    assert len(seen) == 2
+    assert seen[0]["planned"] is True and "planned" not in seen[1]
+
+
+def test_query_over_api_limit_is_rejected_without_network():
+    with pytest.raises(rag_client.RAGError):
+        run_search(lambda request: pytest.fail("must validate first"), query="x" * 20001)

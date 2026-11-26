@@ -211,3 +211,93 @@ def test_admin_broadcast_notifies_all_users_and_admin_self():
     admin_notifs_after = client.get("/api/v1/notifications").json()["data"]["items"]
     target_adm = next(n for n in admin_notifs_after if n["id"] == grp_notif_id)
     assert target_adm["is_read"] is False
+
+
+def test_report_code_collision_retries_cleanly(monkeypatch):
+    """Nếu 2 request đồng thời sinh cùng mã RPT-YYYY-NNNNNN (IntegrityError UNIQUE code), tự rollback & cấp mã kế tiếp."""
+    from sqlalchemy.exc import IntegrityError
+    from app.schemas.reports import QuickErrorCreateRequest, TicketCreateRequest
+    from app.services import report_service
+
+    # Tạo trước 1 report để có RPT-YYYY-000001
+    t1 = report_service._create_ticket_report_sync(
+        "citizen-race-1",
+        "citizen",
+        TicketCreateRequest(
+            category_code="AI_ASSISTANT",
+            reason_code="AI_WRONG_ANSWER",
+            title="Báo cáo gốc số 1",
+            description="Nội dung báo cáo gốc dùng để kiểm tra trùng mã report.",
+            target_type="ai_message",
+            target_id="msg-1",
+        ),
+    )
+    existing_code = t1["code"]
+
+    real_gen = report_service._generate_report_code
+    calls = {"ticket": 0, "quick": 0}
+
+    def colliding_once_ticket(session):
+        calls["ticket"] += 1
+        if calls["ticket"] == 1:
+            return existing_code  # Giả lập race condition trả trùng mã đã tồn tại
+        return real_gen(session)
+
+    monkeypatch.setattr(report_service, "_generate_report_code", colliding_once_ticket)
+    t2 = report_service._create_ticket_report_sync(
+        "citizen-race-2",
+        "citizen",
+        TicketCreateRequest(
+            category_code="AI_ASSISTANT",
+            reason_code="AI_WRONG_ANSWER",
+            title="Báo cáo song song số 2",
+            description="Nội dung báo cáo song song cần tự động retry sang mã kế tiếp.",
+            target_type="ai_message",
+            target_id="msg-2",
+        ),
+    )
+    assert calls["ticket"] == 2
+    assert t2["code"] != existing_code
+    assert t2["code"].endswith("000002")
+
+    # Tương tự với quick error report
+    def colliding_once_quick(session):
+        calls["quick"] += 1
+        if calls["quick"] == 1:
+            return t2["code"]
+        return real_gen(session)
+
+    monkeypatch.setattr(report_service, "_generate_report_code", colliding_once_quick)
+    q_res, duplicated, _ = report_service._create_quick_error_report_sync(
+        "lawyer-race-1",
+        "lawyer",
+        QuickErrorCreateRequest(
+            reason_code="QE_SAVE_FAILED",
+            note="Báo lỗi song song kiểm tra retry mã",
+            feature_code="PROCEDURE_SUBMIT",
+            context={"route": "/race-test", "http_status": 502},
+        ),
+    )
+    assert calls["quick"] == 2
+    assert duplicated is False
+    assert q_res["code"].endswith("000003")
+
+
+def test_pg_advisory_lock_executed_on_postgresql_dialect():
+    """Trên PostgreSQL, _acquire_pg_advisory_xact_lock phải gọi pg_advisory_xact_lock(ns, key)."""
+    from types import SimpleNamespace
+    from app.services import report_service
+
+    executed = []
+
+    class FakePGSession:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def execute(self, stmt, params):
+            executed.append((str(stmt), params))
+
+    report_service._acquire_pg_advisory_xact_lock(FakePGSession(), 7102026, 2026)
+    assert len(executed) == 1
+    assert "pg_advisory_xact_lock" in executed[0][0]
+    assert executed[0][1] == {"ns": 7102026, "key": 2026}

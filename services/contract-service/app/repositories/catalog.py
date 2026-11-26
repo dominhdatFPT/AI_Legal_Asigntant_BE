@@ -29,19 +29,24 @@ class CatalogRepository:
     def __init__(self, connect=None):
         self._connect = connect
 
+    @staticmethod
+    def _snapshot(conn, read):
+        # psycopg sends "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" itself: same snapshot, one less round trip.
+        if read:
+            conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            conn.read_only = True
+
     @contextmanager
     def transaction(self, *, read=False):
         try:
             if self._connect:
                 with self._connect() as conn:
-                    if read:
-                        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    self._snapshot(conn, read)
                     yield conn
             else:
                 uri = DatabaseSettings.from_env().database_url.replace("postgresql+psycopg://", "postgresql://", 1)
                 with pooled_connection(uri, connect_timeout=5, use_dict_row=True) as conn:
-                    if read:
-                        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    self._snapshot(conn, read)
                     yield conn
         except (psycopg.IntegrityError, psycopg.errors.DeadlockDetected):
             raise conflict() from None
@@ -172,9 +177,13 @@ class CatalogRepository:
             return self.version(conn, version_id)
 
     def put_fields(self, conn, version_id, fields):
-        for index, field in enumerate(fields):
-            conn.execute("INSERT INTO public.contract_template_fields(version_id,name,label,type,required,identity_key,ordinal) VALUES(%s,%s,%s,%s,%s,%s,%s)",
-                (version_id, field.name, field.label, field.type, field.required, field.identity_key, index))
+        if not fields:
+            return
+        # One multi-row INSERT (1 round trip); rows keep list order and ordinal=index.
+        params = [value for index, field in enumerate(fields)
+            for value in (version_id, field.name, field.label, field.type, field.required, field.identity_key, index)]
+        conn.execute("INSERT INTO public.contract_template_fields(version_id,name,label,type,required,identity_key,ordinal) VALUES" +
+            ",".join(["(%s,%s,%s,%s,%s,%s,%s)"] * len(fields)), params)
 
     def create_version(self, template_id, body):
         with self.transaction() as conn:

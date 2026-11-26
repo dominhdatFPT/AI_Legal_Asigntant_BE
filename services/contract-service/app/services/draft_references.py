@@ -10,6 +10,7 @@ import httpx
 from app.core.config import service_base
 from app.core.errors import ContractError
 from app.services.user_gate import unique_object
+from app.core.http import http_client
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class DraftReferences:
 
     def ensure(self, owner, token, request_id, documents, procedure=None):
         deadline = time.monotonic() + 15
-        with httpx.Client(follow_redirects=False, trust_env=False, transport=self.transport) as client:
+        with http_client(self.transport, follow_redirects=False, trust_env=False) as client:
             if documents:
                 try:
                     base = service_base(self.document_base, "document-service")

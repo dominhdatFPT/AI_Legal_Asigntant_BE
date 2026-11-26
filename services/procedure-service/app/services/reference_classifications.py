@@ -1,8 +1,8 @@
 """Classification catalogue for source documents, querying directly from PostgreSQL with fallback."""
 import logging
-import time
-import psycopg
-from psycopg.rows import dict_row
+from sqlalchemy import text
+from app.core.catalog_cache import catalog_cache
+from app.repositories.procedure_repository import db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -30,48 +30,43 @@ FALLBACK_ITEMS = [
     {"key": "DD-001", "code": "DD-001", "procedure_id": "d5d9c792-5b9e-4e42-9a3b-2856247c7c30", "name": "Đăng ký biến động quyền sử dụng đất do chuyển nhượng", "domain": "land", "kind": "project_procedure"},
     {"key": "DD-010", "code": "DD-010", "procedure_id": "b0c1d2e3-f4a5-4b6c-d7e8-9f0a1b2c3d4e", "name": "Thủ tục đăng ký thế chấp quyền sử dụng đất, tài sản gắn liền với đất", "domain": "land", "kind": "project_procedure"},
     {"key": "DD-004", "code": "DD-004", "procedure_id": "b4c5d6e7-f8a9-4b0c-1d2e-3f4a5b6c7d8e", "name": "Thủ tục đăng ký đất đai, cấp Giấy chứng nhận lần đầu", "domain": "land", "kind": "project_procedure"},
-    {"key": "coop-branch-registration", "code": "HTX-001", "procedure_id": None, "name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã", "domain": "cooperative", "kind": "document_classification"},
-    {"key": "vat-declaration", "code": "DN-012", "procedure_id": None, "name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ", "domain": "business", "kind": "document_classification"},
-    {"key": "household-certificate-reissue", "code": "HKD-003", "procedure_id": None, "name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh", "domain": "business", "kind": "document_classification"},
-    {"key": "social-insurance-authorization", "code": "BHXH-001", "procedure_id": None, "name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội", "domain": "social_insurance", "kind": "document_classification"},
-    {"key": "land-allocation-rental", "code": "DD-013", "procedure_id": None, "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng", "domain": "land", "kind": "document_classification"},
-    {"key": "land-survey", "code": "DD-015", "procedure_id": None, "name": "Yêu cầu đo đạc đất", "domain": "land", "kind": "document_classification"},
-    {"key": "agricultural-land-term-confirmation", "code": "DD-016", "procedure_id": None, "name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp", "domain": "land", "kind": "document_classification"},
-    {"key": "land-allocation-method-change", "code": "DD-017", "procedure_id": None, "name": "Chuyển hình thức giao đất, cho thuê đất", "domain": "land", "kind": "document_classification"},
-    {"key": "land-dispute-mediation", "code": "DD-014", "procedure_id": None, "name": "Hòa giải tranh chấp đất đai", "domain": "land", "kind": "document_classification"}
+    {"key": "coop-branch-registration", "code": "HTX-001", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128001", "name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã", "domain": "cooperative", "kind": "project_procedure"},
+    {"key": "vat-declaration", "code": "DN-012", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128002", "name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ", "domain": "business", "kind": "project_procedure"},
+    {"key": "household-certificate-reissue", "code": "HKD-003", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128003", "name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh", "domain": "business", "kind": "project_procedure"},
+    {"key": "social-insurance-authorization", "code": "BHXH-001", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128004", "name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội", "domain": "social_insurance", "kind": "project_procedure"},
+    {"key": "land-allocation-rental", "code": "DD-013", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128005", "name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất; giao đất và giao rừng, thuê đất và thuê rừng", "domain": "land", "kind": "project_procedure"},
+    {"key": "land-survey", "code": "DD-015", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128007", "name": "Yêu cầu đo đạc đất", "domain": "land", "kind": "project_procedure"},
+    {"key": "agricultural-land-term-confirmation", "code": "DD-016", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128008", "name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp", "domain": "land", "kind": "project_procedure"},
+    {"key": "land-allocation-method-change", "code": "DD-017", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128009", "name": "Chuyển hình thức giao đất, cho thuê đất", "domain": "land", "kind": "project_procedure"},
+    {"key": "land-dispute-mediation", "code": "DD-014", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128006", "name": "Hòa giải tranh chấp đất đai", "domain": "land", "kind": "project_procedure"},
+    {"key": "topsoil-plan", "code": "DD-022", "procedure_id": "c3a1e204-7a91-49b2-a42e-1b8f04128010", "name": "Phương án sử dụng tầng đất mặt", "domain": "land", "kind": "project_procedure"},
 ]
 
-_CACHE = {"data": None, "timestamp": 0.0}
-_CACHE_TTL = 30.0
+_CACHE_TTL = 120.0
+
+
+def invalidate_classifications_cache():
+    catalog_cache.invalidate("classifications")
 
 
 def load_classifications_from_db():
-    global _CACHE
-    now = time.time()
-    if _CACHE["data"] is not None and (now - _CACHE["timestamp"]) < _CACHE_TTL:
-        return _CACHE["data"]
-
-    try:
-        from app.core.config import settings
-        db_url = settings.PROCEDURE_DATABASE_URL
-        if not db_url:
-            return None
-        with psycopg.connect(db_url, connect_timeout=4, prepare_threshold=None,
-                             row_factory=dict_row, options="-c statement_timeout=5000") as conn:
-            rows = conn.execute("""
-                SELECT key, code, name, domain, kind, procedure_id::text
+    def load():
+        with db_connection() as conn:
+            rows = conn.execute(text("""
+                SELECT key, code, name, domain, kind, CAST(procedure_id AS text) AS procedure_id
                 FROM public.reference_classifications
                 ORDER BY code, name
-            """).fetchall()
-            if rows and len(rows) > 0:
-                result = {
+            """)).mappings().all()
+            if rows:
+                return {
                     "domains": DEFAULT_DOMAINS,
-                    "items": rows,
+                    "items": [dict(row) for row in rows],
                     "data_source": "database"
                 }
-                _CACHE["data"] = result
-                _CACHE["timestamp"] = now
-                return result
+        return None
+
+    try:
+        return catalog_cache.get_or_load("classifications", "all", _CACHE_TTL, load)
     except Exception as e:
         logger.warning(f"Could not load classifications from procedure DB: {e}")
     return None

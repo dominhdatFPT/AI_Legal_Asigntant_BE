@@ -17,11 +17,14 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Iterable
 
+from common_auth.context import request_id_var, sanitize_request_id
+
 logger = logging.getLogger("common_auth.events")
 
 EXCHANGE = "legal.events.topic"
 DEAD_LETTER_EXCHANGE = "legal.events.dlx"
 DEAD_LETTER_QUEUE = "q.dead_letter"
+PROCEDURE_PURGE_QUEUE = "q.contract.procedure_events"
 RETRY_AFTER = 10.0
 
 Handler = Callable[[str, dict], Awaitable[None]]
@@ -39,13 +42,18 @@ def masked(url: str) -> str:
     return url.rsplit("@", 1)[-1]
 
 
-def make_event(event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "event_id": f"evt-{uuid.uuid4().hex}",
+def make_event(
+    event_type: str, payload: dict, *, event_id: str | None = None, request_id: str | None = None,
+) -> dict:
+    event = {
+        "event_id": event_id if event_id is not None else f"evt-{uuid.uuid4().hex}",
         "event_type": event_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
+    if rid := sanitize_request_id(request_id) or sanitize_request_id(request_id_var.get()):
+        event.update(request_id=rid, correlation_id=rid)
+    return event
 
 
 class EventPublisher:
@@ -66,37 +74,62 @@ class EventPublisher:
             self._loop, self._lock = loop, asyncio.Lock()
             self._connection = self._channel = self._exchange = None
         async with self._lock:
-            if self._connection is None or self._connection.is_closed or self._channel.is_closed:
+            if (self._connection is None or self._connection.is_closed
+                    or self._channel is None or self._channel.is_closed or self._exchange is None):
                 await self.close()
                 self._connection = await aio_pika.connect(url, timeout=2)
-                self._channel = await self._connection.channel()
+                self._channel = await self._connection.channel(publisher_confirms=True, on_return_raises=True)
                 self._exchange = await self._channel.declare_exchange(
                     EXCHANGE, aio_pika.ExchangeType.TOPIC, durable=True
                 )
             return self._exchange
 
     async def publish(self, routing_key: str, payload: dict[str, Any]) -> bool:
+        return await self.publish_envelope(routing_key, make_event(routing_key, payload))
+
+    async def publish_envelope(
+        self, routing_key: str, event: dict, *, mandatory: bool = False, queue_name: str | None = None,
+    ) -> bool:
         """Trả về True khi broker đã xác nhận (publisher confirm), False nếu bỏ qua hoặc lỗi."""
         url = rabbitmq_url()
         if not url or time.monotonic() < self._retry_at:
             return False
         import aio_pika
+        from aiormq import spec
 
-        event = make_event(routing_key, payload)
+        event = dict(event)
+        for field in ("request_id", "correlation_id"):
+            if value := sanitize_request_id(event.get(field)):
+                event[field] = value
+            else:
+                event.pop(field, None)
+        rid = event.get("request_id")
+        headers = {"x-request-id": rid} if rid else {}
+        if queue_name:
+            headers["x-original-routing-key"] = routing_key
         body = json.dumps(event, default=str).encode("utf-8")
         # Đang có kết nối mà publish lỗi (kết nối chết ngầm, mạng chập) thì thử lại 1 lần với kết nối mới.
         attempts = 2 if self._connection is not None else 1
         for attempt in range(1, attempts + 1):
             try:
                 exchange = await asyncio.wait_for(self._get_exchange(url), timeout=3)
+                if queue_name:
+                    exchange = self._channel.default_exchange
                 message = aio_pika.Message(
                     body=body,
                     content_type="application/json",
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                     message_id=event["event_id"],
+                    correlation_id=event.get("correlation_id"),
+                    headers=headers or None,
                 )
-                await asyncio.wait_for(exchange.publish(message, routing_key=routing_key), timeout=3)
-                return True
+                confirmation = await asyncio.wait_for(
+                    exchange.publish(message, routing_key=queue_name or routing_key, mandatory=mandatory),
+                    timeout=3,
+                )
+                if confirmation is True or isinstance(confirmation, spec.Basic.Ack):
+                    return True
+                raise RuntimeError("Broker did not confirm the publish")
             except Exception as exc:
                 await self.close()
                 if attempt == attempts:
@@ -167,11 +200,38 @@ async def consume_forever(
     routing_keys = list(routing_keys)
 
     async def on_message(message) -> None:
+        headers = dict(message.headers or {})
+        original_key = headers.get("x-original-routing-key", message.routing_key or "")
         try:
-            await handler(message.routing_key or "", json.loads(message.body))
-        except Exception:
-            logger.exception("Xử lý message %s thất bại, chuyển sang %s.", message.message_id, DEAD_LETTER_QUEUE)
+            body = json.loads(message.body)
+            if not isinstance(body, dict):
+                raise ValueError("Event must be a JSON object")
+            await handler(original_key, body)
+        except (ValueError, TypeError, KeyError, UnicodeDecodeError):
+            logger.exception("Poison event %s sent to DLQ", message.message_id)
             await message.reject(requeue=False)
+        except Exception:
+            logger.exception("Event %s failed", message.message_id)
+            try:
+                count = int(headers.get("x-retry-count", 0))
+            except (TypeError, ValueError):
+                await message.reject(requeue=False)
+                return
+            if count < 0 or count >= 3 or not queue_name:
+                await message.reject(requeue=False)
+                return
+            headers.update({"x-retry-count": count + 1, "x-original-routing-key": original_key})
+            try:
+                retry = aio_pika.Message(
+                    body=message.body, headers=headers, content_type=message.content_type,
+                    message_id=message.message_id, correlation_id=message.correlation_id,
+                    delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                )
+                await channel.default_exchange.publish(retry, routing_key=f"{queue_name}.retry.{count + 1}", mandatory=True)
+                await message.ack()
+            except Exception:
+                logger.exception("Retry publish failed; closing channel to restore original delivery")
+                await channel.close()
         else:
             await message.ack()
 
@@ -179,11 +239,17 @@ async def consume_forever(
         try:
             connection = await aio_pika.connect(url, timeout=5)
             async with connection:
-                channel = await connection.channel()
+                channel = await connection.channel(publisher_confirms=True, on_return_raises=True)
                 await channel.set_qos(prefetch_count=prefetch)
                 exchange = await channel.declare_exchange(EXCHANGE, aio_pika.ExchangeType.TOPIC, durable=True)
                 if queue_name:
                     queue = await declare_work_queue(channel, queue_name)
+                    for attempt, delay in enumerate((10000, 60000, 300000), 1):
+                        await channel.declare_queue(
+                            f"{queue_name}.retry.{attempt}", durable=True,
+                            arguments={"x-message-ttl": delay, "x-dead-letter-exchange": "",
+                                       "x-dead-letter-routing-key": queue_name},
+                        )
                 else:
                     queue = await channel.declare_queue(exclusive=True)
                 for key in routing_keys:

@@ -52,7 +52,7 @@ def test_process_message_uses_rag_context_and_history(fake_services, chunk):
         "Sang tên sổ đỏ cần gì?", history, request_id="req-9",
     ))
 
-    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "top_k": 3, "request_id": "req-9"}
+    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "top_k": 4, "request_id": "req-9"}
     prompt = fake_services["generate"]["system_prompt"]
     assert "Khoản 1 Điều 188, Luật Đất đai 2024 (31/2024/QH15)" in prompt
     assert "Chỉ dùng thông tin trong các trích đoạn" in prompt
@@ -156,7 +156,8 @@ def test_long_document_is_truncated_with_marker(fake_services):
 
 
 def test_document_budget_is_shared_between_documents(fake_services):
-    docs = [doc("a" * 10000), doc("b" * 10000), doc("c" * 10000)]
+    size = prompts.MAX_DOCUMENT_CHARS // 3 + 500
+    docs = [doc(letter * size) for letter in "abc"]
     asyncio.run(agent.process_message("Phân tích giúp", [], documents=docs))
 
     prompt = fake_services["generate"]["system_prompt"]
@@ -267,7 +268,7 @@ def test_prepare_returns_llm_call_without_calling_llm_and_run_matches_process_me
 
     assert isinstance(prepared, responder.LLMCall)
     assert "generate" not in fake_services  # mới chuẩn bị, chưa gọi LLM
-    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "top_k": 3, "request_id": "req-p"}
+    assert fake_services["search"] == {"query": "Sang tên sổ đỏ cần gì?", "top_k": 4, "request_id": "req-p"}
     assert prepared.chunks == [chunk] and prepared.history == history
     assert prepared.user_content == "Sang tên sổ đỏ cần gì?" and prepared.request_id == "req-p"
     assert "Khoản 1 Điều 188, Luật Đất đai 2024 (31/2024/QH15)" in prepared.system_prompt
@@ -366,7 +367,7 @@ def test_relevance_only_relevant_chunks_go_into_prompt_and_metadata(fake_service
 
     prompt = fake_services["generate"]["system_prompt"]
     assert "NOI-DUNG-2" in prompt and "NOI-DUNG-1" not in prompt and "NOI-DUNG-3" not in prompt
-    assert result["metadata"] == {"rag_chunk_ids": ["id-2"], "model": "gemini-test", "tokens_used": 512}
+    assert result["metadata"] == {"rag_chunk_ids": ["id-2"], "model": "gemini-test", "tokens_used": 554}
 
 
 def test_relevance_none_keeps_all_chunks(fake_services, three_chunks, monkeypatch):
@@ -465,7 +466,7 @@ def test_relevance_end_to_end_relevant_chunk_then_answer(fake_services, llm_by_p
     answer_prompt = llm_by_prompt["calls"][1]["system_prompt"]
     assert "NOI-DUNG-2" in answer_prompt and "NOI-DUNG-1" not in answer_prompt
     assert result["content"] == "Câu trả lời thật."
-    assert result["metadata"] == {"rag_chunk_ids": ["id-2"], "model": "answer-model", "tokens_used": 500}
+    assert result["metadata"] == {"rag_chunk_ids": ["id-2"], "model": "answer-model", "tokens_used": 530}
 
 
 def test_relevance_end_to_end_broken_grader_falls_back_to_all_chunks(fake_services, llm_by_prompt):
@@ -729,7 +730,7 @@ def test_rewrite_off_searches_once_with_original_and_never_rewrites(rag, monkeyp
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert rag["calls"] == [{"query": ORIGINAL_Q, "top_k": 3, "request_id": None}]
+    assert rag["calls"] == [{"query": ORIGINAL_Q, "top_k": 4, "request_id": None}]
     assert rewrites == []
     assert result["metadata"]["rag_chunk_ids"] == ["id-1", "id-2"]
 
@@ -758,7 +759,7 @@ def test_rewrite_on_with_llm_bypass_behaves_like_off(rag, monkeypatch):
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert rag["calls"] == [{"query": ORIGINAL_Q, "top_k": 3, "request_id": None}] and rewrites == []
+    assert rag["calls"] == [{"query": ORIGINAL_Q, "top_k": 4, "request_id": None}] and rewrites == []
     assert result["metadata"]["llm_bypass"] is True and result["metadata"]["queries"] == [ORIGINAL_Q]
 
 
@@ -772,15 +773,15 @@ def test_rewrite_on_different_query_searches_twice_and_merges_interleaved(rag, m
     result = asyncio.run(agent.process_message(ORIGINAL_Q, history, request_id="req-m"))
 
     assert sorted(c["query"] for c in rag["calls"]) == sorted([ORIGINAL_Q, REWRITTEN_Q])
-    assert all(c["top_k"] == 3 and c["request_id"] == "req-m" for c in rag["calls"])
+    assert all(c["top_k"] == 4 and c["request_id"] == "req-m" for c in rag["calls"])
     assert rewrites == [{"user_content": ORIGINAL_Q, "history": history, "request_id": "req-m"}]
-    # xen kẽ, câu gốc đứng trước, bỏ trùng id-1, tối đa rag_top_k = 3 đoạn
+    # Xen kẽ, câu gốc đứng trước, bỏ trùng id-1, giữ đủ ngân sách tối thiểu 4 đoạn.
     assert result["metadata"] == {
-        "rag_chunk_ids": ["id-1", "id-5", "id-2"], "model": "gemini-test", "tokens_used": 512,
+        "rag_chunk_ids": ["id-1", "id-5", "id-2", "id-3"], "model": "gemini-test", "tokens_used": 512,
     }
 
 
-def test_rewrite_on_merge_limit_follows_rag_top_k(rag, monkeypatch):
+def test_rewrite_on_merge_limit_has_a_floor_of_four(rag, monkeypatch):
     monkeypatch.setenv("RAG_TOP_K", "3")
     set_rewrite(monkeypatch)
     fake_rewrite(monkeypatch)
@@ -789,8 +790,8 @@ def test_rewrite_on_merge_limit_follows_rag_top_k(rag, monkeypatch):
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert [c["top_k"] for c in rag["calls"]] == [3, 3]
-    assert result["metadata"]["rag_chunk_ids"] == ["id-1", "id-4", "id-2"]
+    assert [c["top_k"] for c in rag["calls"]] == [4, 4]
+    assert result["metadata"]["rag_chunk_ids"] == ["id-1", "id-4", "id-2", "id-5"]
 
 
 def test_rewrite_on_merged_chunks_go_into_the_prompt(rag, fake_services, monkeypatch):
@@ -802,8 +803,8 @@ def test_rewrite_on_merged_chunks_go_into_the_prompt(rag, fake_services, monkeyp
     asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
     prompt = fake_services["generate"]["system_prompt"]
-    assert all(f"NOI-DUNG-{n}" in prompt for n in (1, 2, 3)) and "NOI-DUNG-4" not in prompt  # gộp tối đa rag_top_k = 3
-    assert prompt.index("NOI-DUNG-1") < prompt.index("NOI-DUNG-3") < prompt.index("NOI-DUNG-2")
+    assert all(f"NOI-DUNG-{n}" in prompt for n in (1, 2, 3, 4))
+    assert prompt.index("NOI-DUNG-1") < prompt.index("NOI-DUNG-3") < prompt.index("NOI-DUNG-2") < prompt.index("NOI-DUNG-4")
 
 
 @pytest.mark.parametrize("rewritten", [ORIGINAL_Q.upper(), f"  {ORIGINAL_Q}  \n", "Chuyển   văn phòng  thì làm SAO", ORIGINAL_Q])
@@ -931,9 +932,9 @@ def test_rewrite_on_generate_and_grading_get_the_original_question(rag, fake_ser
     asyncio.run(agent.process_message(ORIGINAL_Q, history, request_id="req-g"))
 
     assert [c["user_content"] for c in grade_calls] == [ORIGINAL_Q, ORIGINAL_Q]
-    assert [x["id"] for x in grade_calls[0]["chunks"]] == ["id-1", "id-3", "id-2"]
+    assert [x["id"] for x in grade_calls[0]["chunks"]] == ["id-1", "id-3", "id-2", "id-4"]
     assert isinstance(prepared, responder.LLMCall) and prepared.user_content == ORIGINAL_Q
-    assert prepared.history == history and [c["id"] for c in prepared.chunks] == ["id-1", "id-3", "id-2"]
+    assert prepared.history == history and [c["id"] for c in prepared.chunks] == ["id-1", "id-3", "id-2", "id-4"]
     assert fake_services["generate"]["user_content"] == ORIGINAL_Q
     assert REWRITTEN_Q not in fake_services["generate"]["system_prompt"]
 
@@ -961,7 +962,7 @@ def test_rewrite_on_logs_counts_and_keeps_timing_log_and_metadata_keys(rag, monk
     result = asyncio.run(agent.process_message(ORIGINAL_Q, [], request_id="req-l"))
 
     line = next(r.getMessage() for r in caplog.records if "agent tìm theo câu gốc và câu viết lại" in r.getMessage())
-    assert "request_id=req-l" in line and "gốc=3" in line and "viết_lại=2" in line and "sau_gộp=3" in line
+    assert "request_id=req-l" in line and "gốc=3" in line and "viết_lại=2" in line and "sau_gộp=4" in line
     assert any("agent timing" in r.getMessage() and "rag=" in r.getMessage() for r in caplog.records)
     assert set(result["metadata"]) == {"rag_chunk_ids", "model", "tokens_used"}
 
@@ -1017,6 +1018,18 @@ def candidates(rag):
     return chunks
 
 
+@pytest.mark.parametrize("top_k,expected", [(1, 4), (3, 4), (4, 4), (7, 7)])
+def test_qa_search_budget_keeps_at_least_four_chunks(rag, monkeypatch, top_k, expected):
+    set_two_step(monkeypatch, candidate_k=0, top_k=top_k, relevance=False)
+    chunks = make_chunks(*range(1, expected + 1))
+    rag["results"][ORIGINAL_Q] = chunks
+
+    result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
+
+    assert [c["top_k"] for c in rag["calls"]] == [expected]
+    assert result["metadata"]["rag_chunk_ids"] == [c["id"] for c in chunks]
+
+
 def test_two_step_defaults_are_off():
     from app.core.config import get_settings
 
@@ -1032,7 +1045,7 @@ def test_candidate_k_not_above_top_k_behaves_as_before(rag, monkeypatch, candida
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert [c["top_k"] for c in rag["calls"]] == [3]
+    assert [c["top_k"] for c in rag["calls"]] == [4]
     assert grade_calls[0]["chunks"] == chunks
     # y hệt cũ: giữ nguyên danh sách chấm trả về, không cắt theo rag_select_max
     assert result["metadata"]["rag_chunk_ids"] == ["id-2", "id-3"]
@@ -1045,7 +1058,7 @@ def test_relevance_check_off_ignores_candidate_k(rag, monkeypatch):
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert [c["top_k"] for c in rag["calls"]] == [3]
+    assert [c["top_k"] for c in rag["calls"]] == [4]
     assert result["metadata"]["rag_chunk_ids"] == ["id-1", "id-2", "id-3"]
 
 
@@ -1061,7 +1074,7 @@ def test_llm_bypass_ignores_candidate_k(rag, monkeypatch):
 
     result = asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert [c["top_k"] for c in rag["calls"]] == [3] and result["metadata"]["llm_bypass"] is True
+    assert [c["top_k"] for c in rag["calls"]] == [4] and result["metadata"]["llm_bypass"] is True
 
 
 def test_two_step_searches_wide_and_prompt_has_only_the_graded_chunks_in_order(rag, candidates, fake_services, monkeypatch):
@@ -1076,7 +1089,7 @@ def test_two_step_searches_wide_and_prompt_has_only_the_graded_chunks_in_order(r
     prompt = fake_services["generate"]["system_prompt"]
     assert prompt.index("NOI-DUNG-2") < prompt.index("NOI-DUNG-5") < prompt.index("NOI-DUNG-9")
     assert not any(f"NOI-DUNG-{n}" in prompt for n in (1, 3, 4, 6, 7, 8))
-    assert result["metadata"] == {"rag_chunk_ids": ["id-2", "id-5", "id-9"], "model": "gemini-test", "tokens_used": 512}
+    assert result["metadata"] == {"rag_chunk_ids": ["id-2", "id-5", "id-9"], "model": "gemini-test", "tokens_used": 554}
 
 
 def test_two_step_llm_call_gets_only_selected_chunks(rag, candidates, monkeypatch):
@@ -1182,7 +1195,7 @@ def test_two_step_with_rewrite_merges_both_lists_up_to_candidate_k(rag, monkeypa
     assert result["metadata"]["rag_chunk_ids"] == ["id-1", "id-7", "id-2"]  # chấm None: rag_top_k đoạn đầu
 
 
-def test_rewrite_on_without_two_step_still_merges_up_to_rag_top_k(rag, monkeypatch):
+def test_rewrite_on_without_two_step_merges_at_least_four(rag, monkeypatch):
     set_rewrite(monkeypatch)
     set_two_step(monkeypatch, candidate_k=0)
     fake_rewrite(monkeypatch)
@@ -1192,8 +1205,8 @@ def test_rewrite_on_without_two_step_still_merges_up_to_rag_top_k(rag, monkeypat
 
     asyncio.run(agent.process_message(ORIGINAL_Q, []))
 
-    assert [c["top_k"] for c in rag["calls"]] == [3, 3]
-    assert [c["id"] for c in grade_calls[0]["chunks"]] == ["id-1", "id-5", "id-2"]
+    assert [c["top_k"] for c in rag["calls"]] == [4, 4]
+    assert [c["id"] for c in grade_calls[0]["chunks"]] == ["id-1", "id-5", "id-2", "id-6"]
 
 
 def test_two_step_logs_candidates_kept_and_case(rag, candidates, monkeypatch, caplog):
@@ -1245,319 +1258,6 @@ def test_two_step_does_not_add_llm_calls(rag, candidates, fake_services, monkeyp
 
     assert calls == [True, False]
     assert result["metadata"]["rag_chunk_ids"] == ["id-2", "id-5", "id-9"]
-
-
-# ── Cache câu trả lời (ANSWER_CACHE_ENABLED) ──────────────────────────────────
-
-ASKED = "Sang tên sổ đỏ cần gì?"
-ASKED_AGAIN = "  sang TÊN   sổ đỏ\ncần gì ?! "
-
-
-def set_answer_cache(monkeypatch, on=True, **env):
-    from app.core.config import get_settings
-
-    monkeypatch.setenv("ANSWER_CACHE_ENABLED", "true" if on else "false")
-    for name, value in env.items():
-        monkeypatch.setenv(name, str(value))
-    get_settings.cache_clear()
-    responder.clear_answer_cache()
-
-
-@pytest.fixture
-def counted(monkeypatch, chunk):
-    """rag và LLM giả có đếm lần gọi. state["llm_error"] = True: lần gọi LLM tiếp theo ném LLMError; state["answer"]: nội dung trả lời."""
-    state = {"rag": 0, "llm": 0, "llm_error": False, "answer": "Theo Khoản 1 Điều 188 Luật Đất đai 2024..."}
-
-    async def fake_search(query, top_k=5, request_id=None, transport=None):
-        state["rag"] += 1
-        return [chunk]
-
-    async def fake_generate(system_prompt, history, user_content, **options):
-        state["llm"] += 1
-        if state["llm_error"]:
-            raise llm_client.LLMError("503")
-        return state["answer"], 512, "gemini-test"
-
-    monkeypatch.setattr(rag_client, "search", fake_search)
-    monkeypatch.setattr(llm_client, "generate", fake_generate)
-    return state
-
-
-def ask(question=ASKED, history=None, request_id=None):
-    return asyncio.run(agent.process_message(question, history or [], request_id=request_id))
-
-
-def test_answer_cache_flag_default_values():
-    from app.core.config import get_settings
-
-    s = get_settings()
-    assert (s.answer_cache_enabled, s.answer_cache_ttl_seconds, s.answer_cache_max_items) == (False, 21600, 500)
-
-
-def test_answer_cache_off_by_default_calls_rag_and_llm_every_time(counted):
-    first, second = ask(), ask()
-
-    assert counted["rag"] == 2 and counted["llm"] == 2
-    assert first == second and "cache_hit" not in second["metadata"]
-
-
-def test_answer_cache_explicitly_off_never_touches_cache(counted, monkeypatch):
-    set_answer_cache(monkeypatch, on=False)
-
-    def boom(*args, **kwargs):
-        raise AssertionError("cờ tắt thì không được đụng tới cache")
-
-    monkeypatch.setattr(responder, "_get_answer_cache", boom)
-    ask()
-    ask()
-    assert counted["rag"] == 2 and counted["llm"] == 2
-
-
-def test_answer_cache_on_empty_history_second_time_skips_rag_and_llm(counted, monkeypatch, chunk):
-    set_answer_cache(monkeypatch)
-
-    first = ask(ASKED)
-    second = ask(ASKED_AGAIN)  # khác hoa thường, khoảng trắng, dấu cuối
-
-    assert counted["rag"] == 1 and counted["llm"] == 1
-    assert second["content"] == first["content"]
-    assert "cache_hit" not in first["metadata"] and first["metadata"]["tokens_used"] == 512
-    assert second["metadata"] == {
-        "rag_chunk_ids": [chunk["id"]], "model": "gemini-test", "tokens_used": 0, "cache_hit": True,
-    }
-
-
-def test_answer_cache_hit_via_prepare_returns_dict_not_llm_call(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    first = asyncio.run(agent.prepare(ASKED, []))
-    assert isinstance(first, responder.LLMCall) and first.cache_key is not None  # trượt: cần LLM, có khoá để lưu
-    asyncio.run(first.run())
-
-    prepared = asyncio.run(agent.prepare(ASKED_AGAIN, []))
-
-    assert isinstance(prepared, dict) and prepared["metadata"]["cache_hit"] is True
-    assert counted["rag"] == 1 and counted["llm"] == 1
-
-
-def test_answer_cache_hit_logs_timing_with_request_id(counted, monkeypatch, caplog):
-    set_answer_cache(monkeypatch)
-    ask(ASKED, request_id="req-1")
-    with caplog.at_level(logging.INFO, logger="app.services.qa_agent"):
-        ask(ASKED_AGAIN, request_id="req-2")
-    lines = [r.getMessage() for r in caplog.records if "cache=hit" in r.getMessage()]
-    assert len(lines) == 1
-    assert lines[0].startswith("agent timing request_id=req-2 cache=hit total=") and lines[0].endswith("s")
-    assert "Sang tên" not in caplog.text
-
-
-def test_answer_cache_on_different_question_is_a_miss(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    ask("Sang tên sổ đỏ cần gì?")
-    ask("Sang tên sổ do cần gì?")  # thiếu dấu tiếng Việt: khác khoá
-    assert counted["rag"] == 2 and counted["llm"] == 2
-
-
-def test_answer_cache_on_with_history_always_calls_rag_and_llm(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    history = [{"role": "user", "content": "Chào bạn"}, {"role": "assistant", "content": "Chào bạn"}]
-
-    ask(ASKED, history)
-    ask(ASKED, history)
-
-    assert counted["rag"] == 2 and counted["llm"] == 2
-    assert len(responder._get_answer_cache()) == 0  # câu có lịch sử cũng không được lưu
-
-
-def test_answer_cache_answer_with_history_is_not_reused_for_first_message(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    ask(ASKED, [{"role": "user", "content": "Chào bạn"}])
-    ask(ASKED)  # câu đầu hội thoại, cùng chữ: vẫn phải gọi, vì lần trước không lưu
-    assert counted["llm"] == 2
-
-
-def test_answer_cache_llm_error_is_not_stored(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    counted["llm_error"] = True
-    with pytest.raises(llm_client.LLMError):
-        ask()
-    assert len(responder._get_answer_cache()) == 0
-
-    counted["llm_error"] = False
-    result = ask()
-    assert counted["llm"] == 2 and "cache_hit" not in result["metadata"]
-
-
-def test_answer_cache_rag_error_is_not_stored(monkeypatch, counted):
-    set_answer_cache(monkeypatch)
-
-    async def broken(*args, **kwargs):
-        raise rag_client.RAGError("rag chết")
-
-    monkeypatch.setattr(rag_client, "search", broken)
-    with pytest.raises(rag_client.RAGError):
-        ask()
-    assert len(responder._get_answer_cache()) == 0
-
-
-def test_answer_cache_empty_answer_is_not_stored(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    counted["answer"] = "  \n "
-    ask()
-    ask()
-    assert counted["llm"] == 2 and len(responder._get_answer_cache()) == 0
-
-
-def test_answer_cache_out_of_scope_is_not_stored(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    set_relevance(monkeypatch)
-    grade_calls = fake_grade(monkeypatch, [])
-
-    first, second = ask(), ask()
-
-    assert first["metadata"]["type"] == "out_of_scope" and second == first
-    assert len(grade_calls) == 2 and counted["rag"] == 2 and counted["llm"] == 0
-    assert len(responder._get_answer_cache()) == 0
-
-
-def test_answer_cache_llm_bypass_never_reads_or_writes(bypass, monkeypatch):
-    set_answer_cache(monkeypatch)  # set_answer_cache chỉ đổi cờ cache, LLM_BYPASS vẫn bật
-
-    def boom(*args, **kwargs):
-        raise AssertionError("LLM_BYPASS bật thì không được tra hay lưu cache")
-
-    monkeypatch.setattr(responder, "_get_answer_cache", boom)
-    first, second = ask(), ask()
-
-    assert first["metadata"]["llm_bypass"] is True and second["metadata"]["llm_bypass"] is True
-    assert "cache_hit" not in second["metadata"] and len(bypass["searches"]) == 2
-
-
-def test_answer_cache_changing_openrouter_model_is_a_miss(counted, monkeypatch):
-    from app.core.config import get_settings
-
-    set_answer_cache(monkeypatch, OPENROUTER_MODEL="model-a")
-    ask()
-    monkeypatch.setenv("OPENROUTER_MODEL", "model-b")
-    get_settings.cache_clear()
-    result = ask()
-
-    assert counted["llm"] == 2 and "cache_hit" not in result["metadata"]
-    monkeypatch.setenv("OPENROUTER_MODEL", "model-a")
-    get_settings.cache_clear()
-    assert ask()["metadata"]["cache_hit"] is True  # đổi lại model cũ thì câu của model-a vẫn còn
-    assert counted["llm"] == 2
-
-
-def test_answer_cache_changing_llm_provider_is_a_miss(counted, monkeypatch):
-    from app.core.config import get_settings
-
-    set_answer_cache(monkeypatch)
-    ask()
-    monkeypatch.setenv("LLM_PROVIDER", "openrouter,gemini")
-    get_settings.cache_clear()
-    ask()
-    assert counted["llm"] == 2
-
-
-def test_answer_cache_does_not_apply_to_document_review(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-
-    def run():
-        return asyncio.run(agent.process_message("Kiểm tra giúp tôi hợp đồng này", [], documents=[doc()]))
-
-    first, second = run(), run()
-
-    assert counted["llm"] == 2 and "cache_hit" not in second["metadata"]
-    assert len(responder._get_answer_cache()) == 0
-
-
-def test_answer_cache_meaningless_question_is_not_cached(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    ask("asdfgh qwerty zxcvb")
-    assert counted["rag"] == 0 and len(responder._get_answer_cache()) == 0
-
-
-def test_answer_cache_hit_result_is_a_copy(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    ask()
-    hit = ask()
-    hit["metadata"]["rag_chunk_ids"].append("rác")
-    hit["metadata"]["model"] = "đã bị sửa"
-    hit["content"] = "đã bị sửa"
-
-    again = ask()
-    assert again["content"].startswith("Theo Khoản 1") and again["metadata"]["model"] == "gemini-test"
-    assert "rác" not in again["metadata"]["rag_chunk_ids"]
-
-
-def test_answer_cache_stored_metadata_has_no_cache_hit(counted, monkeypatch):
-    set_answer_cache(monkeypatch)
-    ask()
-    ask()  # trúng cache, kết quả trả ra có cache_hit
-    stored = responder.get_cached_answer(("sang tên sổ đỏ cần gì", "gemini", ""))
-    assert stored is not None and "cache_hit" not in stored["metadata"] and stored["metadata"]["tokens_used"] == 512
-
-
-def test_answer_cache_expires_after_ttl(counted, monkeypatch):
-    set_answer_cache(monkeypatch, ANSWER_CACHE_TTL_SECONDS=60)
-    now = [9000.0]
-    monkeypatch.setattr(responder.cache.time, "monotonic", lambda: now[0])
-    ask()
-    now[0] += 59
-    assert ask()["metadata"].get("cache_hit") is True
-    now[0] += 2
-    assert "cache_hit" not in ask()["metadata"]
-    assert counted["llm"] == 2
-
-
-def test_answer_cache_evicts_oldest_when_full(counted, monkeypatch):
-    set_answer_cache(monkeypatch, ANSWER_CACHE_MAX_ITEMS=2)
-    for q in ("câu một", "câu hai", "câu ba"):
-        ask(q)
-    assert counted["llm"] == 3 and len(responder._get_answer_cache()) == 2
-    ask("câu ba")
-    assert counted["llm"] == 3
-    ask("câu một")  # đã bị bỏ vì cũ nhất
-    assert counted["llm"] == 4
-
-
-@pytest.mark.parametrize("env", [{"ANSWER_CACHE_MAX_ITEMS": 0}, {"ANSWER_CACHE_TTL_SECONDS": 0}])
-def test_answer_cache_on_but_zero_size_or_ttl_stores_nothing(counted, monkeypatch, env):
-    set_answer_cache(monkeypatch, **env)
-    ask()
-    ask()
-    assert counted["llm"] == 2
-
-
-def test_answer_cache_read_error_falls_back_to_normal_answer(counted, monkeypatch, caplog):
-    set_answer_cache(monkeypatch)
-
-    def broken_get(self, key):
-        raise RuntimeError("cache hỏng")
-
-    monkeypatch.setattr(responder.cache.TTLCache, "get", broken_get)
-    with caplog.at_level(logging.WARNING, logger="app.services.qa_agent"):
-        result = ask(request_id="req-9")
-
-    assert result["content"].startswith("Theo Khoản 1") and "cache_hit" not in result["metadata"]
-    assert counted["rag"] == 1 and counted["llm"] == 1
-    assert "answer cache lỗi khi đọc" in caplog.text and "req-9" in caplog.text
-
-
-def test_answer_cache_write_error_still_returns_answer(counted, monkeypatch, caplog):
-    set_answer_cache(monkeypatch)
-
-    def broken_set(self, key, value):
-        raise RuntimeError("không ghi được")
-
-    monkeypatch.setattr(responder.cache.TTLCache, "set", broken_set)
-    with caplog.at_level(logging.WARNING, logger="app.services.responder"):
-        first = ask(request_id="req-8")
-        second = ask()
-
-    assert first["content"].startswith("Theo Khoản 1") and second == first
-    assert counted["llm"] == 2
-    assert "answer cache lỗi khi ghi" in caplog.text
 
 
 # ── OPENROUTER_AUX_MODEL không đổi model của câu trả lời chính ────────────────

@@ -31,7 +31,7 @@ def _as_utc(value: datetime) -> datetime:
 def issue_token_pair(db: Session, user: User, user_agent: str | None = None) -> dict:
     raw, token_hash, expires_at = security.new_refresh_token()
     refresh_tokens.add(db, user_id=user.id, token_hash=token_hash, expires_at=expires_at, user_agent=user_agent)
-    access_token = security.create_access_token(str(user.id), user.role.value)
+    access_token = security.create_access_token(str(user.id), user.role.value, username=user.username)
     return security.token_pair(access_token, raw)
 
 
@@ -132,39 +132,53 @@ def login_with_firebase(db: Session, firebase_token: str, user_agent: str | None
     return user, pair, is_new_user
 
 
-def refresh(db: Session, raw_token: str, user_agent: str | None = None) -> dict:
+def refresh(
+    db: Session,
+    raw_token: str,
+    user_agent: str | None = None,
+    *,
+    contention_grace_seconds: int = 0,
+) -> dict:
     token = refresh_tokens.get_by_hash(db, security.hash_refresh_token(raw_token), for_update=True)
     if token is None:
         raise ApiError(401, INVALID_REFRESH_TOKEN)
 
+    # Account revocation takes precedence over the contention grace window.
+    user = users.get_by_id(db, token.user_id)
+    if user is None:
+        refresh_tokens.revoke_all_for_user(db, token.user_id)
+        db.commit()
+        raise ApiError(401, INVALID_REFRESH_TOKEN)
+    if account_guard.is_locked(user):
+        refresh_tokens.revoke_all_for_user(db, user.id)
+        db.commit()
+        raise ApiError(403, ACCOUNT_LOCKED, account_guard.locked_message(user))
+
     if token.revoked_at is not None:
+        elapsed = (datetime.now(timezone.utc) - _as_utc(token.revoked_at)).total_seconds()
+        if (refresh_tokens.is_rotation(token) and contention_grace_seconds > 0
+                and 0 <= elapsed <= contention_grace_seconds):
+            raise ApiError(
+                409,
+                "REFRESH_IN_PROGRESS",
+                "Một yêu cầu khác vừa cập nhật phiên. Vui lòng thử lại.",
+            )
         refresh_tokens.revoke_all_for_user(db, token.user_id)
         db.commit()
         raise ApiError(401, INVALID_REFRESH_TOKEN)
 
     if _as_utc(token.expires_at) <= datetime.now(timezone.utc):
         raise ApiError(401, INVALID_REFRESH_TOKEN)
-
-    user = users.get_by_id(db, token.user_id)
-    if user is None:
-        refresh_tokens.revoke_all_for_user(db, token.user_id)
-        db.commit()
-        raise ApiError(401, INVALID_REFRESH_TOKEN)
-
-    if account_guard.is_locked(user):
-        refresh_tokens.revoke_all_for_user(db, user.id)
-        db.commit()
-        raise ApiError(403, ACCOUNT_LOCKED, account_guard.locked_message(user))
     account_guard.release_expired_lock(db, user, commit=False)
 
-    refresh_tokens.revoke(db, token)
+    refresh_tokens.revoke(db, token, rotated=True)
     pair = issue_token_pair(db, user, user_agent)
     db.commit()
     return pair
 
 
 def logout(db: Session, raw_token: str, current_user_id: str) -> None:
-    token = refresh_tokens.get_by_hash(db, security.hash_refresh_token(raw_token))
+    token = refresh_tokens.get_by_hash(db, security.hash_refresh_token(raw_token), for_update=True)
     if token is not None and str(token.user_id) == current_user_id:
         refresh_tokens.revoke(db, token)
         db.commit()

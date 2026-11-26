@@ -1,15 +1,21 @@
+import asyncio
 import logging
 import os
+import threading
 import uuid
 from contextlib import asynccontextmanager
+from common_auth import outbox
+from common_auth.context import request_id_var, sanitize_request_id
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core import event_outbox
 from app.core.config import settings
 from app.database import get_engine
-from app.api.procedures import router as procedures_router
+from app.api import internal_procedures
+from app.api.procedures import make_request_id, router as procedures_router
 from app.api.templates import router as templates_router
 from app.api.mau18 import router as mau18_router
 from app.api.custom_form_templates import router as custom_form_templates_router
@@ -37,26 +43,27 @@ async def lifespan(app: FastAPI):
         engine = get_engine()
         if engine:
             logger.info("Kết nối cơ sở dữ liệu đã sẵn sàng.")
-            import threading
-            def _bg_seed():
-                try:
-                    from app.api.custom_form_templates import ensure_builtin_seeded
-                    from app.repositories.procedure_repository import db_connection
-                    with db_connection(write=True) as conn:
-                        ensure_builtin_seeded(conn)
-                    logger.info("Hoàn tất kiểm tra seed mẫu đơn ban đầu.")
-                except Exception as err:
-                    logger.warning(f"Seed mẫu đơn ban đầu gặp lỗi: {err}")
-            threading.Thread(target=_bg_seed, daemon=True).start()
+            if os.getenv("PROCEDURE_CATALOG_WARMUP", "true").lower() in ("true", "1", "yes"):
+                def _warm():
+                    try:
+                        from app.api.custom_form_templates import warm_public_templates_cache
+                        warm_public_templates_cache()
+                        logger.info("Public custom form templates cache warmed up.")
+                    except Exception as exc:
+                        logger.debug("Public custom form templates warmup skipped: %s", exc)
+                threading.Thread(target=_warm, name="procedure-templates-warmup", daemon=True).start()
     except Exception as e:
         logger.warning(f"Chưa thể kết nối CSDL khi khởi động: {e}")
-    yield
-    # Shutdown: giải phóng connection pool
-    logger.info("Đang tắt Procedure Service và giải phóng connection pool...")
-    engine = get_engine()
-    if engine:
-        engine.dispose()
-        logger.info("Đã giải phóng connection pool thành công.")
+    relay_task = asyncio.create_task(event_outbox.relay.run_forever()) if outbox.enabled() else None
+    try:
+        yield
+    finally:
+        try:
+            if relay_task is not None:
+                await event_outbox.relay.shutdown(relay_task)
+        finally:
+            logger.info("Đang tắt Procedure Service và giải phóng connection pool...")
+            event_outbox.relay.dispose_engine_when_idle(get_engine)
 
 
 app = FastAPI(
@@ -79,12 +86,19 @@ if os.getenv("STANDALONE_CORS", "false").lower() in ("true", "1"):
     )
 
 
+app.add_middleware(internal_procedures.InternalRequestMiddleware)
+
+
 # Middleware đồng bộ Request ID tự động (L2, L3)
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    req_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = sanitize_request_id(request.headers.get("X-Request-ID")) or f"req-{uuid.uuid4()}"
     request.state.request_id = req_id
-    response = await call_next(request)
+    token = request_id_var.set(req_id)
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_var.reset(token)
     response.headers["X-Request-ID"] = req_id
     return response
 
@@ -100,7 +114,7 @@ except ImportError:
 # Exception handler cho HTTPException tiêu chuẩn (M2)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -123,7 +137,7 @@ async def invalid_request(request: Request, exc: RequestValidationError):
         msg = err.get("msg", "Dữ liệu không hợp lệ")
         details.append({"field": field_name, "message": msg})
 
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=422,
         content={
@@ -140,7 +154,7 @@ async def invalid_request(request: Request, exc: RequestValidationError):
 
 @app.exception_handler(ProcedureInvalidData)
 async def invalid_data_handler(request: Request, exc: ProcedureInvalidData):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     if isinstance(exc, FormDataInvalid):
         error = {
             "code": "VALIDATION_ERROR",
@@ -164,7 +178,7 @@ async def invalid_data_handler(request: Request, exc: ProcedureInvalidData):
 
 @app.exception_handler(ProcedureDbUnavailable)
 async def db_unavailable_handler(request: Request, exc: ProcedureDbUnavailable):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=503,
         content={
@@ -184,7 +198,7 @@ app.add_exception_handler(SQLAlchemyError, db_unavailable_handler)
 
 @app.exception_handler(TemplateNotFoundError)
 async def template_not_found_handler(request: Request, exc: TemplateNotFoundError):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=404,
         content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
@@ -193,7 +207,7 @@ async def template_not_found_handler(request: Request, exc: TemplateNotFoundErro
 
 @app.exception_handler(TemplateNotDraftError)
 async def template_not_draft_handler(request: Request, exc: TemplateNotDraftError):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=409,
         content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
@@ -202,7 +216,7 @@ async def template_not_draft_handler(request: Request, exc: TemplateNotDraftErro
 
 @app.exception_handler(TemplateInvalidStatusError)
 async def template_invalid_status_handler(request: Request, exc: TemplateInvalidStatusError):
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=409,
         content={"data": None, "error": {"code": exc.code, "message": exc.message}, "request_id": req_id},
@@ -212,7 +226,7 @@ async def template_invalid_status_handler(request: Request, exc: TemplateInvalid
 @app.exception_handler(Exception)
 async def internal_error_handler(request: Request, exc: Exception):
     logger.error(f"Internal server error: {exc}", exc_info=True)
-    req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    req_id = getattr(request.state, "request_id", None) or make_request_id(request.headers.get("X-Request-ID"))
     return JSONResponse(
         status_code=500,
         content={
@@ -239,5 +253,6 @@ app.include_router(mau18_router, prefix="/api/v1/procedures", tags=["Form templa
 app.include_router(custom_form_templates_router, prefix="/api/v1/procedures", tags=["User configured forms"])
 app.include_router(office_editor_router, prefix="/api/v1/procedures", tags=["Word editor"])
 app.include_router(custom_form_templates_router, prefix="/api/procedures", tags=["User configured forms alias"], include_in_schema=False)
+app.include_router(internal_procedures.router)
 app.include_router(procedures_router, prefix="/api/v1/procedures", tags=["Procedures"])
 app.include_router(procedures_router, prefix="/api/procedures", tags=["Procedures-Alias"], include_in_schema=False)

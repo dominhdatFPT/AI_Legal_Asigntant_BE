@@ -17,25 +17,65 @@ TABLES = (
     "contract_notification_outbox",
 )
 
-_POOL_MAX_SIZE = int(os.getenv("CONTRACT_DB_POOL_SIZE", "4"))
-_POOL_IDLE_TTL = 240.0
+import sys
+from contextlib import contextmanager
+
+_POOL_MAX_SIZE = int(os.getenv("CONTRACT_DB_POOL_SIZE", "2"))
+_POOL_IDLE_TTL = 45.0
 _POOLS_LOCK = threading.Lock()
 _POOLS: dict[tuple[str, bool], LifoQueue] = {}
 
 
-def _open_connection(url: str, connect_timeout: int, use_dict_row: bool):
+def _open_connection(url: str, connect_timeout: int, use_dict_row: bool, *, autocommit: bool = False):
     clean_url = url.replace("postgresql+psycopg://", "postgresql://", 1)
     kwargs = {
         "connect_timeout": connect_timeout,
         "prepare_threshold": None,
+        "autocommit": autocommit,
         "keepalives": 1,
-        "keepalives_idle": 30,
-        "keepalives_interval": 10,
+        "keepalives_idle": 5,
+        "keepalives_interval": 3,
         "keepalives_count": 3,
     }
+    if sys.platform.startswith("linux"):
+        kwargs["tcp_user_timeout"] = 10000
     if use_dict_row:
         kwargs["row_factory"] = dict_row
     return psycopg.connect(clean_url, **kwargs)
+
+
+@contextmanager
+def open_fresh_connection(
+    url: str,
+    *,
+    connect_timeout: int = 5,
+    use_dict_row: bool = False,
+    autocommit: bool = True,
+):
+    """Mở kết nối PostgreSQL ngắn hạn độc lập và đóng ngay sau khi đọc/ghi một lô dữ liệu."""
+    conn = _open_connection(
+        url,
+        connect_timeout,
+        use_dict_row,
+        autocommit=autocommit,
+    )
+    try:
+        yield conn
+        if not autocommit and not conn.closed and not conn.broken:
+            conn.commit()
+    except Exception:
+        if not autocommit and not conn.closed and not conn.broken:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        if not conn.closed:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @contextmanager
@@ -71,8 +111,12 @@ def pooled_connection(
             and (now - returned_at) < _POOL_IDLE_TTL
         ):
             try:
-                candidate.execute("SELECT 1")
-                candidate.rollback()
+                # Empty query in autocommit = 1 round trip, no implicit BEGIN/ROLLBACK.
+                candidate.autocommit = True
+                try:
+                    candidate.execute("")
+                finally:
+                    candidate.autocommit = False
                 conn = candidate
                 break
             except Exception:
@@ -89,19 +133,27 @@ def pooled_connection(
     if conn is None:
         conn = _open_connection(target_url, connect_timeout, use_dict_row)
 
+    # Not `with conn:` — psycopg 3 Connection.__exit__ closes the connection, which defeated the pool.
+    reusable = False
     try:
-        with conn:
-            yield conn
-    except Exception:
-        if not conn.closed and not conn.broken:
+        yield conn
+        if not conn.closed and not conn.broken and not conn.autocommit:
+            conn.commit()
+        reusable = True
+    except BaseException:
+        if not conn.closed and not conn.broken and not conn.autocommit:
             try:
                 conn.rollback()
             except Exception:
                 pass
         raise
     finally:
-        if conn is not None and not conn.closed and not conn.broken:
+        if reusable and not conn.closed and not conn.broken:
             try:
+                # Callers may set per-transaction attributes; never leak them to the next borrower.
+                conn.read_only = None
+                conn.isolation_level = None
+                conn.autocommit = False
                 pool.put_nowait((conn, time.monotonic()))
             except Exception:
                 try:

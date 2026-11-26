@@ -33,3 +33,11 @@ def test_document_download_metadata_headers_exposed_to_frontend():
 def test_legacy_document_port_is_backup_not_primary():
     assert "server document-service:8000 resolve;" in CONFIG
     assert "server document-service:5000 resolve backup;" in CONFIG
+
+
+def test_gateway_strips_untrusted_cloudflare_ip_header():
+    assert 'proxy_set_header CF-Connecting-IP "";' in CONFIG
+    render_cfg = (ROOT / "gateway/render/nginx.conf.template").read_text(encoding="utf-8")
+    assert 'map "${TRUST_CLOUDFLARE_HEADERS}:$http_cf_connecting_ip" $rate_limit_client' in render_cfg
+    assert "proxy_set_header X-Real-IP $trusted_client_ip;" in render_cfg
+    assert "proxy_set_header CF-Connecting-IP $forwarded_cf_ip;" in render_cfg

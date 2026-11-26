@@ -80,6 +80,15 @@ def test_chua_khai_ho_so_thi_khong_duoc_tao(client, user):
     assert data["block_message"]
 
 
+def test_non_ascii_internal_token_is_unauthorized(client, user):
+    response = client.get(URL.format(user.id), headers=[
+        (b"x-internal-token", b"incorrect-\xe9"),
+        (b"x-request-id", b"req-\r\ntrace"),
+    ])
+    assert response.status_code == 401
+    assert response.headers["X-Request-ID"] == response.json()["request_id"] == "req-trace"
+
+
 def test_bi_khoa_co_thoi_han_thi_khong_duoc_tao(client, db, user):
     _add_profile(db, user)
     until = datetime.now(timezone.utc) + timedelta(days=1)

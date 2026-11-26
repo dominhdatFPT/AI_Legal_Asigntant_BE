@@ -48,11 +48,14 @@ def test_nap_roi_tim_kiem(pg, sample_text):
     from app.services.search import search_chunks
 
     emb = FakeEmbedder(768)
+    # The hashed embedder matches words rather than intent. This clause appears in Article 4,
+    # while Article 2 also uses the generic phrase about transfer of land-use rights.
+    query = "hợp đồng chuyển nhượng có công chứng hoặc chứng thực và tờ khai lệ phí trước bạ"
     ingest_document(pg, emb, title="Luật Mẫu", doc_type="luat", content=sample_text, doc_number="01/2099/QH-MAU")
     ingest_document(pg, emb, title="Nghị định Mẫu", doc_type="nghi_dinh", status="superseded",
-                    content="Điều 1. Điều kiện chuyển nhượng quyền sử dụng đất\nVăn bản đã hết hiệu lực.")
+                    content=f"Điều 1. Hồ sơ chuyển nhượng quyền sử dụng đất\n{query}. Văn bản đã hết hiệu lực.")
 
-    results = search_chunks(pg, emb, "điều kiện chuyển nhượng quyền sử dụng đất", top_k=3)
+    results = search_chunks(pg, emb, query, top_k=3)
     assert results[0]["section_info"]["dieu"] == "4"
     assert results[0]["document"]["doc_number"] == "01/2099/QH-MAU"
     assert 0 <= results[-1]["score"] <= results[0]["score"] <= 1

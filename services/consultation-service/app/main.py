@@ -9,17 +9,26 @@ from common_auth.fastapi_dep import add_auth_error_handler
 from app.api import consultations, ws
 from app.core import database
 from app.core.responses import install_error_handlers
-from app.services import transcript_service
+from app.services import http_client, transcript_service, user_events
 
 logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Không có database thì không quét (môi trường chưa cấu hình).
-    task = asyncio.create_task(transcript_service.sweep_loop()) if database.database_url() else None
-    yield
-    if task:
-        task.cancel()
+    tasks = []
+    if database.database_url():
+        tasks = [
+            asyncio.create_task(transcript_service.sweep_loop()),
+            asyncio.create_task(user_events.start()),
+        ]
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        http_client.close_shared_client()
 
 
 app = FastAPI(title="Consultation Service", version="0.2.0", lifespan=lifespan)

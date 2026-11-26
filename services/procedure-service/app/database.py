@@ -2,7 +2,6 @@ import os
 import logging
 import threading
 import time
-from collections.abc import Iterator
 from dotenv import load_dotenv
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -15,15 +14,10 @@ _be_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.env
 _keys_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.keys/onlyoffice.env"))
 _root_env = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../.env"))
 
-if os.path.exists(_service_env):
-    load_dotenv(_service_env, override=True)
-if os.path.exists(_be_env):
-    load_dotenv(_be_env, override=False)
-if os.path.exists(_keys_env):
-    load_dotenv(_keys_env, override=False)
-if os.path.exists(_root_env):
-    load_dotenv(_root_env, override=False)
-load_dotenv()
+if os.getenv("PROCEDURE_SKIP_DOTENV") != "1":
+    for env_path in (_service_env, _be_env, _keys_env, _root_env):
+        if os.path.exists(env_path):
+            load_dotenv(env_path, override=False)
 
 
 class Base(DeclarativeBase):
@@ -65,6 +59,51 @@ def database_url() -> str:
     return url
 
 
+def _attach_pool_guards(engine: Engine) -> None:
+    """
+    Giới hạn số truy vấn, số dòng và tuổi thọ mỗi kết nối TCP PostgreSQL trong pool.
+    Tránh một kết nối tái sử dụng tích luỹ vượt ngưỡng nghẽn TCP trên một số mạng.
+    Không áp dụng cho SQLite StaticPool (dùng trong unit test).
+    """
+    if getattr(getattr(engine, "dialect", None), "name", "") != "postgresql":
+        return
+
+    import time
+    from sqlalchemy import event
+
+    max_queries = 500
+    max_rows = 5000
+    max_age_seconds = 300.0
+
+    @event.listens_for(engine.pool, "connect")
+    def _on_connect(dbapi_connection, connection_record):
+        connection_record.info["created_at"] = time.monotonic()
+        connection_record.info["queries"] = 0
+        connection_record.info["rows"] = 0
+        connection_record.info["retire"] = False
+
+    @event.listens_for(engine, "after_cursor_execute")
+    def _after_execute(conn, cursor, statement, parameters, context, executemany):
+        proxy = getattr(conn, "connection", None)
+        rec = getattr(proxy, "_connection_record", None)
+        info = rec.info if rec is not None else getattr(proxy, "record_info", None)
+        if info is None:
+            return
+        info["queries"] = info.get("queries", 0) + 1
+        rc = getattr(cursor, "rowcount", 0)
+        info["rows"] = info.get("rows", 0) + (rc if isinstance(rc, int) and rc > 0 else 1)
+        if info["queries"] >= max_queries or info["rows"] >= max_rows:
+            info["retire"] = True
+
+    @event.listens_for(engine.pool, "checkin")
+    def _on_checkin(dbapi_connection, connection_record):
+        info = connection_record.info
+        created_at = info.get("created_at")
+        expired = created_at is not None and (time.monotonic() - created_at) >= max_age_seconds
+        if info.get("retire") or expired:
+            connection_record.invalidate()
+
+
 def get_engine() -> Engine | None:
     """
     Khởi tạo hoặc lấy SQLAlchemy Engine kết nối tới PostgreSQL (Thread-safe).
@@ -78,22 +117,36 @@ def get_engine() -> Engine | None:
                 if not db_url:
                     return None
                 try:
+                    import sys
+
+                    from sqlalchemy.engine import make_url
+                    url = make_url(db_url)
+                    if url.get_backend_name() == "sqlite":
+                        _engine = create_engine(db_url)
+                        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
+                        return _engine
+                    transaction_pooler = url.port == 6543 and "pooler" in (url.host or "").lower()
+                    connect_args = {
+                        "connect_timeout": 3,
+                        "keepalives": 1,
+                        "keepalives_idle": 5,
+                        "keepalives_interval": 3,
+                        "keepalives_count": 3,
+                    }
+                    if transaction_pooler and url.get_driver_name() == "psycopg":
+                        connect_args["prepare_threshold"] = None
+                    if sys.platform.startswith("linux"):
+                        connect_args["tcp_user_timeout"] = 10000
+
                     _engine = create_engine(
                         db_url,
-                        pool_pre_ping=True,
-                        pool_size=3,
-                        max_overflow=2,
-                        pool_recycle=300,
-                        connect_args={
-                            # Transaction poolers may reuse server connections across clients.
-                            # Disable automatic preparation to avoid statement-name collisions.
-                            "prepare_threshold": None,
-                            "connect_timeout": 3,
-                            "keepalives": 1,
-                            "keepalives_idle": 30,
-                            "keepalives_interval": 10,
-                            "keepalives_count": 3,
-                        },
+                        pool_pre_ping=False,
+                        pool_use_lifo=True,
+                        pool_size=3 if transaction_pooler else 2,
+                        max_overflow=1,
+                        pool_timeout=3,
+                        pool_recycle=600,
+                        connect_args=connect_args,
                     )
                     _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
                     logger.info("Khởi tạo SQLAlchemy Engine thành công với PROCEDURE_DATABASE_URL")
@@ -104,42 +157,8 @@ def get_engine() -> Engine | None:
     return _engine
 
 
-def get_db() -> Iterator[Session]:
-    """Dependency cung cấp Session database cho các endpoint FastAPI kèm auto rollback khi lỗi."""
-    engine = get_engine()
-    if engine is None or _session_factory is None:
-        raise RuntimeError("Cơ sở dữ liệu PostgreSQL chưa được khởi tạo thành công.")
-    db = _session_factory()
-    try:
-        yield db
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
 def get_supabase_config() -> tuple[str, str]:
-    """
-    Lấy Supabase REST URL và Anon Key phục vụ giao tiếp trực tiếp qua PostgREST.
-    Tuyệt đối không hardcode Anon Key hay URL trong source code trừ giá trị dự phòng mặc định khi môi trường thiếu.
-    """
+    """Đọc cấu hình Supabase REST từ môi trường."""
     url = (os.getenv("SUPABASE_URL") or "").strip()
     anon_key = (os.getenv("SUPABASE_ANON_KEY") or "").strip()
-    if not url or not anon_key:
-        if os.path.exists(_service_env):
-            from dotenv import dotenv_values
-            vals = dotenv_values(_service_env)
-            if not url and vals.get("SUPABASE_URL"):
-                url = (vals["SUPABASE_URL"] or "").strip()
-            if not anon_key and vals.get("SUPABASE_ANON_KEY"):
-                anon_key = (vals["SUPABASE_ANON_KEY"] or "").strip()
-    if not url:
-        url = "https://qqwuhiymixomwrdunfkz.supabase.co"
-    if not anon_key:
-        anon_key = (
-            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-            "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxd3VoaXltaXhvbXdyZHVuZmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MzgxNzAsImV4cCI6MjEwNzAxNDE3MH0."
-            "SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA"
-        )
-    return url, anon_key
+    return (url, anon_key) if url and anon_key else ("", "")

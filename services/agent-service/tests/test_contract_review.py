@@ -67,9 +67,10 @@ def test_review_queries_khac_uses_document_opening_without_placeholders():
 
 
 def test_review_queries_never_exceed_rag_limit():
-    [query] = cr.review_queries("khac", "câu hỏi " + "dài " * 1000)[:1]
-    assert len(query) <= 1000
-    assert all(len(q) <= 1000 for q in cr.review_queries("the_chap", "hỏi " * 600))
+    question = "câu hỏi " + "dài " * 1000
+    [query] = cr.review_queries("khac", question)[:1]
+    assert query == question.strip()
+    assert all(len(q) <= 20000 for q in cr.review_queries("the_chap", "hỏi " * 6000))
 
 
 def chunks(*ids):

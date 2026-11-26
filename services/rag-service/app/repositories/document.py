@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.orm import Session, defer
 
 from app.models import DocumentChunk, DocumentVersion, IngestLog, LegalDocument
@@ -140,6 +140,11 @@ def semantic_search(
     """Tìm top_k chunk gần câu hỏi nhất theo khoảng cách cosine (toán tử <=> của pgvector).
     Chỉ PostgreSQL + pgvector chạy được (SQLite không có).
     Trả về [(chunk, văn bản, khoảng cách)], khoảng cách càng nhỏ càng giống."""
+    # top_k ở đây đã bao gồm overfetch từ search.py.
+    # SET LOCAL chỉ có hiệu lực trong transaction hiện tại.
+    if top_k > 20 and db.get_bind().dialect.name == "postgresql":
+        ef_search = max(64, top_k * 2)
+        db.execute(text(f"SET LOCAL hnsw.ef_search = {ef_search}"))
     distance = DocumentChunk.embedding.cosine_distance(query_embedding).label("distance")
     stmt = (
         select(DocumentChunk, LegalDocument, distance)
@@ -157,6 +162,97 @@ def semantic_search(
     if doc_types:
         stmt = stmt.where(LegalDocument.doc_type.in_(doc_types))
     return [(chunk, doc, float(dist)) for chunk, doc, dist in db.execute(stmt).all()]
+
+
+def _active_chunks_stmt(*columns):
+    """SELECT các cột của document_chunks thuộc văn bản đang tìm được (cùng điều kiện status/is_processed như semantic_search).
+    Chỉ chọn cột truyền vào: không kéo embedding, không kéo legal_documents.content."""
+    return (
+        select(*columns)
+        .select_from(DocumentChunk)
+        .join(LegalDocument, DocumentChunk.document_id == LegalDocument.id)
+        .where(LegalDocument.status == "active", LegalDocument.is_processed.is_(True))
+    )
+
+
+def active_chunks_fingerprint(db: Session) -> tuple[int, datetime | None]:
+    """(số đoạn, thời điểm tạo mới nhất) của các đoạn đang active. Đổi khi nạp, duyệt, thay nội dung (tạo lại mọi đoạn)
+    hoặc đổi trạng thái văn bản. Chỉ đọc; dùng để biết chỉ mục BM25 trong bộ nhớ (services/hybrid.py) còn đúng không."""
+    count, newest = db.execute(
+        _active_chunks_stmt(func.count(DocumentChunk.id), func.max(DocumentChunk.created_at))
+    ).one()
+    return int(count or 0), newest
+
+
+def active_chunk_texts(db: Session) -> list[tuple[uuid.UUID, str]]:
+    """[(id, content)] của mọi đoạn đang active, theo thứ tự văn bản rồi chunk_index (ổn định giữa các lần chạy).
+    Chỉ đọc; dựng chỉ mục BM25."""
+    stmt = _active_chunks_stmt(DocumentChunk.id, DocumentChunk.content).order_by(
+        DocumentChunk.document_id, DocumentChunk.chunk_index
+    )
+    return [(row[0], row[1]) for row in db.execute(stmt).all()]
+
+
+def retrieval_rows(db: Session, embedding_model: str, doc_types: list[str] | None = None,
+                   chunk_ids: list[str] | None = None, doc_numbers: list[str] | None = None,
+                   articles: list[str] | None = None,
+                   limit: int | None = None,
+                   doc_ids: list[uuid.UUID] | None = None,
+                   title_patterns: list[str] | None = None) -> list[tuple[DocumentChunk, LegalDocument, float]]:
+    """Independent lexical/exact pool with the same visibility filters as vector.
+
+    No vector or document full text is materialized. Callers own their session.
+    doc_ids / title_patterns (LIKE, mọi giá trị đều là bind param) phục vụ tra cứu Điều/Khoản liền kề và theo tên Điều.
+    """
+    stmt = _active_chunks_stmt(DocumentChunk, LegalDocument).where(DocumentChunk.embedding_model == embedding_model)
+    if doc_types:
+        stmt = stmt.where(LegalDocument.doc_type.in_(doc_types))
+    if chunk_ids is not None:
+        stmt = stmt.where(DocumentChunk.id.in_([uuid.UUID(cid) for cid in chunk_ids]))
+    if doc_numbers:
+        # lower() của SQLite chỉ hạ chữ ASCII ("NQ-HĐTP"), nên so thêm đúng dạng gốc
+        stmt = stmt.where(or_(
+            LegalDocument.doc_number.in_(doc_numbers),
+            func.lower(LegalDocument.doc_number).in_([n.lower() for n in doc_numbers]),
+        ))
+    if doc_ids:
+        stmt = stmt.where(DocumentChunk.document_id.in_(doc_ids))
+    if title_patterns:
+        stmt = stmt.where(or_(*[DocumentChunk.content.like(p, escape="\\") for p in title_patterns]))
+    if articles:
+        stmt = stmt.where(DocumentChunk.section_info["dieu"].as_string().in_(articles))
+    stmt = stmt.order_by(DocumentChunk.document_id, DocumentChunk.chunk_index).options(
+        defer(LegalDocument.content), defer(DocumentChunk.embedding),
+    )
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return [(chunk, doc, 1.0) for chunk, doc in db.execute(stmt).all()]
+
+
+def lexical_corpus_fingerprint(
+    db: Session,
+    embedding_model: str,
+    doc_types: list[str] | None = None,
+) -> tuple[int, datetime | None]:
+    """Dấu vân tay (số đoạn, thời điểm tạo mới nhất) theo embedding_model và doc_types để cache BM25."""
+    stmt = _active_chunks_stmt(
+        func.count(DocumentChunk.id), func.max(DocumentChunk.created_at)
+    ).where(DocumentChunk.embedding_model == embedding_model)
+    if doc_types:
+        stmt = stmt.where(LegalDocument.doc_type.in_(doc_types))
+    count, newest = db.execute(stmt).one()
+    return int(count or 0), newest
+
+
+def lexical_corpus(db: Session, embedding_model: str,
+                   doc_types: list[str] | None = None) -> list[tuple[str, str]]:
+    stmt = _active_chunks_stmt(
+        DocumentChunk.id, DocumentChunk.content, LegalDocument.title, LegalDocument.doc_number,
+    ).where(DocumentChunk.embedding_model == embedding_model)
+    if doc_types:
+        stmt = stmt.where(LegalDocument.doc_type.in_(doc_types))
+    stmt = stmt.order_by(DocumentChunk.document_id, DocumentChunk.chunk_index)
+    return [(str(cid), f"{title} {number or ''}\n{content}") for cid, content, title, number in db.execute(stmt).all()]
 
 
 def list_ingest_logs(

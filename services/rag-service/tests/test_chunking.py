@@ -1,5 +1,7 @@
 import unicodedata
 
+import pytest
+
 from app.services.chunking import chunk_legal_text, embedding_text, normalize_text
 
 
@@ -66,8 +68,108 @@ def test_van_ban_khong_co_dieu_cat_theo_doan():
     text = "Đoạn một nói về thủ tục.\n\nĐoạn hai nói về lệ phí.\n\n" + "Đoạn ba. " * 100
     chunks = chunk_legal_text(text, max_chars=300)
     assert chunks
-    assert all(c.section_info == {"chuong": None, "dieu": None, "khoan": None, "diem": None} for c in chunks)
+    assert all(c.section_info == {"chuong": None, "muc": None, "dieu": None, "khoan": None, "diem": None} for c in chunks)
     assert chunks[0].content.startswith("Đoạn một")
+
+
+@pytest.mark.parametrize(
+    "reference_line",
+    [
+        "Mục 1 của Phụ lục này quy định về hồ sơ.",
+        "mục 12 được áp dụng cho trường hợp này.",
+        "MỤC 2 của văn bản này vẫn có hiệu lực.",
+        "Mục 1, Mục 2 của Phụ lục này được áp dụng.",
+        "Mục 1 và Mục 2 quy định về thủ tục.",
+        "Điều 5 của Luật này quy định về hồ sơ.",
+    ],
+)
+def test_cau_tham_chieu_dau_dong_khong_lam_mat_noi_dung_dieu(reference_line):
+    first_article = (
+        "Điều 1. Phạm vi áp dụng\n"
+        "1. Nội dung trước câu tham chiếu.\n"
+        f"{reference_line}\n"
+        "Nội dung tiếp theo vẫn thuộc khoản 1.\n"
+        "2. Nội dung cuối Điều 1."
+    )
+    second_article = "Điều 2. Hiệu lực\nNội dung Điều 2."
+    text = (
+        "Chương I\n"
+        "Mục 3. QUY ĐỊNH CHUNG\n"
+        f"{first_article}\n"
+        f"{second_article}"
+    )
+
+    chunks = chunk_legal_text(text)
+
+    assert [c.section_info["dieu"] for c in chunks] == ["1", "2"]
+    assert [c.content for c in chunks] == [first_article, second_article]
+    assert [c.section_info["muc"] for c in chunks] == ["3", "3"]
+    assert all(c.section_info["chuong"] == "I" for c in chunks)
+
+
+@pytest.mark.parametrize("previous_muc", [None, "3"])
+@pytest.mark.parametrize(
+    "reference_line",
+    [
+        "Mục 1 của Phụ lục này được áp dụng.",
+        "Mục 1.1 của Phụ lục này được áp dụng.",
+        "Mục 2.3",
+        "Mục 2.3 của Phụ lục này được áp dụng.",
+        "Mục 12.34.5 của Phụ lục này được áp dụng.",
+        "  mỤc 2.3 của Phụ lục này được áp dụng.",
+        "Mục 2.",
+        "Mục 2:",
+        "Mục 2.QUY ĐỊNH CHUNG",
+        "Mục 2:QUY ĐỊNH CHUNG",
+    ],
+)
+def test_khong_nham_muc_tham_chieu_la_tieu_de(reference_line, previous_muc):
+    prefix = f"Mục {previous_muc}\n" if previous_muc is not None else ""
+    first_article = (
+        "Điều 1. Quy định\n"
+        f"{reference_line}\n"
+        "Nội dung tiếp theo."
+    )
+    second_article = "Điều 2. Hiệu lực\nNội dung Điều 2."
+
+    chunks = chunk_legal_text(f"{prefix}{first_article}\n{second_article}")
+
+    assert [c.section_info["dieu"] for c in chunks] == ["1", "2"]
+    assert [c.content for c in chunks] == [first_article, second_article]
+    assert [c.section_info["muc"] for c in chunks] == [
+        previous_muc,
+        previous_muc,
+    ]
+
+
+@pytest.mark.parametrize(
+    "muc_heading",
+    [
+        "Mục 2",
+        "Mục 2. QUY ĐỊNH RIÊNG",
+        "Mục 2: QUY ĐỊNH RIÊNG",
+        "Mục 2.\tQUY ĐỊNH RIÊNG",
+        "  MỤC 2 : QUY ĐỊNH RIÊNG  ",
+    ],
+)
+def test_tieu_de_muc_that_ket_thuc_dieu_truoc_va_cap_nhat_metadata(muc_heading):
+    first_article = "Điều 1. Phạm vi\nNội dung Điều 1."
+    second_article = "Điều 2. Thủ tục\nNội dung Điều 2."
+    text = (
+        "Chương I\n"
+        "Mục 1. QUY ĐỊNH CHUNG\n"
+        f"{first_article}\n"
+        f"{muc_heading}\n"
+        "TIÊU ĐỀ MỤC MỚI\n"
+        f"{second_article}"
+    )
+
+    chunks = chunk_legal_text(text)
+
+    assert [c.section_info["dieu"] for c in chunks] == ["1", "2"]
+    assert [c.content for c in chunks] == [first_article, second_article]
+    assert [c.section_info["muc"] for c in chunks] == ["1", "2"]
+    assert all(c.section_info["chuong"] == "I" for c in chunks)
 
 
 def test_van_ban_rong():
@@ -91,4 +193,31 @@ def test_chu_hoa_va_dau_hai_cham():
 def test_embedding_text_them_ten_van_ban(sample_text):
     c = chunk_legal_text(sample_text)[3]
     t = embedding_text("Luật Mẫu", c)
-    assert t.startswith("Luật Mẫu - Chương II\nĐiều 4.")
+    assert t.startswith("[Văn bản: Luật Mẫu > Chương II > Mục 1 > Điều 4]\nĐiều 4.")
+
+
+def test_muc_duoc_ke_thua_va_reset_khi_sang_chuong(sample_text):
+    by_dieu = {c.section_info["dieu"]: c for c in chunk_legal_text(sample_text)}
+    assert by_dieu["1"].section_info["muc"] is None
+    assert by_dieu["3"].section_info["muc"] == "1"
+    assert by_dieu["4"].section_info["muc"] == "1"
+    assert by_dieu["5"].section_info["muc"] == "2"
+    assert by_dieu["6"].section_info["muc"] is None
+    for limit in (250, 300, 400, 2500):
+        chunks = chunk_legal_text(sample_text, max_chars=limit)
+        assert all(c.section_info["muc"] == "1" for c in chunks if c.section_info["dieu"] == "4")
+
+
+def test_embedding_breadcrumb_day_du_va_bo_cap_thieu():
+    from app.schemas.search import SectionInfo
+    from app.services.chunking import Chunk
+
+    chunk = Chunk("Nội dung.", {"chuong": "II", "muc": "1", "dieu": "4", "khoan": "2", "diem": "a"})
+    assert embedding_text("Luật Mẫu", chunk) == (
+        "[Văn bản: Luật Mẫu > Chương II > Mục 1 > Điều 4 > Khoản 2 > Điểm a]\nNội dung."
+    )
+    assert embedding_text("Luật Mẫu", Chunk("Đoạn văn.")) == "[Văn bản: Luật Mẫu]\nĐoạn văn."
+    assert embedding_text("Luật Mẫu", Chunk("Điều 7.", {"dieu": "7", "muc": "  "})) == (
+        "[Văn bản: Luật Mẫu > Điều 7]\nĐiều 7."
+    )
+    assert SectionInfo.model_validate(chunk.section_info).model_dump()["muc"] == "1"

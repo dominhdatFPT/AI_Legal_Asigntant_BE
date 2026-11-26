@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "name": "Phương án sử dụng tầng đất mặt",
-  "code": "DD-008",
-  "procedure_code": "DD-008",
+  "code": "DD-022",
+  "procedure_code": "DD-022",
   "domain": "dat_dai",
   "procedure_id": null,
   "reference_catalog_names": [

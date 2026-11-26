@@ -35,31 +35,19 @@ def set_env(monkeypatch, **values):
     get_settings.cache_clear()
 
 
-class FakeDbapiConnection:
-    """Kết nối DBAPI giả: ghi lại câu lệnh đã chạy, commit và việc đóng cursor."""
+class FakeConnection:
+    """Ghi lại câu lệnh chạy qua SQLAlchemy Connection."""
 
     def __init__(self):
         self.log = []
 
-    def cursor(self):
-        connection = self
-
-        class Cursor:
-            def execute(self, sql):
-                connection.log.append(("execute", sql))
-
-            def close(self):
-                connection.log.append(("close",))
-
-        return Cursor()
-
-    def commit(self):
-        self.log.append(("commit",))
+    def exec_driver_sql(self, sql):
+        self.log.append(sql)
 
 
 @pytest.fixture
 def fake_create_engine(monkeypatch, clean_env):
-    """Thay create_engine và event của database.py: ghi lại tham số tạo engine và các hàm lắng nghe sự kiện connect."""
+    """Ghi lại tham số tạo engine và các listener được đăng ký."""
     seen = {"engine": object(), "calls": [], "listeners": []}
 
     def create(url, **kwargs):
@@ -137,7 +125,7 @@ def test_zero_or_negative_means_no_limit_and_keeps_only_fixed_settings(clean_env
     }
 
 
-def test_zero_command_timeout_registers_no_connect_listener(fake_create_engine, monkeypatch):
+def test_zero_command_timeout_registers_no_begin_listener(fake_create_engine, monkeypatch):
     set_env(monkeypatch, DB_COMMAND_TIMEOUT_SECONDS=0)
 
     database.get_engine()
@@ -178,20 +166,20 @@ def test_engine_created_with_custom_parameters(fake_create_engine, monkeypatch):
         "pool_pre_ping": True, "pool_size": 3, "max_overflow": 2, "pool_recycle": 60,
         "connect_args": {**KEEPALIVE_ARGS, "connect_timeout": 5},
     }
-    connection = FakeDbapiConnection()
-    fake_create_engine["listeners"][0][2](connection, None)
-    assert ("execute", "SET statement_timeout = 7000") in connection.log
+    connection = FakeConnection()
+    fake_create_engine["listeners"][0][2](connection)
+    assert connection.log == ["SET LOCAL statement_timeout = 7000"]
 
 
-def test_statement_timeout_is_set_on_every_new_connection_and_committed(fake_create_engine):
+def test_statement_timeout_is_set_when_each_transaction_begins(fake_create_engine):
     database.get_engine()
 
     [(target, name, listener)] = fake_create_engine["listeners"]
-    assert target is fake_create_engine["engine"] and name == "connect"
-    connection = FakeDbapiConnection()
-    listener(connection, None)
-    # SET trước, rồi đóng cursor, rồi commit (không commit thì rollback khi trả về pool sẽ xoá SET)
-    assert connection.log == [("execute", "SET statement_timeout = 20000"), ("close",), ("commit",)]
+    assert target is fake_create_engine["engine"] and name == "begin"
+    connection = FakeConnection()
+    for _ in range(2):
+        listener(connection)
+    assert connection.log == ["SET LOCAL statement_timeout = 20000"] * 2
 
 
 def test_engine_is_created_once(fake_create_engine):

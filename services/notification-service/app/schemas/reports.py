@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SENSITIVE_CONTEXT_KEYS = {
     "password",
@@ -99,6 +98,9 @@ class AdminRejectRequest(BaseModel):
 
 
 class BroadcastCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    recipient_id: Optional[str] = Field(default=None, max_length=64, description="UUID của người nhận nếu gửi đích danh cá nhân")
+    recipient_ids: Optional[List[str]] = Field(default=None, description="Danh sách UUID của các người nhận cụ thể")
     title: str = Field(..., min_length=5, max_length=150, description="Tiêu đề thông báo hệ thống")
     content: str = Field(..., min_length=10, max_length=4000, description="Nội dung thông báo")
     audience: Literal["all", "citizen", "lawyer", "admin"] = Field(
@@ -107,6 +109,16 @@ class BroadcastCreateRequest(BaseModel):
     )
     priority: Literal["normal", "high", "critical"] = Field(default="normal")
     channels: List[Literal["in_app", "email", "push"]] = Field(default_factory=lambda: ["in_app"])
-    action_url: Optional[str] = Field(default="/", max_length=512)
-    scheduled_at: Optional[datetime] = Field(default=None, description="Thời điểm hẹn giờ phát (NULL = phát ngay lập tức)")
-    expires_at: Optional[datetime] = Field(default=None, description="Thời điểm thông báo hết hạn hiển thị")
+    action_url: Optional[str] = Field(default=None, max_length=512)
+
+    @field_validator("title", "content", mode="before")
+    @classmethod
+    def strip_broadcast_text(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("recipient_ids")
+    @classmethod
+    def dedup_recipient_ids(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        return list(dict.fromkeys(str(r).strip() for r in v if r and str(r).strip()))

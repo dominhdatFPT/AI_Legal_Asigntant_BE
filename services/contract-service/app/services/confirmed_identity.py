@@ -10,6 +10,7 @@ from app.core.config import service_base
 from app.core.errors import ContractError
 from app.schemas.identity_suggestions import ConfirmedProfile
 from app.services.user_gate import unique_object
+from app.core.http import http_client
 
 
 def bad_response():
@@ -34,7 +35,7 @@ class ConfirmedIdentity:
         except ContractError:
             raise unavailable() from None
         try:
-            with httpx.Client(timeout=5, follow_redirects=False, trust_env=False, transport=self.transport) as client:
+            with http_client(self.transport, timeout=5, follow_redirects=False, trust_env=False) as client:
                 with client.stream("GET", base + "/api/v1/documents/identity-profile/me", headers={
                     "Authorization":"Bearer " + token, "X-Request-ID":request_id,
                 }) as response:

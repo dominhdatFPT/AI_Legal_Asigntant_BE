@@ -1,0 +1,261 @@
+x-service: &service
+  pull_policy: never
+  networks: [default]
+  volumes:
+    - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+  depends_on:
+    postgres-e2e: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    rabbitmq-core-events: {condition: service_healthy}
+
+x-env: &env
+  JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
+  INTERNAL_TOKEN: test-internal-token-e2e-strong
+  LAWYER_SERVICE_TOKEN: test-lawyer-token-e2e-strong
+  OUTBOX_ENABLED: "true"
+  OUTBOX_POLL_SECONDS: "0.25"
+  RABBITMQ_URL: amqp://test-e2e:test-e2e@rabbitmq-core-events:5672/
+  REDIS_URL: redis://redis:6379/0
+  CORPUS_VERSION_KEY: legal:corpus_version
+  USER_SERVICE_URL: http://user-service:8000
+  LAWYER_SERVICE_URL: http://lawyer-service:8000
+  PROCEDURE_SERVICE_URL: http://procedure-service:8000
+  CONTRACT_SERVICE_URL: http://contract-service:8000
+  CONSULTATION_SERVICE_URL: http://consultation-service:8000
+  NOTIFICATION_SERVICE_URL: http://notification-service:8000
+  AGENT_SERVICE_URL: http://agent-service:8000
+  RAG_SERVICE_URL: http://rag-service:8000
+  DOCUMENT_SERVICE_URL: http://document-service:8000
+  PROCEDURE_SKIP_DOTENV: "1"
+  LLM_BYPASS: "true"
+  RELEVANCE_CHECK: "false"
+  EMBEDDING_PROVIDER: fake
+  OPENROUTER_API_KEY: ""
+  GEMINI_API_KEY: ""
+
+x-health: &health
+  interval: 2s
+  timeout: 3s
+  retries: 30
+  start_period: 3s
+
+services:
+  postgres-e2e:
+    image: pgvector/pgvector:pg16
+    pull_policy: never
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    tmpfs: [/var/lib/postgresql/data]
+    ports: ["127.0.0.1:55433:5432"]
+    networks:
+      default:
+        aliases: [db.zzzzzzzzzzzzzzzzzzzz.supabase.co]
+      host-access: {}
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/postgres_tls.key:/run/test-tls/server.key:ro
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/postgres_tls.crt:/run/test-tls/server.crt:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        install -d -o postgres -g postgres -m 0700 /tmp/legal-test-tls
+        install -o postgres -g postgres -m 0600 /run/test-tls/server.key /tmp/legal-test-tls/server.key
+        install -o postgres -g postgres -m 0644 /run/test-tls/server.crt /tmp/legal-test-tls/server.crt
+        exec docker-entrypoint.sh postgres -c cluster_name=legal-test-e2e -c max_connections=400 -c ssl=on \
+          -c ssl_cert_file=/tmp/legal-test-tls/server.crt -c ssl_key_file=/tmp/legal-test-tls/server.key
+    healthcheck:
+      <<: *health
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+
+  redis:
+    image: redis:7-alpine
+    pull_policy: never
+    command: ["redis-server", "--maxmemory", "24mb", "--maxmemory-policy", "volatile-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "redis-cli", "ping"]
+
+  rabbitmq-core-events:
+    image: rabbitmq:3-management-alpine
+    pull_policy: never
+    environment:
+      RABBITMQ_DEFAULT_USER: test-e2e
+      RABBITMQ_DEFAULT_PASS: test-e2e
+    networks:
+      default:
+        aliases: [rabbitmq, rabbitmq-core-events]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+
+  gateway:
+    image: nginx:alpine
+    pull_policy: never
+    ports: ["127.0.0.1:18080:80"]
+    networks: [default, host-access]
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      agent-service: {condition: service_healthy}
+      user-service: {condition: service_healthy}
+      lawyer-service: {condition: service_healthy}
+      procedure-service: {condition: service_healthy}
+      rag-service: {condition: service_healthy}
+      contract-service: {condition: service_healthy}
+      document-service: {condition: service_healthy}
+      location-service: {condition: service_healthy}
+      consultation-service: {condition: service_healthy}
+      notification-service: {condition: service_healthy}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+
+  agent-service:
+    <<: *service
+    image: be-agent-service:latest
+    environment:
+      <<: *env
+      AGENT_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/agent_db
+      CACHE_BACKEND: redis
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/agent/health', timeout=2)"]
+
+  user-service:
+    <<: *service
+    image: be-user-service:latest
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_private.pem:/run/keys/jwt_private.pem:ro
+    environment:
+      <<: *env
+      USER_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/user_db
+      RUN_LOGOUT_AUDIT_IN_API: "true"
+      JWT_PRIVATE_KEY_PATH: /run/keys/jwt_private.pem
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/users/health', timeout=2)"]
+
+  lawyer-service:
+    <<: *service
+    image: be-lawyer-service:latest
+    environment:
+      <<: *env
+      LAWYER_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/lawyer_db
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/lawyers/health', timeout=2)"]
+
+  procedure-service:
+    <<: *service
+    image: be-procedure-service:latest
+    environment:
+      <<: *env
+      PROCEDURE_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/procedure_db
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/procedures/health', timeout=2)"]
+
+  rag-service:
+    <<: *service
+    image: be-rag-service:latest
+    environment:
+      <<: *env
+      RAG_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/rag_db
+      RUN_RAG_INDEXING_WORKER_IN_API: "false"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/rag/health', timeout=2)"]
+
+  contract-service:
+    <<: *service
+    image: be-contract-service:latest
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - ./services/contract-service/tests/test_system_pdf_source.py:/app/test_system_pdf_source.py:ro
+    environment:
+      <<: *env
+      CONTRACT_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/contract_db?sslmode=require
+      PROCEDURE_WRITE_MODE: auto
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/contracts/health', timeout=2)"]
+
+  document-service:
+    <<: *service
+    image: be-document-service:latest
+    environment:
+      <<: *env
+      DOCUMENT_DATABASE_URL: postgresql://postgres:postgres@db.zzzzzzzzzzzzzzzzzzzz.supabase.co:5432/document_db?sslmode=require
+      DOCUMENT_SUPABASE_URL: https://zzzzzzzzzzzzzzzzzzzz.supabase.co
+      DOCUMENT_SUPABASE_SERVICE_ROLE_KEY: isolated-e2e-unused-storage-key
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/documents/health', timeout=2)"]
+
+  location-service:
+    <<: *service
+    image: be-location-service:latest
+    environment:
+      <<: *env
+      LOCATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/location_db
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/locations/health', timeout=2)"]
+
+  consultation-service:
+    <<: *service
+    image: be-consultation-service:latest
+    environment:
+      <<: *env
+      CONSULTATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/consultation_db
+      USER_ACTIVE_CACHE_SECONDS: "30"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/consultations/health', timeout=2)"]
+
+  notification-service:
+    <<: *service
+    image: be-notification-service:latest
+    environment:
+      <<: *env
+      NOTIFICATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/notification_db
+      RUN_NOTIFICATION_HUB_IN_API: "false"
+      RUN_REPORT_ENRICHMENT_IN_API: "false"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/notifications/health', timeout=2)"]
+
+  rag-worker:
+    <<: *service
+    image: be-rag-worker:latest
+    command: ["python", "-m", "app.rag_indexing_worker"]
+    environment:
+      <<: *env
+      RAG_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/rag_db
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "/run/test/worker_health.py", "q.rag.indexing"]
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - ./tests_3layer/layer3_docker_e2e/worker_health.py:/run/test/worker_health.py:ro
+
+  notification-worker:
+    <<: *service
+    image: be-notification-worker:latest
+    command: ["python", "-m", "app.notification_event_worker"]
+    environment:
+      <<: *env
+      NOTIFICATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/notification_db
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "/run/test/worker_health.py", "q.notification.events"]
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - ./tests_3layer/layer3_docker_e2e/worker_health.py:/run/test/worker_health.py:ro
+
+networks:
+  default:
+    internal: true
+  host-access: {}

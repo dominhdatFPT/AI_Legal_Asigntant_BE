@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from . import revocation
+from .context import sanitize_request_id
 from .core import ACCESS_COOKIE, FORBIDDEN, AuthError, CurrentUser, decode_access_token, extract_token
 
 
@@ -35,7 +36,9 @@ def require_role(*roles: str):
 
 
 async def _auth_error_response(request: Request, exc: AuthHTTPException) -> JSONResponse:
-    request_id = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+    request_id = (sanitize_request_id(getattr(request.state, "request_id", None))
+                  or sanitize_request_id(request.headers.get("X-Request-ID"))
+                  or f"req-{uuid.uuid4()}")
     headers = {**(exc.headers or {}), "X-Request-ID": request_id}
     return JSONResponse(
         status_code=exc.status_code,

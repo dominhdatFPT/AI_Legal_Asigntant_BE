@@ -12,8 +12,14 @@ OWNER = "11111111-1111-4111-8111-111111111111"
 
 class TestRecordPersistence(unittest.TestCase):
     def test_01_land_submit_and_retrieve(self):
+        from unittest.mock import patch
+        from app.services import profile_binding
+        load = profile_binding.load_profile_values
+        patcher = patch.object(profile_binding, "load_profile_values", side_effect=lambda user_id: {**load(user_id), "profile.full_name": "Nguyễn Văn A", "profile.cccd_number": "012345678901"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         form_data = valid_form(
-            "DD-001",
+            "DD-002",
             applicant_name="Nguyễn Văn A",
             applicant_id_number="012345678901",
             applicant_phone="0901234567",
@@ -25,14 +31,14 @@ class TestRecordPersistence(unittest.TestCase):
             land_use_origin="Nhận chuyển nhượng quyền sử dụng đất",
         )
         res = ProcedureService.submit_application(
-            procedure_code="DD-001",
+            procedure_code="DD-002",
             user_id=OWNER,
             status="draft",
             form_data=form_data,
             extra_data={"note": "Test save land record"},
         )
         self.assertIn("id", res)
-        self.assertEqual(res["procedure_code"], "DD-001")
+        self.assertEqual(res["procedure_code"], "DD-002")
         self.assertEqual(res["applicant_name"], "Nguyễn Văn A")
         self.assertEqual(res["domain"], "land")
         self.assertEqual(res["target_table"], "land_procedure_records")
@@ -47,6 +53,12 @@ class TestRecordPersistence(unittest.TestCase):
         print(f"\n[PASS] Saved & Retrieved Land record ID: {record_id}")
 
     def test_02_business_submit_and_retrieve(self):
+        from unittest.mock import patch
+        from app.services import profile_binding
+        load = profile_binding.load_profile_values
+        patcher = patch.object(profile_binding, "load_profile_values", side_effect=lambda user_id: {**load(user_id), "profile.full_name": "Trần Thị B", "profile.cccd_number": "098765432109"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         form_data = valid_form(
             "HKD-001",
             applicant_name="Trần Thị B",
@@ -81,17 +93,17 @@ class TestRecordPersistence(unittest.TestCase):
         print(f"\n[PASS] Saved & Retrieved Business record ID: {record_id}")
 
     def test_03_lookup_by_code_and_short_id(self):
+        from unittest.mock import patch
+        from app.services import profile_binding
+        load = profile_binding.load_profile_values
+        patcher = patch.object(profile_binding, "load_profile_values", side_effect=lambda user_id: {**load(user_id), "profile.full_name": "Bùi Võ Đức Trọng", "profile.cccd_number": "012345678901"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         form_data = valid_form(
             "DD-001",
             applicant_name="Bùi Võ Đức Trọng",
-            applicant_id_number="012345678901",
             applicant_phone="0901234567",
-            plot_number="128",
-            map_sheet_number="14",
-            land_address="Số 10 Đường ABC, Phường 1, Quận 1, TP.HCM",
-            land_area=120.5,
-            land_use_purpose="Đất ở tại đô thị (ODT)",
-            land_use_origin="Nhận chuyển nhượng quyền sử dụng đất",
+            change_content="Chuyển nhượng quyền sử dụng đất",
         )
         res = ProcedureService.submit_application(
             procedure_code="DD-001",
@@ -108,7 +120,7 @@ class TestRecordPersistence(unittest.TestCase):
         self.assertIsNotNone(lookup1)
         self.assertEqual(lookup1["application_code"], composite_code)
         self.assertEqual(lookup1["record"]["applicant_name"], "Bùi Võ Đức Trọng")
-        self.assertEqual(lookup1["record"]["form_data"]["plot_number"], "128")
+        self.assertEqual(lookup1["record"]["form_data"]["change_content"], "Chuyển nhượng quyền sử dụng đất")
         self.assertIsNotNone(lookup1["schema"])
 
         # 2. Lookup bằng tiền tố 8 ký tự

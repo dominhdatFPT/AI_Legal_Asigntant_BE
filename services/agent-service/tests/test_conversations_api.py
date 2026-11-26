@@ -383,7 +383,15 @@ def test_three_documents_are_accepted(client, fake_documents, fake_agent):
     assert r.status_code == 200
 
 
-@pytest.mark.parametrize("content", ["", "   ", "x" * 2001])
+def test_send_message_qua_dai_tra_413(client, fake_agent):
+    conversation_id = create(client)
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "x" * 20001})
+    assert r.status_code == 413
+    assert r.json()["error"]["code"] == "QUESTION_TOO_LONG"
+    assert fake_agent == []
+
+
+@pytest.mark.parametrize("content", ["", "   "])
 def test_send_message_validation(client, fake_agent, content):
     conversation_id = create(client)
     r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": content})
@@ -433,7 +441,7 @@ def streaming(monkeypatch, chunk):
         state["searches"].append(query)
         return [chunk]
 
-    async def fake_stream(system_prompt, history, user_content, info=None):
+    async def fake_stream(system_prompt, history, user_content, info=None, **options):
         state["stream_calls"].append({"system_prompt": system_prompt, "history": history, "user_content": user_content})
         for i, part in enumerate(state["parts"]):
             if state["fail_after"] == i:
@@ -453,6 +461,34 @@ def streaming(monkeypatch, chunk):
 
 def saved_messages(client, conversation_id):
     return client.get(f"{BASE}/{conversation_id}").json()["data"]["messages"]
+
+
+def test_stream_passes_profile_options_and_persists_truncation(client, monkeypatch):
+    seen = {}
+
+    async def prepare(user_content, history, request_id=None):
+        return responder.LLMCall(
+            "complex", [], history, user_content, request_id, 0, 0,
+            llm_options={"max_output_tokens": 6000, "timeout_seconds": 3, "max_retries": 0},
+            auxiliary_tokens=12,
+        )
+
+    async def stream(system_prompt, history, user_content, info=None, **options):
+        seen.update(options)
+        yield "partial answer"
+        info.update(tokens=7, model="stream-model", truncated=True, finish_reason="length")
+
+    monkeypatch.setattr(agent, "prepare", prepare)
+    monkeypatch.setattr(llm_client, "generate_stream", stream)
+    conversation_id = create(client)
+    response = client.post(stream_url(conversation_id), json={"content": "Tư vấn mua nhà"})
+    events = parse_sse(response.text)
+    assert events[-1][0] == "done"
+    metadata = events[-1][1]["assistant_message"]["metadata"]
+    assert seen == {"max_output_tokens": 6000, "timeout_seconds": 3, "max_retries": 0}
+    assert metadata["truncated"] and metadata["finish_reason"] == "length"
+    assert metadata["tokens_used"] == 19
+    assert saved_messages(client, conversation_id)[-1]["metadata"] == metadata
 
 
 def test_stream_emits_deltas_then_done_matching_saved_messages(client, streaming, chunk):
@@ -588,6 +624,7 @@ def test_stream_out_of_scope_is_single_delta_without_answering_llm(client, strea
     assert events[0][1] == {"text": prompts.OUT_OF_SCOPE_ANSWER}
     assert events[1][1]["assistant_message"]["metadata"] == {
         "rag_chunk_ids": [], "model": "grader-model", "tokens_used": 9, "type": "out_of_scope",
+        "quota_exempt": True, "quota_exemption_reason": "out_of_scope",
     }
     assert streaming["stream_calls"] == []
 
@@ -712,80 +749,6 @@ def test_old_endpoint_unchanged_while_stream_exists(client, fake_agent):
     assert r.json()["data"]["assistant_message"]["content"] == AI_RESULT["content"]
 
 
-# ── Cache câu trả lời ở endpoint stream (ANSWER_CACHE_ENABLED) ────────────────
-
-def enable_answer_cache(monkeypatch):
-    from app.core.config import get_settings
-
-    monkeypatch.setenv("ANSWER_CACHE_ENABLED", "true")
-    get_settings.cache_clear()
-    responder.clear_answer_cache()
-
-
-def test_stream_answer_cache_second_conversation_gets_one_delta_without_llm(client, streaming, monkeypatch, chunk):
-    enable_answer_cache(monkeypatch)
-    first_id, second_id = create(client), create(client)
-
-    first = parse_sse(client.post(stream_url(first_id), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-    second = parse_sse(client.post(stream_url(second_id), json={"content": "  sang TÊN sổ đỏ cần gì ?"}).text)
-
-    assert [n for n, _ in first] == ["delta", "delta", "delta", "done"]
-    assert [n for n, _ in second] == ["delta", "done"]
-    assert second[0][1]["text"] == "".join(STREAM_PARTS)
-    assert len(streaming["stream_calls"]) == 1 and len(streaming["searches"]) == 1
-    done = second[-1][1]
-    assert done["assistant_message"]["content"] == "".join(STREAM_PARTS)
-    assert done["assistant_message"]["metadata"] == {
-        "rag_chunk_ids": [chunk["id"]], "model": "stream-model", "tokens_used": 0, "cache_hit": True,
-    }
-    # lượt trúng cache vẫn được lưu vào hội thoại mới như bình thường
-    saved = saved_messages(client, second_id)
-    assert [m["role"] for m in saved] == ["user", "assistant"] and saved[1] == done["assistant_message"]
-
-
-def test_stream_answer_cache_follow_up_in_same_conversation_is_not_cached(client, streaming, monkeypatch):
-    enable_answer_cache(monkeypatch)
-    conversation_id = create(client)
-
-    client.post(stream_url(conversation_id), json={"content": "Sang tên sổ đỏ cần gì?"})
-    again = parse_sse(client.post(stream_url(conversation_id), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-
-    assert [n for n, _ in again] == ["delta", "delta", "delta", "done"]  # có lịch sử: gọi LLM thật
-    assert len(streaming["stream_calls"]) == 2
-
-
-def test_stream_answer_cache_broken_stream_is_not_stored(client, streaming, monkeypatch):
-    enable_answer_cache(monkeypatch)
-    streaming["fail_after"] = 1
-    broken = parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-    assert broken[-1][0] == "error"
-    assert len(responder._get_answer_cache()) == 0
-
-    streaming["fail_after"] = None
-    ok = parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-
-    assert ok[-1][0] == "done" and len(streaming["stream_calls"]) == 2
-
-
-def test_send_message_and_stream_share_the_answer_cache(client, streaming, monkeypatch):
-    enable_answer_cache(monkeypatch)
-    parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-
-    r = client.post(f"{BASE}/{create(client)}/messages", json={"content": "sang tên sổ đỏ cần gì?"})
-
-    assert r.status_code == 200
-    message = r.json()["data"]["assistant_message"]
-    assert message["content"] == "".join(STREAM_PARTS)
-    assert message["metadata"]["cache_hit"] is True and message["metadata"]["tokens_used"] == 0
-    assert len(streaming["stream_calls"]) == 1 and len(streaming["searches"]) == 1
-
-
-def test_stream_answer_cache_off_by_default(client, streaming):
-    for _ in range(2):
-        parse_sse(client.post(stream_url(create(client)), json={"content": "Sang tên sổ đỏ cần gì?"}).text)
-    assert len(streaming["stream_calls"]) == 2 and len(streaming["searches"]) == 2
-
-
 # ---------- Kịch bản hội thoại: GET /conversations/{id}/transcript ----------
 
 def seed_messages(db, conversation_id, items, start=datetime(2026, 10, 7, 1, 0, 0, tzinfo=timezone.utc)):
@@ -838,7 +801,7 @@ def test_transcript_json_two_turns_in_order(client, db):
 
 def test_transcript_not_limited_by_history_limit(client, db):
     conversation_id = create(client)
-    items = [(role, f"{role} {i}") for i in range(1, 11) for role in ("user", "assistant")]  # 20 tin > HISTORY_LIMIT
+    items = [(role, f"{role} {i}") for i in range(1, 11) for role in ("user", "assistant")]  # 20 tin > HISTORY_MAX_MESSAGES (12)
     seed_messages(db, conversation_id, items)
 
     data = client.get(transcript_url(conversation_id)).json()["data"]
@@ -1038,3 +1001,41 @@ def test_transcript_exactly_500_messages_is_not_truncated(client, db):
     data = client.get(transcript_url(conversation_id)).json()["data"]
 
     assert data["truncated"] is False and data["total_messages"] == 500 and len(data["turns"]) == 250
+
+
+def test_send_message_deleted_mid_flight_returns_404_and_does_not_resurrect(client, db, monkeypatch):
+    conversation_id = create(client, "Hội thoại sắp xóa")
+
+    async def process_and_delete(user_content, history, request_id=None, documents=None):
+        existing = repo.get_conversation(db, uuid.UUID(conversation_id))
+        assert existing is not None
+        repo.delete_conversation(db, existing)
+        return AI_RESULT
+
+    monkeypatch.setattr(agent, "process_message", process_and_delete)
+
+    r = client.post(f"{BASE}/{conversation_id}/messages", json={"content": "Tiếp tục hỏi"})
+
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+    assert repo.get_conversation(db, uuid.UUID(conversation_id)) is None
+
+
+def test_stream_deleted_mid_flight_emits_not_found_and_does_not_resurrect(client, db, streaming, monkeypatch):
+    conversation_id = create(client, "Hội thoại stream bị xóa")
+    original_stream = llm_client.generate_stream
+
+    async def stream_and_delete(*args, **kwargs):
+        async for chunk_text in original_stream(*args, **kwargs):
+            yield chunk_text
+        existing = repo.get_conversation(db, uuid.UUID(conversation_id))
+        if existing is not None:
+            repo.delete_conversation(db, existing)
+
+    monkeypatch.setattr(llm_client, "generate_stream", stream_and_delete)
+
+    events = parse_sse(client.post(stream_url(conversation_id), json={"content": "Tiếp tục hỏi"}).text)
+
+    assert events[-1][0] == "error"
+    assert events[-1][1]["code"] == "CONVERSATION_NOT_FOUND"
+    assert repo.get_conversation(db, uuid.UUID(conversation_id)) is None

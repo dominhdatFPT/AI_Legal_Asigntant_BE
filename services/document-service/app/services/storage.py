@@ -8,6 +8,7 @@ import httpx
 from app.core.config import Settings
 from app.core.errors import DocumentError
 from app.core.downloads import download_filename
+from app.core.http import http_client
 
 MIME_TYPES = {"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
               "image/jpeg", "image/png"}
@@ -25,8 +26,8 @@ class Storage:
         if media_type:
             headers["Content-Type"] = media_type
         try:
-            with httpx.Client(timeout=self.settings.timeout_seconds, transport=self.transport,
-                              follow_redirects=False, trust_env=False) as client:
+            with http_client(self.transport, timeout=self.settings.timeout_seconds,
+                             follow_redirects=False, trust_env=False) as client:
                 response = client.request(method, self.settings.supabase_url + "/storage/v1" + path,
                                           content=content, json=json, headers=headers)
                 response.raise_for_status()
@@ -109,8 +110,8 @@ class Storage:
         if not self.settings.storage_key.startswith("sb_secret_"):
             headers["Authorization"] = f"Bearer {self.settings.storage_key}"
         try:
-            with httpx.Client(timeout=self.settings.timeout_seconds, transport=self.transport,
-                              follow_redirects=False, trust_env=False) as client:
+            with http_client(self.transport, timeout=self.settings.timeout_seconds,
+                             follow_redirects=False, trust_env=False) as client:
                 with client.stream("GET", self.settings.supabase_url + "/storage/v1/object/authenticated/" + path,
                                    headers=headers) as response:
                     response.raise_for_status()
@@ -148,8 +149,8 @@ class Storage:
         if not self.settings.storage_key.startswith("sb_secret_"):
             headers["Authorization"] = f"Bearer {self.settings.storage_key}"
         try:
-            with httpx.Client(timeout=self.settings.timeout_seconds, transport=self.transport,
-                              follow_redirects=False, trust_env=False) as client:
+            with http_client(self.transport, timeout=self.settings.timeout_seconds,
+                             follow_redirects=False, trust_env=False) as client:
                 response = client.get(self.settings.supabase_url + "/storage/v1/bucket/"
                                       + quote(self.settings.storage_bucket, safe=""), headers=headers)
                 response.raise_for_status()

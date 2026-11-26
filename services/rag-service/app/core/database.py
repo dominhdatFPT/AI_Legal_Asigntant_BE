@@ -1,3 +1,4 @@
+import threading
 from collections.abc import Iterator
 
 from sqlalchemy import Engine, create_engine, event
@@ -12,6 +13,7 @@ class Base(DeclarativeBase):
 
 _engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
+_engine_lock = threading.Lock()
 
 
 def database_url() -> str:
@@ -57,33 +59,27 @@ def engine_options(url: str | None = None) -> dict:
 
 
 def _apply_statement_timeout(engine: Engine, seconds: int) -> None:
-    """Đặt statement_timeout cho mỗi kết nối mới: truy vấn quá giờ bị server huỷ, psycopg ném QueryCanceled, SQLAlchemy đổi
-    thành OperationalError (một SQLAlchemyError) nên đi qua đường xử lý lỗi DB sẵn có (503). Dùng câu SET sau khi kết nối
-    thay vì tham số `options` lúc mở kết nối, vì pooler (pgbouncer, Supavisor) có thể từ chối tham số khởi động lạ."""
+    """Giới hạn thời gian truy vấn trong từng giao dịch PostgreSQL."""
     if seconds <= 0:
         return
     millis = int(seconds) * 1000
 
-    @event.listens_for(engine, "connect")
-    def _set_statement_timeout(dbapi_connection, _connection_record):
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute(f"SET statement_timeout = {millis}")
-        finally:
-            cursor.close()
-        dbapi_connection.commit()  # không commit thì lần rollback khi trả kết nối về pool sẽ xoá SET
+    @event.listens_for(engine, "begin")
+    def _set_statement_timeout(conn):
+        conn.exec_driver_sql(f"SET LOCAL statement_timeout = {millis}")
 
 
 def get_engine() -> Engine:
     global _engine, _session_factory
     if _engine is None:
-        url = database_url()
-        if url.startswith("sqlite"):
-            _engine = create_engine(url, **engine_options(url))
-        else:
-            _engine = create_engine(url, **engine_options())
-            _apply_statement_timeout(_engine, get_settings().db_command_timeout_seconds)
-        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
+        with _engine_lock:
+            if _engine is None:
+                url = database_url()
+                engine = create_engine(url, **engine_options(url))
+                if not url.startswith("sqlite"):
+                    _apply_statement_timeout(engine, get_settings().db_command_timeout_seconds)
+                _session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+                _engine = engine  # Publish only after the session factory and engine hooks are ready.
     return _engine
 
 

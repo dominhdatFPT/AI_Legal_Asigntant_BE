@@ -1,26 +1,17 @@
 import os
 import sys
-import requests
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sqlalchemy import text
+from app.repositories.procedure_repository import db_connection
+from app.core.catalog_cache import catalog_cache
 
 # Base directory
 SERVICE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BIZ_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục kinh doanh")
 LAND_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục đất đai")
 PREVIEW_DIR = os.path.join(SERVICE_DIR, "database", "form_templates_preview")
-
-SUPABASE_URL = "https://qqwuhiymixomwrdunfkz.supabase.co"
-SUPABASE_ANON_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxd3VoaXltaXhvbXdyZHVuZmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MzgxNzAsImV4cCI6MjEwNzAxNDE3MH0."
-    "SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA"
-)
-
-HEADERS = {
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "resolution=merge-duplicates"
-}
 
 # Template definitions mapping
 TEMPLATE_ENTRIES = [
@@ -502,9 +493,18 @@ TEMPLATE_ENTRIES = [
     },
 ]
 
+def _upsert_statement(payload):
+    columns = list(payload)
+    updates = [f"{column} = EXCLUDED.{column}" for column in columns if column not in ("domain", "file_name")]
+    return text(
+        f"INSERT INTO public.form_templates ({', '.join(columns)}) "
+        f"VALUES ({', '.join(':' + column for column in columns)}) "
+        f"ON CONFLICT (domain, file_name) DO UPDATE SET {', '.join(updates)}"
+    )
+
+
 def seed_templates():
     print(f"Bắt đầu nạp {len(TEMPLATE_ENTRIES)} biểu mẫu vào database Supabase...")
-    rest_url = f"{SUPABASE_URL}/rest/v1/form_templates"
     
     success_count = 0
     for idx, entry in enumerate(TEMPLATE_ENTRIES, 1):
@@ -519,7 +519,6 @@ def seed_templates():
             raw_bytes = f.read()
             
         file_size = len(raw_bytes)
-        hex_data = "\\x" + raw_bytes.hex()
         
         payload = {
             "domain": entry["domain"],
@@ -530,35 +529,16 @@ def seed_templates():
             "format": entry["format"],
             "media_type": entry["media_type"],
             "file_size": file_size,
-            "file_data": hex_data,
+            "file_data": raw_bytes,
             "order_index": entry["order_index"],
             "is_active": True,
         }
         
-        # Check if exists by (domain, file_name)
-        check_url = f"{rest_url}?domain=eq.{entry['domain']}&file_name=eq.{requests.utils.quote(entry['file_name'])}&select=id"
-        check_res = requests.get(check_url, headers=HEADERS)
-        existing = check_res.json() if check_res.ok else []
-        
-        if existing:
-            # Update existing
-            rec_id = existing[0]["id"]
-            update_url = f"{rest_url}?id=eq.{rec_id}"
-            res = requests.patch(update_url, headers=HEADERS, json=payload)
-            if res.ok:
-                print(f"[{idx}/{len(TEMPLATE_ENTRIES)}] ĐÃ CẬP NHẬT: [{entry['procedure_code']}] {entry['name']} ({file_size:,} bytes)")
-                success_count += 1
-            else:
-                print(f"[{idx}/{len(TEMPLATE_ENTRIES)}] LỖI UPDATE: {res.status_code} - {res.text[:150]}")
-        else:
-            # Insert new
-            res = requests.post(rest_url, headers=HEADERS, json=payload)
-            if res.status_code in (200, 201):
-                print(f"[{idx}/{len(TEMPLATE_ENTRIES)}] ĐÃ NẠP MỚI: [{entry['procedure_code']}] {entry['name']} ({file_size:,} bytes)")
-                success_count += 1
-            else:
-                print(f"[{idx}/{len(TEMPLATE_ENTRIES)}] LỖI INSERT: {res.status_code} - {res.text[:150]}")
-                
+        with db_connection(write=True) as conn:
+            conn.execute(_upsert_statement(payload), payload)
+        success_count += 1
+
+    catalog_cache.invalidate("templates")
     print(f"\n HOÀN TẤT: Đã lưu thành công {success_count}/{len(TEMPLATE_ENTRIES)} biểu mẫu vào Database!")
 
 if __name__ == "__main__":

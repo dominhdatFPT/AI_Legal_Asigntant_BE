@@ -76,10 +76,13 @@ def test_gemini_thu_lai_khi_429_roi_thanh_cong():
 
 
 def test_gemini_query_het_luot_thu_thi_bao_loi():
-    e, models, sleeps = _embedder(fail=[429, 429, 429])
+    # Online retry là cấu hình (EMBEDDING_ONLINE_MAX_RETRIES); mặc định 0 xem test_rag_precision_and_embedding_budget.py
+    client = FakeClient(fail=[429, 429, 429])
+    sleeps = []
+    e = GeminiEmbedder(api_key="", client=client, batch_size=2, sleep=sleeps.append, online_max_retries=2)
     with pytest.raises(EmbeddingError):
         e.embed_query("x")
-    assert sleeps == [1, 2]
+    assert sleeps == [1, 2] and len(client.models.calls) == 3
 
 
 def test_gemini_loi_400_khong_thu_lai():

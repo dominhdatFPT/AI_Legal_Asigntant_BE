@@ -61,6 +61,12 @@ class CreateUserRequest(BaseModel):
         return value.lower()
 
 
+class UserLookupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+
+
 class InternalChangeRoleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

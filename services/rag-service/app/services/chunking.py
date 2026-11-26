@@ -16,11 +16,17 @@ import unicodedata
 from dataclasses import dataclass, field
 
 DEFAULT_MAX_CHARS = 2500  # ~ 600–900 token tiếng Việt, dưới giới hạn 2048 token của gemini-embedding-001
+EMBEDDING_FORMAT_VERSION = "v2_breadcrumb"
 
 # "Chương I", "CHƯƠNG II", "Chương 3"
 _CHUONG = re.compile(r"^\s*chương\s+([ivxlcdm]+|\d+)\b", re.IGNORECASE)
-# "Mục 1. ..." (nhóm Điều trong một Chương) — không lưu, chỉ để không bị dính vào Điều trước
-_MUC = re.compile(r"^\s*mục\s+\d+\b", re.IGNORECASE)
+# "Mục 1", "Mục 1. TÊN MỤC" hoặc "Mục 1: TÊN MỤC".
+# Sau dấu phân cách bắt buộc có khoảng trắng và tên Mục.
+# Không nhận tham chiếu "Mục 1 của..." hoặc số phân cấp "Mục 1.1...".
+_MUC = re.compile(
+    r"^\s*mục\s+(\d+)(?:\s*[.:]\s+\S.*)?\s*$",
+    re.IGNORECASE,
+)
 # "Điều 188. Tên điều" / "Điều 10a: ..." — bắt buộc có dấu . hoặc : sau số
 # để không nhầm câu kiểu "Điều 5 của Luật này quy định..."
 _DIEU = re.compile(r"^\s*điều\s+(\d+[a-zđ]?)\s*[.:]\s*(.*)$", re.IGNORECASE)
@@ -33,12 +39,13 @@ _DIEM = re.compile(r"^\s*([a-zđ])\)\s+\S")
 @dataclass
 class Chunk:
     content: str
-    section_info: dict = field(default_factory=dict)  # {"chuong", "dieu", "khoan", "diem"}
+    section_info: dict = field(default_factory=dict)  # {"chuong", "muc", "dieu", "khoan", "diem"}
 
 
 @dataclass
 class _Article:
     chuong: str | None
+    muc: str | None
     dieu: str
     heading_line: str  # "Điều 188. Điều kiện thực hiện..."
     body: list[str]
@@ -57,26 +64,30 @@ def normalize_text(text: str) -> str:
     return "\n".join(out).strip()
 
 
-def _info(chuong=None, dieu=None, khoan=None, diem=None) -> dict:
-    return {"chuong": chuong, "dieu": dieu, "khoan": khoan, "diem": diem}
+def _info(chuong=None, dieu=None, khoan=None, diem=None, *, muc=None) -> dict:
+    return {"chuong": chuong, "muc": muc, "dieu": dieu, "khoan": khoan, "diem": diem}
 
 
 def _split_articles(lines: list[str]) -> list[_Article]:
     articles: list[_Article] = []
     chuong: str | None = None
+    muc: str | None = None
     current: _Article | None = None
     for line in lines:
         m_chuong = _CHUONG.match(line)
         if m_chuong:
             chuong = m_chuong.group(1).upper()
+            muc = None
             current = None  # tên chương không thuộc Điều nào
             continue
-        if _MUC.match(line):
+        m_muc = _MUC.match(line)
+        if m_muc:
+            muc = m_muc.group(1)
             current = None
             continue
         m_dieu = _DIEU.match(line)
         if m_dieu:
-            current = _Article(chuong, m_dieu.group(1), line.strip(), [])
+            current = _Article(chuong, muc, m_dieu.group(1), line.strip(), [])
             articles.append(current)
             continue
         if current is not None:
@@ -135,32 +146,32 @@ def _hard_split(prefix: str, lines: list[str], max_chars: int) -> list[str]:
 def _chunk_article(a: _Article, max_chars: int) -> list[Chunk]:
     whole = _join(a.heading_line, a.body)
     if len(whole) <= max_chars:
-        return [Chunk(whole, _info(a.chuong, a.dieu))]
+        return [Chunk(whole, _info(a.chuong, a.dieu, muc=a.muc))]
 
     intro, khoans = _group_by(a.body, _KHOAN)
     if not khoans:
-        return [Chunk(t, _info(a.chuong, a.dieu)) for t in _hard_split(_join(a.heading_line), a.body, max_chars)]
+        return [Chunk(t, _info(a.chuong, a.dieu, muc=a.muc)) for t in _hard_split(_join(a.heading_line), a.body, max_chars)]
 
     header = _join(a.heading_line, intro)  # câu mở đầu của Điều (nếu có) đi kèm mọi khoản
     chunks: list[Chunk] = []
     for khoan_no, khoan_lines in khoans:
         text = _join(header, khoan_lines)
         if len(text) <= max_chars:
-            chunks.append(Chunk(text, _info(a.chuong, a.dieu, khoan_no)))
+            chunks.append(Chunk(text, _info(a.chuong, a.dieu, khoan_no, muc=a.muc)))
             continue
         k_intro, diems = _group_by(khoan_lines, _DIEM)
         k_header = _join(header, k_intro)  # "1. ... khi có các điều kiện sau đây:"
         if not diems or len(k_header) > max_chars // 2:
             for t in _hard_split(header, khoan_lines, max_chars):
-                chunks.append(Chunk(t, _info(a.chuong, a.dieu, khoan_no)))
+                chunks.append(Chunk(t, _info(a.chuong, a.dieu, khoan_no, muc=a.muc)))
             continue
         for diem_ch, diem_lines in diems:
             text = _join(k_header, diem_lines)
             if len(text) <= max_chars:
-                chunks.append(Chunk(text, _info(a.chuong, a.dieu, khoan_no, diem_ch)))
+                chunks.append(Chunk(text, _info(a.chuong, a.dieu, khoan_no, diem_ch, muc=a.muc)))
             else:
                 for t in _hard_split(k_header, diem_lines, max_chars):
-                    chunks.append(Chunk(t, _info(a.chuong, a.dieu, khoan_no, diem_ch)))
+                    chunks.append(Chunk(t, _info(a.chuong, a.dieu, khoan_no, diem_ch, muc=a.muc)))
     return chunks
 
 
@@ -199,8 +210,51 @@ def chunk_legal_text(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[Chun
     return chunks
 
 
+def article_title(content: str) -> str | None:
+    """Tên Điều từ dòng 'Điều 328. Đặt cọc' ở đầu chunk (mọi chunk con đều mang dòng này)."""
+    for line in content.split("\n", 3)[:3]:
+        m = _DIEU.match(line)
+        if m:
+            return m.group(2).strip() or None
+    return None
+
+
+def has_clause(content: str, khoan: str, diem: str | None = None) -> bool:
+    """Chunk có chứa Khoản `khoan` (và Điểm `diem` nếu có) trong NỘI DUNG không. Điều ngắn được lưu nguyên điều
+    (section_info không có khoản) nên tra khoản phải đọc chính văn bản của chunk cha."""
+    in_khoan = False
+    for line in content.split("\n"):
+        m_khoan = _KHOAN.match(line)
+        if m_khoan:
+            in_khoan = m_khoan.group(1) == str(khoan)
+            if in_khoan and diem is None:
+                return True
+            continue
+        if in_khoan and diem is not None:
+            m_diem = _DIEM.match(line)
+            if m_diem and m_diem.group(1) == str(diem).lower():
+                return True
+    return False
+
+
 def embedding_text(doc_title: str, chunk: Chunk) -> str:
-    """Chuỗi gửi đi tạo embedding: thêm tên văn bản + chương để vector mang đủ ngữ cảnh."""
-    chuong = chunk.section_info.get("chuong")
-    head = f"{doc_title} - Chương {chuong}" if chuong else doc_title
-    return f"{head}\n{chunk.content}"
+    """Thêm breadcrumb của các cấp có metadata, giữ nguyên nội dung chunk."""
+    parts = [f"Văn bản: {doc_title}"]
+    for key, label in (("chuong", "Chương"), ("muc", "Mục"), ("dieu", "Điều"),
+                       ("khoan", "Khoản"), ("diem", "Điểm")):
+        value = chunk.section_info.get(key)
+        if value is not None and str(value).strip():
+            parts.append(f"{label} {str(value).strip()}")
+    return f"[{' > '.join(parts)}]\n{chunk.content}"
+
+
+def embedded_chunk(chunk: Chunk, vector: list[float]) -> dict:
+    """Payload lưu vector đã tạo bằng embedding_text của phiên bản hiện tại."""
+    return {
+        "content": chunk.content,
+        "section_info": {
+            **chunk.section_info,
+            "_embedding_format_version": EMBEDDING_FORMAT_VERSION,
+        },
+        "embedding": vector,
+    }

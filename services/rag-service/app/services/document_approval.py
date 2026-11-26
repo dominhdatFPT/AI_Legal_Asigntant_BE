@@ -7,17 +7,19 @@ Giả định rag-service chạy MỘT tiến trình: trạng thái processing c
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import text as sql_text
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from common_auth.events import rabbitmq_url
 from app.core.database import get_session
 from app.models import LegalDocument
 from app.repositories import document as document_repo
-from app.services import ingest_log
+from app.services import corpus_version, ingest_log
 from app.services.chunking import chunk_legal_text, embedding_text
+from app.services.chunking import embedded_chunk
 from app.services.embedding import EmbeddingError, get_embedder
 from app.services.ingest import EmptyDocumentError
 
@@ -106,7 +108,7 @@ def approve_document_background(
         document_repo.replace_chunks(
             db,
             doc,
-            [{"content": c.content, "section_info": c.section_info, "embedding": v} for c, v in zip(chunks, vectors)],
+            [embedded_chunk(c, v) for c, v in zip(chunks, vectors)],
             embedding_model=embedder.model_name,
         )
         doc.status = "active"
@@ -125,6 +127,7 @@ def approve_document_background(
         )
     else:
         logger.info("Duyệt xong văn bản %s: %d chunk, %.2fs", document_id, chunk_count, time.perf_counter() - started)
+        corpus_version.bump_corpus_version()  # đã commit xong: cache tìm luật/câu trả lời của agent-service tự mất hiệu lực; không ném lỗi
         ingest_log.record(
             "approve_done", actor_user_id=actor_user_id, actor_role=actor_role, document_id=document_id,
             doc_number=doc_number, title=title, chunk_count=chunk_count,
@@ -138,13 +141,16 @@ def approve_document_background(
                 logger.exception("Không đóng được session của việc nền duyệt văn bản %s", document_id)
 
 
-def recover_interrupted_ingests(db: Session) -> int:
+def recover_interrupted_ingests(db: Session, stale_minutes: int | None = None) -> int:
     """Văn bản đang processing mà không còn tiến trình nào chạy nó (service vừa khởi động lại) -> failed.
     Trả về số văn bản được phục hồi. Chỉ đụng ingest_status = processing."""
+    query = update(LegalDocument).where(LegalDocument.ingest_status == "processing")
+    if stale_minutes is not None and stale_minutes > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)
+        query = query.where(LegalDocument.updated_at < cutoff)
+
     result = db.execute(
-        update(LegalDocument)
-        .where(LegalDocument.ingest_status == "processing")
-        .values(ingest_status="failed", ingest_error=INTERRUPTED_MESSAGE, updated_at=datetime.now(timezone.utc))
+        query.values(ingest_status="failed", ingest_error=INTERRUPTED_MESSAGE, updated_at=datetime.now(timezone.utc))
         .execution_options(synchronize_session=False)
     )
     db.commit()
@@ -156,7 +162,8 @@ def recover_on_startup() -> None:
     db: Session | None = None
     try:
         db = _open_session()
-        count = recover_interrupted_ingests(db)
+        stale_minutes = 30 if rabbitmq_url() else None
+        count = recover_interrupted_ingests(db, stale_minutes=stale_minutes)
         if count:
             logger.warning("Đặt %d văn bản đang processing thành failed (service khởi động lại)", count)
     except Exception as e:  # noqa: BLE001

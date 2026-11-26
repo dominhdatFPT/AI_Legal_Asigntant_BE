@@ -1,20 +1,10 @@
-import logging
 import math
 from typing import Any, Dict, Optional
 
-from app.core.exceptions import (
-    ApplicationLockedError,
-    ApplicationNotFoundError,
-    ApplicationPermissionError,
-    ApplicationValidationError,
-)
+from app.core.exceptions import ApplicationValidationError
 from app.repositories import procedure_record_repository
+from app.repositories.procedure_repository import FormDataInvalid, ProcedureRepository
 from app.services import procedure_form_service
-
-logger = logging.getLogger(__name__)
-
-
-from app.repositories.procedure_repository import FormDataInvalid, db_connection
 
 
 class ProcedureApplicationService:
@@ -41,9 +31,8 @@ class ProcedureApplicationService:
         try:
             schema = procedure_form_service.get_procedure_form_schema(procedure_code)
         except ValueError:
-            with db_connection() as conn:
-                if not procedure_record_repository.get_procedure_id_by_code(conn, procedure_code):
-                    return None
+            if not procedure_record_repository.get_procedure_id_by_code(procedure_code):
+                return None
             raise FormDataInvalid([{"field": "procedure_code", "message": "Thủ tục này chưa có biểu mẫu nên chưa nhận hồ sơ."}])
 
         from app.services.profile_binding import bind_application_profile
@@ -79,17 +68,11 @@ class ProcedureApplicationService:
 
         schema = None
         try:
-            s = procedure_form_service.get_procedure_form_schema(record["procedure_code"])
-            schema = s.model_dump()
-        except Exception:
-            schema = None
+            schema = procedure_form_service.get_procedure_form_schema(record["procedure_code"]).model_dump()
+        except ValueError:
+            pass
 
-        proc_meta = None
-        try:
-            from app.repositories.procedure_repository import ProcedureRepository
-            proc_meta = ProcedureRepository.get_procedure_by_id_or_code(record["procedure_code"])
-        except Exception:
-            proc_meta = None
+        proc_meta = ProcedureRepository.get_procedure_by_id_or_code(record["procedure_code"])
         short_id = str(record['id'])[:8].upper()
         app_code = f"{record['procedure_code']}-{short_id}"
         record['application_code'] = app_code
@@ -174,55 +157,32 @@ class ProcedureApplicationService:
     def submit_application_by_id(
         domain: str, record_id: str, user_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Kiểm tra tính hợp lệ dữ liệu biểu mẫu và nộp hồ sơ chính thức:
-        1. Kiểm tra tồn tại hồ sơ (404)
-        2. Kiểm tra phân quyền sở hữu BOLA (403)
-        3. Kiểm tra trạng thái hồ sơ phải là 'draft' (400)
-        4. Đối chiếu toàn bộ các trường bắt buộc (required: true) theo Schema biểu mẫu
-        5. Cập nhật status = 'submitted' và khóa hồ sơ
-        """
-        rec = procedure_record_repository.get_procedure_record_by_id(
-            domain=domain, record_id=record_id
-        )
-        if not rec:
-            raise ApplicationNotFoundError("Không tìm thấy hồ sơ yêu cầu.")
+        """Kiểm tra dữ liệu bắt buộc của hồ sơ nháp trước khi nộp."""
 
-        owner_id = rec.get("user_id")
-        if owner_id:
-            if not user_id or str(owner_id) != str(user_id):
-                raise ApplicationPermissionError("FORBIDDEN: Bạn không có quyền nộp hồ sơ này.")
-
-        current_status = rec.get("status") or "draft"
-        if current_status != "draft":
-            raise ApplicationLockedError(
-                f"Chỉ có thể nộp hồ sơ ở trạng thái nháp ('draft'). Trạng thái hiện tại: '{current_status}'."
-            )
-
-        # Kiểm tra validation các trường bắt buộc theo schema
-        procedure_code = rec.get("procedure_code")
-        if procedure_code:
+        def validate_draft(record: dict) -> None:
             try:
-                schema = procedure_form_service.get_procedure_form_schema(procedure_code)
-                form_data = rec.get("form_data") or {}
-                missing_fields = []
-                for field in schema.fields:
-                    if field.required:
-                        val = form_data.get(field.name)
-                        if val is None or (isinstance(val, str) and not val.strip()):
-                            missing_fields.append(f"{field.label} ({field.name})")
+                schema = procedure_form_service.get_procedure_form_schema(record["procedure_code"])
+            except ValueError as exc:
+                raise ApplicationValidationError(
+                    "Thủ tục này chưa có biểu mẫu nên chưa nhận hồ sơ."
+                ) from exc
 
-                if missing_fields:
-                    raise ApplicationValidationError(
-                        f"Hồ sơ còn thiếu các trường bắt buộc: {', '.join(missing_fields)}"
-                    )
-            except ApplicationValidationError:
-                raise
-            except Exception as e:
-                logger.warning(f"Lỗi khi validate form schema trước khi nộp: {e}")
+            form_data = record.get("form_data") or {}
+            missing_fields = []
+            for field in schema.fields:
+                value = form_data.get(field.name)
+                if field.required and (
+                    value is None or (isinstance(value, str) and not value.strip())
+                ):
+                    missing_fields.append(f"{field.label} ({field.name})")
+            if missing_fields:
+                raise ApplicationValidationError(
+                    f"Hồ sơ còn thiếu các trường bắt buộc: {', '.join(missing_fields)}"
+                )
 
         return procedure_record_repository.submit_procedure_record(
             domain=domain,
             record_id=record_id,
             user_id=user_id,
+            validate=validate_draft,
         )

@@ -8,8 +8,8 @@ Cấu hình qua biến môi trường (mặc định hợp với chạy local qu
 - AUTH_COOKIE_SECURE      true khi chạy HTTPS (bắt buộc true nếu SameSite=None). Mặc định false.
 - AUTH_COOKIE_SAMESITE    lax | strict | none. Mặc định lax.
 - AUTH_COOKIE_DOMAIN      để trống = cookie gắn với host hiện tại.
-- AUTH_REFRESH_COOKIE_PATH đường dẫn trình duyệt gửi refresh cookie. Mặc định /api
-  (khớp cả /api/users/auth/... qua gateway lẫn /api/v1/users/auth/... gọi thẳng service).
+- AUTH_REFRESH_COOKIE_PATH đường dẫn trình duyệt gửi refresh cookie. Mặc định /api/users/auth
+  qua gateway. Nếu gọi thẳng service bằng cookie, cấu hình /api/v1/users/auth.
 """
 
 import os
@@ -20,6 +20,8 @@ from common_auth import ACCESS_COOKIE
 from app.core.security import REFRESH_TOKEN_TTL
 
 REFRESH_COOKIE = "refresh_token"
+DEFAULT_REFRESH_COOKIE_PATH = "/api/users/auth"
+_LEGACY_REFRESH_COOKIE_PATH = "/api"
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -43,7 +45,7 @@ def _options() -> dict:
 
 
 def _refresh_path() -> str:
-    return os.getenv("AUTH_REFRESH_COOKIE_PATH", "/api").strip() or "/api"
+    return os.getenv("AUTH_REFRESH_COOKIE_PATH", "").strip() or DEFAULT_REFRESH_COOKIE_PATH
 
 
 def set_auth_cookies(response: Response, pair: dict) -> None:
@@ -53,13 +55,18 @@ def set_auth_cookies(response: Response, pair: dict) -> None:
     # thay vì trình duyệt tự xoá cookie rồi BE chỉ thấy UNAUTHORIZED.
     max_age = int(REFRESH_TOKEN_TTL.total_seconds())
     response.set_cookie(ACCESS_COOKIE, pair["access_token"], max_age=max_age, path="/", **opts)
-    response.set_cookie(REFRESH_COOKIE, pair["refresh_token"], max_age=max_age, path=_refresh_path(), **opts)
+    refresh_path = _refresh_path()
+    response.set_cookie(REFRESH_COOKIE, pair["refresh_token"], max_age=max_age, path=refresh_path, **opts)
+    if refresh_path != _LEGACY_REFRESH_COOKIE_PATH:
+        # Xóa cookie cũ để trình duyệt không gửi hai refresh token trùng tên.
+        response.delete_cookie(REFRESH_COOKIE, path=_LEGACY_REFRESH_COOKIE_PATH, **opts)
 
 
 def clear_auth_cookies(response: Response) -> None:
     opts = _options()
     response.delete_cookie(ACCESS_COOKIE, path="/", **opts)
-    response.delete_cookie(REFRESH_COOKIE, path=_refresh_path(), **opts)
+    for path in dict.fromkeys((_refresh_path(), DEFAULT_REFRESH_COOKIE_PATH, _LEGACY_REFRESH_COOKIE_PATH)):
+        response.delete_cookie(REFRESH_COOKIE, path=path, **opts)
 
 
 def refresh_token_from(request: Request, body_token: str | None) -> str | None:

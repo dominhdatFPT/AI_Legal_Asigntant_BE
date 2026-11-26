@@ -57,10 +57,19 @@ def sanitize_action_url(raw_url: Optional[str], default_path: str = "/") -> str:
     return default_path
 
 
+def _short_id(val: Any) -> str:
+    raw = str(val).strip() if val is not None else ""
+    return raw[:8] if raw else ""
+
+
 def format_notification(event_type: str, payload: Dict[str, Any], event_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Chuyển event kỹ thuật thành thông báo cá nhân; None nếu không cần báo."""
-    # Hỗ trợ cả user_id và reporter_id (cho các event report.*)
-    user_id = payload.get("user_id") or payload.get("reporter_id")
+    # Hỗ trợ cả user_id, reporter_id (report.*) và admin_id (chỉ cho procedure.form_template.deleted)
+    user_id = (
+        payload.get("user_id")
+        or payload.get("reporter_id")
+        or (payload.get("admin_id") if event_type == "procedure.form_template.deleted" else None)
+    )
     if not user_id:
         return None
 
@@ -70,57 +79,72 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
     source_id: Optional[str] = None
     id_suffix = ""
 
+    doc_short = _short_id(payload.get("document_id"))
+    doc_label = f" #{doc_short}" if doc_short else ""
+    err_code = str(payload.get("error_code") or "").strip()
+
     if event_type == "document.ocr.completed":
         title = "Tài liệu đã xử lý xong"
-        message = f"Tài liệu #{str(payload.get('document_id'))[:8]} đã được quét an toàn và trích xuất dữ liệu."
+        message = f"Tài liệu{doc_label} đã được quét an toàn và trích xuất dữ liệu."
         icon = "file-text"
         category = "document"
-        action_url = sanitize_action_url(f"/documents/{payload.get('document_id')}", "/documents")
+        action_url = "/detail-information"
 
     elif event_type == "document.processing.failed":
         title = "Không xử lý được tài liệu"
-        message = f"Tài liệu #{str(payload.get('document_id'))[:8]} không xử lý được (mã lỗi {payload.get('error_code')})."
+        err_note = f" (mã lỗi {err_code})" if err_code else ""
+        message = f"Tài liệu{doc_label} không xử lý được{err_note}."
         icon = "file-x"
         category = "document"
-        action_url = sanitize_action_url(f"/documents/{payload.get('document_id')}", "/documents")
+        action_url = "/detail-information"
 
     elif event_type == "contract.generated":
         title = "Hợp đồng đã xuất file xong"
-        message = f"Hợp đồng đã được kết xuất định dạng {str(payload.get('format')).upper()}."
+        fmt = str(payload.get("format") or "").strip().upper()
+        message = f"Hợp đồng đã được kết xuất định dạng {fmt}." if fmt else "Hợp đồng đã được kết xuất hoàn tất."
         icon = "file-check"
         category = "contract"
-        action_url = sanitize_action_url(f"/contracts/drafts/{payload.get('draft_id')}", "/contracts")
+        action_url = "/user-dashboard"
 
     elif event_type == "contract.generation.failed":
         title = "Xuất hợp đồng thất bại"
-        message = f"Không xuất được file hợp đồng (mã lỗi {payload.get('error_code')}). Vui lòng thử lại."
+        err_note = f" (mã lỗi {err_code})" if err_code else ""
+        message = f"Không xuất được file hợp đồng{err_note}. Vui lòng thử lại."
         icon = "alert-circle"
         category = "contract"
-        action_url = sanitize_action_url(f"/contracts/drafts/{payload.get('draft_id')}", "/contracts")
+        action_url = "/user-dashboard"
 
     elif event_type == "procedure.application.submitted":
         title = "Nộp hồ sơ thủ tục thành công"
-        message = f"Hồ sơ thủ tục [{payload.get('domain')}] #{str(payload.get('record_id'))[:8]} đã được tiếp nhận."
+        domain = str(payload.get("domain") or "").strip()
+        rec_short = _short_id(payload.get("record_id"))
+        domain_part = f" [{domain}]" if domain else ""
+        rec_part = f" #{rec_short}" if rec_short else ""
+        message = f"Hồ sơ thủ tục{domain_part}{rec_part} đã được tiếp nhận."
         icon = "clipboard-check"
         category = "procedure"
-        action_url = sanitize_action_url(f"/procedures/records/{payload.get('record_id')}", "/procedures")
+        action_url = "/user-dashboard"
 
     elif event_type == "procedure.form_template.deleted":
         title = "Đã xóa mẫu đơn"
-        message = f"Mẫu đơn #{str(payload.get('template_id'))[:8]} đã được xóa khỏi danh mục (RabbitMQ event processed)."
+        tpl_short = _short_id(payload.get("template_id"))
+        tpl_part = f" #{tpl_short}" if tpl_short else ""
+        message = f"Mẫu đơn{tpl_part} đã được xóa khỏi danh mục."
         icon = "trash"
         category = "procedure"
         user_id = payload.get("admin_id") or user_id
-        action_url = "/landforms"
+        action_url = "/businessforms" if str(payload.get("domain") or "").strip().lower() == "business" else "/landforms"
 
     elif event_type == "lawyer.approved":
         title = "Chúc mừng! Hồ sơ Luật sư đã duyệt"
         message = "Hồ sơ luật sư của bạn đã được duyệt."
         icon = "award"
         category = "lawyer"
-        action_url = "/lawyer/dashboard"
+        action_url = "/user-dashboard"
 
     elif event_type == "user.blocked":
+        if payload.get("notify_user") is False:
+            return None
         title = "Tài khoản bị tạm khóa"
         message = f"Tài khoản của bạn đã bị khóa: {payload.get('reason') or 'Vi phạm điều khoản dịch vụ'}."
         icon = "alert-triangle"
@@ -128,18 +152,21 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
         action_url = "/support"
 
     elif event_type == "report.created":
-        code = payload.get("code") or str(payload.get("report_id", ""))[:8]
+        rid = str(payload.get("report_id") or "").strip()
+        code = str(payload.get("code") or _short_id(rid) or "MỚI")
         title = f"Đã tiếp nhận báo cáo #{code}"
         message = f"Báo cáo \"{payload.get('title') or code}\" đã được gửi tới Quản trị viên và đang chờ xử lý."
         icon = "flag"
         category = "report"
-        source_type = "report"
-        source_id = str(payload.get("report_id") or "")
+        source_type = "report" if rid else None
+        source_id = rid or None
         id_suffix = "-reporter"
-        action_url = sanitize_action_url(f"/support?report_id={payload.get('report_id')}", "/support")
+        raw_url = f"/support?tab=mine&report={rid}" if rid else "/support?tab=mine"
+        action_url = sanitize_action_url(raw_url, "/support?tab=mine")
 
     elif event_type == "report.accepted":
-        code = payload.get("code") or str(payload.get("report_id", ""))[:8]
+        rid = str(payload.get("report_id") or "").strip()
+        code = str(payload.get("code") or _short_id(rid) or "MỚI")
         note = payload.get("decision_note")
         title = f"Báo cáo #{code} đã được chấp nhận"
         message = f"Quản trị viên đã chấp nhận báo cáo của bạn và đang tiến hành xử lý." + (
@@ -147,12 +174,14 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
         )
         icon = "check-circle"
         category = "report"
-        source_type = "report"
-        source_id = str(payload.get("report_id") or "")
-        action_url = sanitize_action_url(f"/support?report_id={payload.get('report_id')}", "/support")
+        source_type = "report" if rid else None
+        source_id = rid or None
+        raw_url = f"/support?tab=mine&report={rid}" if rid else "/support?tab=mine"
+        action_url = sanitize_action_url(raw_url, "/support?tab=mine")
 
     elif event_type == "report.rejected":
-        code = payload.get("code") or str(payload.get("report_id", ""))[:8]
+        rid = str(payload.get("report_id") or "").strip()
+        code = str(payload.get("code") or _short_id(rid) or "MỚI")
         reason_code = str(payload.get("reject_reason_code") or "")
         reason_label = REJECT_REASON_CATALOG.get(reason_code, reason_code)
         note = payload.get("decision_note")
@@ -161,12 +190,14 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
         message = f"Báo cáo #{code} không được chấp nhận. Lý do: {detail}."
         icon = "x-circle"
         category = "report"
-        source_type = "report"
-        source_id = str(payload.get("report_id") or "")
-        action_url = sanitize_action_url(f"/support?report_id={payload.get('report_id')}", "/support")
+        source_type = "report" if rid else None
+        source_id = rid or None
+        raw_url = f"/support?tab=mine&report={rid}" if rid else "/support?tab=mine"
+        action_url = sanitize_action_url(raw_url, "/support?tab=mine")
 
     elif event_type == "report.resolved":
-        code = payload.get("code") or str(payload.get("report_id", ""))[:8]
+        rid = str(payload.get("report_id") or "").strip()
+        code = str(payload.get("code") or _short_id(rid) or "MỚI")
         note = payload.get("decision_note")
         title = f"Sự cố #{code} đã được khắc phục"
         message = f"Vấn đề trong báo cáo #{code} đã được đội ngũ kỹ thuật khắc phục hoàn tất." + (
@@ -174,15 +205,16 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
         )
         icon = "shield-check"
         category = "report"
-        source_type = "report"
-        source_id = str(payload.get("report_id") or "")
-        action_url = sanitize_action_url(f"/support?report_id={payload.get('report_id')}", "/support")
+        source_type = "report" if rid else None
+        source_id = rid or None
+        raw_url = f"/support?tab=mine&report={rid}" if rid else "/support?tab=mine"
+        action_url = sanitize_action_url(raw_url, "/support?tab=mine")
 
     else:
         return None
 
     notif_id = f"notif-{event_id}{id_suffix}" if event_id else f"notif-{uuid.uuid4().hex}"
-    return {
+    result: Dict[str, Any] = {
         "id": notif_id,
         "user_id": str(user_id),
         "event_type": event_type,
@@ -192,24 +224,29 @@ def format_notification(event_type: str, payload: Dict[str, Any], event_id: Opti
         "message": message,
         "icon": icon,
         "action_url": action_url,
-        "source_type": source_type,
-        "source_id": source_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "is_read": False,
     }
+    if source_type:
+        result["source_type"] = source_type
+    if source_id:
+        result["source_id"] = source_id
+    return result
 
 
 def format_admin_report_notification(payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
     """Tạo thông báo nhóm (audience='admin') khi có người dùng hoặc luật sư gửi report mới."""
-    code = payload.get("code") or str(payload.get("report_id", ""))[:8]
+    rid = str(payload.get("report_id") or "").strip()
+    code = str(payload.get("code") or _short_id(rid) or "MỚI")
     kind = payload.get("kind") or "ticket"
     kind_label = "Báo lỗi nhanh" if kind == "quick_error" else "Ticket hỗ trợ"
     role_label = "Luật sư" if payload.get("reporter_role") == "lawyer" else "Người dùng"
     priority = str(payload.get("priority") or "normal")
     report_title = payload.get("title") or code
+    raw_url = f"/admin-reports?report={rid}" if rid else "/admin-reports"
 
-    return {
-        "id": f"grp-{event_id}-admin" if event_id else f"grp-rpt-{payload.get('report_id')}",
+    result: Dict[str, Any] = {
+        "id": f"grp-{event_id}-admin" if event_id else f"grp-rpt-{rid or uuid.uuid4().hex}",
         "audience": "admin",
         "event_type": "report.created",
         "category": "report",
@@ -217,12 +254,14 @@ def format_admin_report_notification(payload: Dict[str, Any], event_id: Optional
         "title": f"[{kind_label}] Báo cáo mới #{code} từ {role_label}",
         "message": f"{report_title} (Mức ưu tiên: {priority.upper()}). Nhấn để kiểm tra và xử lý.",
         "icon": "alert-octagon" if priority in ("high", "critical") else "flag",
-        "action_url": sanitize_action_url(f"/admin/reports/{payload.get('report_id')}", "/admin/reports"),
-        "source_type": "report",
-        "source_id": str(payload.get("report_id") or ""),
+        "action_url": sanitize_action_url(raw_url, "/admin-reports"),
         "created_by": str(payload.get("reporter_id") or ""),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    if rid:
+        result["source_type"] = "report"
+        result["source_id"] = rid
+    return result
 
 
 def save_notification(notif: Dict[str, Any]) -> None:
@@ -231,17 +270,6 @@ def save_notification(notif: Dict[str, Any]) -> None:
 
 def save_group_notification(notif: Dict[str, Any]) -> None:
     notification_store.save_group_notification(notif)
-
-
-def get_user_notifications(
-    user_id: str,
-    limit: int = 50,
-    user_role: Optional[str] = None,
-    unread_only: bool = False,
-) -> List[Dict[str, Any]]:
-    return notification_store.get_user_notifications(
-        str(user_id), limit=limit, user_role=user_role, unread_only=unread_only
-    )
 
 
 async def handle_event(routing_key: str, event: Dict[str, Any]) -> None:
@@ -259,7 +287,8 @@ async def handle_event(routing_key: str, event: Dict[str, Any]) -> None:
     # 2. Nếu là broadcast toàn hệ thống / theo nhóm
     if event_type in ("notification.broadcast.requested", "broadcast.published"):
         grp_id = payload.get("group_notification_id") or (f"grp-{event_id}" if event_id else f"grp-{uuid.uuid4().hex}")
-        grp_notif = {
+        bc_id = str(payload.get("broadcast_id") or "").strip()
+        grp_notif: Dict[str, Any] = {
             "id": str(grp_id),
             "audience": str(payload.get("audience") or "all"),
             "event_type": "broadcast.published",
@@ -268,13 +297,14 @@ async def handle_event(routing_key: str, event: Dict[str, Any]) -> None:
             "title": str(payload.get("title") or "Thông báo hệ thống"),
             "message": str(payload.get("content") or payload.get("message") or ""),
             "icon": "megaphone",
-            "action_url": sanitize_action_url(payload.get("action_url"), "/"),
-            "source_type": "broadcast",
-            "source_id": str(payload.get("broadcast_id") or ""),
+            "action_url": sanitize_action_url(payload.get("action_url"), ""),
             "created_by": str(payload.get("created_by") or ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "expires_at": payload.get("expires_at"),
         }
+        if bc_id:
+            grp_notif["source_type"] = "broadcast"
+            grp_notif["source_id"] = bc_id
         await asyncio.to_thread(save_group_notification, grp_notif)
         realtime_broker.push_to_audience(grp_notif["audience"], grp_notif)
         logger.info(

@@ -1,6 +1,12 @@
+import asyncio
+from contextlib import asynccontextmanager, suppress
+import logging
+import os
+import threading
+
 from fastapi import APIRouter, Depends, FastAPI, Request
 
-from common_auth import CurrentUser
+from common_auth import CurrentUser, revocation
 from app.core.errors import install_handlers, success
 from app.core.security import contract_user
 from app.core.database import database_readiness
@@ -9,11 +15,43 @@ from app.api.drafts import router as drafts_router
 from app.api.identity_suggestions import router as identity_suggestions_router
 from app.api.generations import router as generations_router
 from app.api.personal_templates import router as personal_templates_router
+from app.api import reference_catalog
 from app.api.reference_catalog import router as reference_catalog_router
+from app.services import procedure_events
+
+logger = logging.getLogger(__name__)
 
 
-app = FastAPI(title="Contract Service", version="0.8.1")
+def _warmup_reference_catalog() -> None:
+    try:
+        if reference_catalog._resolve_contract_db_url():
+            reference_catalog.load_from_database()
+            logger.info("Reference catalog cache warmed up.")
+    except Exception as exc:
+        logger.warning("Reference catalog startup warmup skipped: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if os.getenv("CONTRACT_CATALOG_WARMUP", "true").lower() in ("true", "1", "yes"):
+        threading.Thread(
+            target=_warmup_reference_catalog,
+            name="contract-catalog-warmup",
+            daemon=True,
+        ).start()
+    consumer = asyncio.create_task(procedure_events.start()) if reference_catalog._resolve_contract_db_url() else None
+    try:
+        yield
+    finally:
+        if consumer:
+            consumer.cancel()
+            with suppress(asyncio.CancelledError):
+                await consumer
+
+
+app = FastAPI(title="Contract Service", version="0.8.1", lifespan=lifespan)
 install_handlers(app)
+revocation.ensure_started()
 
 # API nghiệp vụ đặt trong router này để mặc định cần access token.
 # Health đặt ngoài router vì Docker phải kiểm tra được khi chưa đăng nhập.

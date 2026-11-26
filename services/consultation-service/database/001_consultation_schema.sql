@@ -26,7 +26,8 @@ create table if not exists consultations (
     closed_at        timestamptz,
     last_activity_at timestamptz not null default now(),  -- mốc 10 ngày: lúc tạo, lúc nhận hoặc tin nhắn cuối
     purged_at        timestamptz,                         -- lúc đã xóa question và tin nhắn
-    summarized_until timestamptz,                         -- tin có created_at <= mốc này đã được tóm tắt (consultation_summaries)
+    summarized_until timestamptz,                         -- phần thời gian của cursor tóm tắt
+    summarized_until_message_id uuid,                     -- phần ID; null = cursor cũ, đọc lại ranh giới
     created_at       timestamptz not null default now(),
     updated_at       timestamptz not null default now(),
 
@@ -67,6 +68,7 @@ create unique index if not exists consultations_open_pair_key on consultations (
 
 -- Database đã tạo từ bản cũ: chạy lại file này sẽ thêm cột.
 alter table consultations add column if not exists summarized_until timestamptz;
+alter table consultations add column if not exists summarized_until_message_id uuid;
 
 -- ---------------------------------------------------------------- Tin nhắn
 create table if not exists consultation_messages (
@@ -86,21 +88,30 @@ create index if not exists ix_consultation_messages_unread
     on consultation_messages (consultation_id, sender_id) where not is_read;
 
 -- ---------------------------------------------------------------- Tóm tắt hội thoại
--- Mỗi dòng là biên bản một đoạn chat (window), do Agent trích từ tin trong (window_start, window_end].
+-- Mỗi dòng là biên bản một đoạn chat; cursor dùng (created_at, id), nên hai window có thể cùng window_end.
 -- Giữ lâu dài, không bị xóa khi cuộc tư vấn bị dọn sau 10 ngày; xóa cùng dòng consultations nếu dòng đó bị xóa hẳn.
 create table if not exists consultation_summaries (
     id              uuid primary key default gen_random_uuid(),
     consultation_id uuid        not null references consultations (id) on delete cascade,
     window_start    timestamptz,                          -- null = từ tin đầu tiên
     window_end      timestamptz not null,                 -- created_at của tin cuối trong đoạn
+    window_end_message_id uuid,                           -- ID tin cuối; không FK vì tin gốc bị dọn sau 10 ngày
     message_count   integer     not null,
     summary         jsonb       not null,                 -- JSON theo schema_version, mỗi facts/legal_references/deadlines có "verified"
     schema_version  integer     not null,
     prompt_version  varchar(20),                          -- do Agent trả về
     created_at      timestamptz not null default now(),
 
-    constraint consultation_summaries_window_key unique (consultation_id, window_end)
+    constraint consultation_summaries_window_key unique nulls not distinct (consultation_id, window_end, window_end_message_id)
 );
+
+-- Nâng cấp database cũ. Dừng toàn bộ worker tóm tắt trước khi chạy và chỉ khởi động lại bằng code mới.
+-- Giữ ID null ở dữ liệu cũ để worker đọc lại timestamp ranh giới, không đoán ID đã được tóm tắt.
+alter table consultation_summaries add column if not exists window_end_message_id uuid;
+alter table consultation_summaries
+    drop constraint if exists consultation_summaries_window_key,
+    add constraint consultation_summaries_window_key
+        unique nulls not distinct (consultation_id, window_end, window_end_message_id);
 
 -- ---------------------------------------------------------------- Report
 -- Admin chỉ thấy ai report ai và lý do, không đọc nội dung chat.

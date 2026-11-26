@@ -12,7 +12,7 @@ def require_internal_token(request: Request) -> None:
     expected = os.getenv("INTERNAL_TOKEN", "")
     given = request.headers.get("X-Internal-Token", "")
     # Chưa cấu hình INTERNAL_TOKEN thì chặn hết, không bao giờ mở cửa.
-    if not expected or not hmac.compare_digest(given, expected):
+    if not expected or not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
         raise ApiError(401, UNAUTHORIZED)
 
 
@@ -23,5 +23,5 @@ def require_lawyer_service_token(request: Request) -> None:
     if not expected:
         raise ApiError(503, "SERVICE_NOT_CONFIGURED", "Chưa cấu hình LAWYER_SERVICE_TOKEN.")
     given = request.headers.get("X-Internal-Token", "")
-    if not hmac.compare_digest(given.encode(), expected.encode()):
+    if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
         raise ApiError(401, UNAUTHORIZED)

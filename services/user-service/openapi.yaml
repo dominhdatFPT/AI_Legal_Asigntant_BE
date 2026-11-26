@@ -64,7 +64,7 @@ paths:
         gắn `firebase_uid`, xóa mật khẩu cũ và thu hồi mọi refresh token cũ (chống chiếm trước tài khoản).
         Các trường hợp email trùng khác trả 409 `EMAIL_IN_USE`.
         Thành công: token trả trong body (dùng với Bearer) và đồng thời được set vào 2 HttpOnly cookie
-        `access_token` (path `/`) và `refresh_token` (path `AUTH_REFRESH_COOKIE_PATH`, mặc định `/api`).
+        `access_token` (path `/`) và `refresh_token` (path `AUTH_REFRESH_COOKIE_PATH`, mặc định `/api/users/auth`).
       x-status: implemented
       parameters:
         - $ref: "#/components/parameters/RequestId"

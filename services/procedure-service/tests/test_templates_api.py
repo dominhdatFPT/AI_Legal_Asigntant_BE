@@ -10,14 +10,6 @@ from scripts.seed_form_templates import collect_templates, split_name
 client = TestClient(app)
 BASE = "/api/v1/procedures/templates"
 
-# Bản rút gọn của database/006 cho SQLite.
-FORM_TEMPLATES_SCHEMA = """
-CREATE TABLE public.form_templates (id TEXT PRIMARY KEY, domain TEXT, name TEXT, procedure_name TEXT, file_name TEXT,
-    format TEXT, media_type TEXT, file_size INTEGER, file_data BLOB, preview_pdf BLOB, order_index INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT 1)
-"""
-
-
 def _insert(conn, **row):
     row = {"id": str(uuid.uuid4()), "preview_pdf": None, "order_index": 0, "is_active": 1, **row}
     row.setdefault("file_size", len(row["file_data"]))
@@ -31,7 +23,8 @@ def _insert(conn, **row):
 @pytest.fixture
 def templates(db_engine):
     with db_engine.begin() as conn:
-        conn.execute(text(FORM_TEMPLATES_SCHEMA))
+        conn.execute(text("DELETE FROM public.form_template_preview_pages"))
+        conn.execute(text("DELETE FROM public.form_templates"))
         ids = {
             "pdf": _insert(conn, domain="land", name="Tách thửa hoặc hợp thửa đất", procedure_name="Tách thửa hoặc hợp thửa đất",
                            file_name="Thủ tục tách thửa hoặc hợp thửa đất.pdf", format="PDF", media_type="application/pdf",
@@ -109,7 +102,10 @@ def test_unknown_or_hidden_template_returns_404(templates):
         assert res.json()["error"]["code"] == "TEMPLATE_NOT_FOUND"
 
 
-def test_missing_table_returns_503():
+def test_missing_table_returns_503(db_engine, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    with db_engine.begin() as conn:
+        conn.execute(text("DROP TABLE public.form_templates"))
     # Chưa chạy database/006: báo lỗi DB như các API khác, không trả danh sách giả.
     res = client.get(BASE)
     assert res.status_code == 503
@@ -123,11 +119,12 @@ def test_existing_procedure_routes_still_work(templates):
 
 def test_seed_reads_template_folders_and_previews():
     rows = collect_templates()
-    assert len(rows) == 30
+    assert len(rows) == 71
     assert {r["domain"] for r in rows} == {"land", "business"}
-    assert len({(r["domain"], r["file_name"]) for r in rows}) == 30
+    assert len({(r["domain"], r["file_name"]) for r in rows}) == 71
     word = [r for r in rows if r["format"] in {"DOC", "DOCX"}]
-    assert len(word) == 21 and all(r["preview_pdf"].startswith(b"%PDF") for r in word)
+    assert len(word) == 35
+    assert sum(bool(r["preview_pdf"]) for r in word) == 23
     assert all(r["preview_pdf"] is None for r in rows if r["format"] not in {"DOC", "DOCX"})
 
 

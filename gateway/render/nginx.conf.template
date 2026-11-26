@@ -10,6 +10,11 @@
 events {}
 
 http {
+    map $http_x_request_id $safe_request_id {
+        default $request_id;
+        "~^[A-Za-z0-9._:-]{1,128}$" $http_x_request_id;
+    }
+
     # Origin FE được phép gọi kèm cookie. FRONTEND_ORIGIN đặt trên Render (vd. https://ten-app.vercel.app).
     map $http_origin $cors_origin {
         default "";
@@ -28,6 +33,48 @@ http {
     resolver ${NGINX_LOCAL_RESOLVERS} valid=30s ipv6=off;
     resolver_timeout 10s;
 
+    # Chỉ tin CF-Connecting-IP khi operator bật TRUST_CLOUDFLARE_HEADERS=true (domain đứng sau Cloudflare Proxy).
+    # Mặc định "false" (ví dụ gọi thẳng *.onrender.com): bỏ qua header giả mạo từ client, dùng địa chỉ kết nối thật.
+    map "${TRUST_CLOUDFLARE_HEADERS}:$http_cf_connecting_ip" $rate_limit_client {
+        "~^true:.+" $http_cf_connecting_ip;
+        default $binary_remote_addr;
+    }
+
+    map "${TRUST_CLOUDFLARE_HEADERS}:$http_cf_connecting_ip" $trusted_client_ip {
+        "~^true:.+" $http_cf_connecting_ip;
+        default $remote_addr;
+    }
+
+    map "${TRUST_CLOUDFLARE_HEADERS}:$http_cf_connecting_ip" $forwarded_cf_ip {
+        "~^true:.+" $http_cf_connecting_ip;
+        default "";
+    }
+
+    limit_req_zone $rate_limit_client zone=general_api:10m rate=30r/s;
+    limit_req_zone $rate_limit_client zone=heavy_api:10m rate=5r/s;
+    limit_req_zone $rate_limit_client zone=auth_api:10m rate=10r/m;
+    limit_req_zone $rate_limit_client zone=chat_api:10m rate=12r/m;
+    limit_req_status 429;
+
+    # $uri (không có query string) để không ghi token/PII trong tham số vào log.
+    log_format gateway_access '$trusted_client_ip [$time_local] "$request_method $uri $server_protocol" '
+                              '$status $body_bytes_sent rid=$safe_request_id rt=$request_time urt=$upstream_response_time';
+    access_log /var/log/nginx/access.log gateway_access;
+
+    # Nén JSON (service không tự nén). event-stream KHÔNG nằm trong gzip_types; SSE/auth vẫn tắt tường minh ở location.
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_vary on;
+    gzip_types application/json;
+
+    # Preflight được cache 2 giờ (trần của Chrome). map + add_header cấp server: add_header trong "if" cấp server là lỗi cú pháp.
+    map $request_method $cors_max_age {
+        OPTIONS 7200;
+        default "";
+    }
+
     server {
         listen ${PORT};
         # Redirect tự động của nginx/FastAPI phải là đường dẫn tương đối, không thì lộ http://host:10000 và bị chặn mixed content.
@@ -40,6 +87,20 @@ http {
         add_header Access-Control-Allow-Credentials "true" always;
         add_header Access-Control-Expose-Headers "X-Request-ID, Content-Disposition, X-Content-SHA256" always;
         add_header Vary "Origin" always;
+        add_header Permissions-Policy "unload=*" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Access-Control-Max-Age $cors_max_age always;
+
+        proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
+        proxy_hide_header Access-Control-Allow-Credentials;
+
+        if ($uri ~ ^/api/procedures/office(?:/|$)) {
+            return 404;
+        }
 
         if ($request_method = OPTIONS) {
             return 204;
@@ -48,7 +109,9 @@ http {
         # Dùng chung cho mọi location (location nào tự khai báo proxy_set_header thì phải lặp lại hết).
         proxy_http_version 1.1;
         proxy_set_header Connection "";
-        proxy_set_header X-Request-ID $request_id;
+        proxy_set_header X-Request-ID $safe_request_id;
+        proxy_set_header X-Real-IP $trusted_client_ip;
+        proxy_set_header CF-Connecting-IP $forwarded_cf_ip;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
         proxy_ssl_server_name on;
@@ -68,62 +131,105 @@ http {
         # proxy_pass có biến thì nginx KHÔNG tự thay prefix, nên dùng rewrite để đổi /api/x/... -> /api/v1/x/...
 
         location = /api/procedures {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${PROCEDURE_SERVICE_URL}";
             rewrite ^ /api/v1/procedures break;
             proxy_pass $up;
         }
 
         location = /api/procedures/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${PROCEDURE_SERVICE_URL}";
             rewrite ^ /api/v1/procedures break;
             proxy_pass $up;
         }
 
+        location ~ ^/api/agent/chat/?$ {
+            limit_req zone=heavy_api burst=20 nodelay;
+            limit_req zone=chat_api burst=3 nodelay;
+            set $up "${AGENT_SERVICE_URL}";
+            rewrite ^ /api/v1/agent/chat break;
+            proxy_pass $up;
+            proxy_buffering off;
+            proxy_cache off;
+            gzip off;
+            proxy_read_timeout 120s;
+        }
+
         location /api/agent/ {
+            limit_req zone=heavy_api burst=20 nodelay;
             set $up "${AGENT_SERVICE_URL}";
             rewrite ^/api/agent/(.*)$ /api/v1/agent/$1 break;
             proxy_pass $up;
+            proxy_buffering off;
+            proxy_cache off;
+            gzip off;
+            proxy_read_timeout 120s;
         }
 
         location = /api/users {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${USER_SERVICE_URL}";
             rewrite ^ /api/v1/users break;
             proxy_pass $up;
         }
 
+        location ~ ^/api/users/auth/(login|register|firebase|refresh)/?$ {
+            limit_req zone=general_api burst=60 nodelay;
+            limit_req zone=auth_api burst=5 nodelay;
+            set $up "${USER_SERVICE_URL}";
+            rewrite ^/api/users/auth/(login|register|firebase|refresh)/?$ /api/v1/users/auth/$1 break;
+            proxy_pass $up;
+            gzip off;  # BREACH: không nén response chứa token
+        }
+
+        # Các endpoint auth còn lại (logout, ...): giống /api/users/ nhưng không nén (BREACH).
+        location /api/users/auth/ {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${USER_SERVICE_URL}";
+            rewrite ^/api/users/(.*)$ /api/v1/users/$1 break;
+            proxy_pass $up;
+            gzip off;
+        }
+
         location /api/users/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${USER_SERVICE_URL}";
             rewrite ^/api/users/(.*)$ /api/v1/users/$1 break;
             proxy_pass $up;
         }
 
-        # POST /api/lawyers (gửi hồ sơ luật sư) không có dấu "/" cuối.
         location = /api/lawyers {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${LAWYER_SERVICE_URL}";
             rewrite ^ /api/v1/lawyers break;
             proxy_pass $up;
         }
 
         location /api/lawyers/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${LAWYER_SERVICE_URL}";
             rewrite ^/api/lawyers/(.*)$ /api/v1/lawyers/$1 break;
             proxy_pass $up;
         }
 
         location /api/procedures/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${PROCEDURE_SERVICE_URL}";
             rewrite ^/api/procedures/(.*)$ /api/v1/procedures/$1 break;
             proxy_pass $up;
+            proxy_read_timeout 120s;
         }
 
         location /api/rag/ {
+            limit_req zone=heavy_api burst=20 nodelay;
             set $up "${RAG_SERVICE_URL}";
             rewrite ^/api/rag/(.*)$ /api/v1/rag/$1 break;
             proxy_pass $up;
         }
 
-        # Upload catalog tham chiếu tới 11 MB, lớn hơn giới hạn chung 10m.
         location = /api/contracts/reference-catalog {
+            limit_req zone=heavy_api burst=20 nodelay;
             set $up "${CONTRACT_SERVICE_URL}";
             rewrite ^ /api/v1/contracts/reference-catalog break;
             proxy_pass $up;
@@ -132,12 +238,14 @@ http {
         }
 
         location /api/contracts/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${CONTRACT_SERVICE_URL}";
             rewrite ^/api/contracts/(.*)$ /api/v1/contracts/$1 break;
             proxy_pass $up;
         }
 
         location /api/documents/ {
+            limit_req zone=heavy_api burst=20 nodelay;
             set $up "${DOCUMENT_SERVICE_URL}";
             rewrite ^/api/documents/(.*)$ /api/v1/documents/$1 break;
             proxy_pass $up;
@@ -145,12 +253,21 @@ http {
         }
 
         location /api/locations/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${LOCATION_SERVICE_URL}";
             rewrite ^/api/locations/(.*)$ /api/v1/locations/$1 break;
             proxy_pass $up;
         }
 
-        location /api/consultations {
+        location = /api/consultations {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${CONSULTATION_SERVICE_URL}";
+            rewrite ^ /api/v1/consultations break;
+            proxy_pass $up;
+        }
+
+        location /api/consultations/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${CONSULTATION_SERVICE_URL}";
             rewrite ^/api/consultations(/.*)?$ /api/v1/consultations$1 break;
             proxy_pass $up;
@@ -160,17 +277,82 @@ http {
             set $up "${CONSULTATION_SERVICE_URL}";
             rewrite ^/ws/consultations/(.*)$ /ws/v1/consultations/$1 break;
             proxy_pass $up;
-            proxy_set_header X-Request-ID $request_id;
+            proxy_set_header X-Request-ID $safe_request_id;
+            proxy_set_header X-Real-IP $trusted_client_ip;
+            proxy_set_header CF-Connecting-IP $forwarded_cf_ip;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto https;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_read_timeout 3600s;
+            proxy_send_timeout 3600s;
         }
 
-        location /api/notifications {
+        location = /api/notifications {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^ /api/v1/notifications break;
+            proxy_pass $up;
+        }
+
+        location = /api/notifications/stream {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^ /api/v1/notifications/stream break;
+            proxy_pass $up;
+            proxy_buffering off;
+            proxy_cache off;
+            gzip off;
+            proxy_read_timeout 90s;
+            proxy_send_timeout 90s;
+        }
+
+        location /api/notifications/ {
+            limit_req zone=general_api burst=60 nodelay;
             set $up "${NOTIFICATION_SERVICE_URL}";
             rewrite ^/api/notifications(/.*)?$ /api/v1/notifications$1 break;
+            proxy_pass $up;
+        }
+
+        location = /api/reports {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^ /api/v1/reports break;
+            proxy_pass $up;
+        }
+
+        location /api/reports/ {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^/api/reports/(.*)$ /api/v1/reports/$1 break;
+            proxy_pass $up;
+        }
+
+        location = /api/admin/reports {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^ /api/v1/admin/reports break;
+            proxy_pass $up;
+        }
+
+        location /api/admin/reports/ {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^/api/admin/reports/(.*)$ /api/v1/admin/reports/$1 break;
+            proxy_pass $up;
+        }
+
+        location = /api/admin/broadcasts {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^ /api/v1/admin/broadcasts break;
+            proxy_pass $up;
+        }
+
+        location /api/admin/broadcasts/ {
+            limit_req zone=general_api burst=60 nodelay;
+            set $up "${NOTIFICATION_SERVICE_URL}";
+            rewrite ^/api/admin/broadcasts/(.*)$ /api/v1/admin/broadcasts/$1 break;
             proxy_pass $up;
         }
     }

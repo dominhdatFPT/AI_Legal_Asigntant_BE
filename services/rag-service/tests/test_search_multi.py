@@ -37,6 +37,7 @@ def no_expansion(monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("QUERY_EXPANSION_ENABLED", "false")
+    monkeypatch.setenv("HYBRID_ENABLED", "false")  # các test này kiểm tra thứ tự vector
     get_settings.cache_clear()
 
 
@@ -52,7 +53,8 @@ def _fake_db(monkeypatch, results_by_text, embedder):
     return calls
 
 
-def test_moi_y_deu_co_doan_cua_minh(monkeypatch):
+@pytest.mark.parametrize("top_k", [3, 4])
+def test_moi_y_deu_co_doan_cua_minh(monkeypatch, top_k):
     emb = TextEmbedder()
     results = {
         # Câu gốc nghiêng hẳn về tách thửa: 5 đoạn rất gần đều là tách thửa (Đ.220)
@@ -63,7 +65,7 @@ def test_moi_y_deu_co_doan_cua_minh(monkeypatch):
     }
     calls = _fake_db(monkeypatch, results, emb)
 
-    out = search.search_chunks(None, emb, QUESTION, top_k=4)
+    out = search.search_chunks(None, emb, QUESTION, top_k=top_k)
 
     assert calls[0] == QUESTION and len(calls) == 4  # câu gốc + 3 ý
     dieu = {c["section_info"]["dieu"] for c in out}
@@ -92,6 +94,20 @@ def test_cau_mot_y_chi_tim_1_lan(monkeypatch):
     calls = _fake_db(monkeypatch, {}, emb)
     search.search_chunks(None, emb, "sang tên sổ đỏ cần những giấy tờ gì", top_k=4)
     assert calls == ["sang tên sổ đỏ cần những giấy tờ gì"]
+
+
+def test_planned_issue_skips_heuristic_splitting(monkeypatch):
+    embedder = TextEmbedder()
+    calls = []
+
+    def fake_search(db, vec, top_k, **kwargs):
+        calls.append(top_k)
+        return []
+
+    monkeypatch.setattr(search.document_repo, "semantic_search", fake_search)
+    monkeypatch.setattr(search, "split_question", lambda q: pytest.fail("already planned"))
+    search.search_chunks(None, embedder, QUESTION, planned=True)
+    assert len(calls) == len(embedder.texts) == 1
 
 
 def test_loi_embedding_o_mot_y_bao_loi_nhu_cu(monkeypatch):

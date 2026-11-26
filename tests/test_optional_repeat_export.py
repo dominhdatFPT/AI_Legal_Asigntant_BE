@@ -18,7 +18,7 @@ from docx.table import Table as WordTable
 from docx.text.paragraph import Paragraph as WordParagraph
 
 source = ast.parse(Path('app/api/custom_form_templates.py').read_text(encoding='utf-8'))
-names = {'_token_name', '_replace_paragraph', '_paragraphs', '_document_field_value', 'fill_word'}
+names = {'_token_name', '_replace_paragraph', '_paragraphs', '_document_field_value', '_condition_matcher', 'fill_word'}
 functions = ast.Module(body=[node for node in source.body if isinstance(node, ast.FunctionDef) and node.name in names], type_ignores=[])
 TOKEN = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
 exec('from __future__ import annotations\n' + ast.unparse(functions), globals())

@@ -25,6 +25,15 @@ def test_can_internal_token(client, method, path, headers):
     assert res.status_code == 401
 
 
+def test_internal_token_and_request_id_handle_non_ascii_and_control_bytes(client):
+    response = client.get(f"/internal/v1/lawyers/{uuid.uuid4()}/status", headers=[
+        (b"x-internal-token", b"wrong-\xe9"),
+        (b"x-request-id", b"req-\r\ntrace\x02"),
+    ])
+    assert response.status_code == 401
+    assert response.headers["X-Request-ID"] == response.json()["request_id"] == "req-trace"
+
+
 def test_chua_tung_co_ho_so(client):
     data = client.get(f"/internal/v1/lawyers/{uuid.uuid4()}/status", headers=INTERNAL).json()["data"]
     assert data["has_profile"] is False and data["can_practice"] is False and data["profile_status"] is None

@@ -6,8 +6,10 @@
 - Chỉ retry GET (tối đa 2 lần, chờ 0,5 rồi 1 giây). Không log body (có mật khẩu, CCCD...).
 """
 
+from http.cookiejar import DefaultCookiePolicy
 import logging
 import os
+import threading
 import time
 from typing import Any
 
@@ -24,6 +26,33 @@ LABELS = {"USER": "Hệ thống tài khoản", "DOCUMENT": "Hệ thống giấy 
 # Test thay bằng httpx.MockTransport / hàm sleep giả; code thật để None / time.sleep.
 transport: httpx.BaseTransport | None = None
 sleep = time.sleep
+
+_shared: httpx.Client | None = None
+_shared_lock = threading.Lock()
+
+
+def _shared_client() -> httpx.Client:
+    """Client dùng chung cả process: giữ kết nối keep-alive/TLS giữa các lần gọi thay vì bắt tay lại mỗi lần."""
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            # keepalive_expiry < 5s (Uvicorn default) để tránh race đóng kết nối với POST không retry.
+            _shared = httpx.Client(
+                follow_redirects=False,
+                trust_env=False,
+                limits=httpx.Limits(keepalive_expiry=2.0),
+            )
+            # Dùng chung cho mọi người dùng: không lưu/gửi lại cookie do service khác đặt.
+            _shared.cookies.jar.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+        return _shared
+
+
+def close_shared_client() -> None:
+    global _shared
+    with _shared_lock:
+        if _shared is not None:
+            _shared.close()
+            _shared = None
 
 
 class UpstreamError(Exception):
@@ -70,10 +99,17 @@ def call(service: str, method: str, path: str, *, json: dict | None = None, bear
     """`bearer`: gọi API công khai bằng access token của người dùng thay cho X-Internal-Token.
     `raw`: 2xx trả nguyên httpx.Response (file nhị phân), lỗi vẫn xử lý như JSON.
     `token_env`: tên biến môi trường chứa giá trị gửi trong X-Internal-Token (route đổi vai trò dùng LAWYER_SERVICE_TOKEN)."""
+    from common_auth import breaker
+
     base = os.getenv(f"{service}_SERVICE_URL", "").rstrip("/")
     token = os.getenv(token_env, "")
     if not base or not (token or bearer):
         logger.error("Thiếu %s_SERVICE_URL hoặc %s", service, token_env)
+        raise unavailable(service)
+
+    gate = breaker.get(f"lawyer:{service}")
+    if not gate.allow():
+        logger.warning("Ngắt mạch đang mở cho %s", service)
         raise unavailable(service)
 
     headers = {"Authorization": f"Bearer {bearer}"} if bearer else {"X-Internal-Token": token}
@@ -85,9 +121,12 @@ def call(service: str, method: str, path: str, *, json: dict | None = None, bear
     for attempt in range(attempts):
         started = time.monotonic()
         try:
-            with httpx.Client(timeout=TIMEOUT_SECONDS, transport=transport, follow_redirects=False,
-                              trust_env=False) as client:
-                response = client.request(method, base + path, json=json, headers=headers)
+            if transport is None:
+                response = _shared_client().request(method, base + path, json=json, headers=headers, timeout=TIMEOUT_SECONDS)
+            else:  # test: MockTransport → client riêng, đóng sau mỗi lần gọi như trước
+                with httpx.Client(timeout=TIMEOUT_SECONDS, transport=transport, follow_redirects=False,
+                                  trust_env=False) as client:
+                    response = client.request(method, base + path, json=json, headers=headers)
         except httpx.TimeoutException:
             failure = timed_out(service)
         except httpx.HTTPError:
@@ -97,12 +136,14 @@ def call(service: str, method: str, path: str, *, json: dict | None = None, bear
                         response.status_code, (time.monotonic() - started) * 1000, rid)
             if response.status_code >= 500 or 300 <= response.status_code < 400:
                 failure = bad_response(service)
-            elif raw and 200 <= response.status_code < 300:
-                return response
             else:
+                gate.success()
+                if raw and 200 <= response.status_code < 300:
+                    return response
                 return _parse(service, response)
         logger.warning("%s %s %s lỗi %s (lần %d) request_id=%s", service, method, path.split("?")[0],
                        failure.code, attempt + 1, rid)
         if attempt + 1 < attempts:
             sleep(RETRY_DELAYS[attempt])
+    gate.failure()
     raise failure

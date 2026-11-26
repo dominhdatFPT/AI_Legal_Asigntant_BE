@@ -10,7 +10,7 @@ ADMIN = "99999999-9999-4999-8999-999999999999"
 client = TestClient(app)
 
 LAND = {"procedure_code": "DD-001", "status": "submitted",
-        "form_data": valid_form("DD-001", applicant_name="Lê Văn C", applicant_id_number="079090123456", land_area=250.0)}
+        "form_data": valid_form("DD-001", applicant_name="Lê Văn C")}
 
 
 def submit(headers, payload=LAND):
@@ -71,11 +71,13 @@ def test_bad_value_rejected_by_db_is_422_not_503(auth, monkeypatch):
     from sqlalchemy.exc import DataError
 
     from app.repositories import procedure_record_repository
+    from app.repositories.procedure_repository import ProcedureInvalidData
 
-    def too_long(*_):
-        raise DataError("INSERT ...", {}, Exception("value too long for type character varying(20)"))
+    def too_long(*_, **__):
+        error = DataError("INSERT ...", {}, Exception("value too long for type character varying(20)"))
+        raise ProcedureInvalidData("DataError") from error
 
-    monkeypatch.setattr(procedure_record_repository, "get_procedure_id_by_code", too_long)
+    monkeypatch.setattr(procedure_record_repository, "save_procedure_record", too_long)
     res = submit(auth(USER_A))
     assert res.status_code == 422
     assert res.json()["error"]["code"] == "VALIDATION_ERROR"

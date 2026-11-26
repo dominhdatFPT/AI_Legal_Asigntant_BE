@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import httpx
 import openai
+import pytest
 from google.genai import errors
 
 from app.core.config import get_settings
@@ -271,14 +272,26 @@ def test_openrouter_goi_stream_kem_usage_va_giu_tham_so_reasoning(monkeypatch):
     assert info == {"model": "or-model", "tokens": 55}
 
 
-def test_openrouter_tat_reasoning_thi_khong_gui_extra_body(monkeypatch):
+def test_openrouter_tat_reasoning_gui_effort_none(monkeypatch):
     _, openrouter = configure(
         monkeypatch, "openrouter", openrouter=[[o("OK")]], OPENROUTER_REASONING_MAX_TOKENS="0",
     )
 
     collect()
 
-    assert "extra_body" not in openrouter.calls[0] and openrouter.calls[0]["max_tokens"] == 800
+    assert openrouter.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert openrouter.calls[0]["max_tokens"] == 800
+
+
+@pytest.mark.parametrize("model", ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-chat"])
+def test_deepseek_stream_disables_reasoning(monkeypatch, model):
+    _, client = configure(monkeypatch, "openrouter", openrouter=[[o("OK"), o(tokens=25)]],
+                          OPENROUTER_MODEL=model, OPENROUTER_REASONING_MAX_TOKENS="0")
+    info = {}
+    assert collect(info) == (["OK"], None)
+    assert client.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert client.calls[0]["max_tokens"] == 800
+    assert info == {"model": model, "tokens": 25}
 
 
 def test_openrouter_loi_http_giua_chung_giu_cau_bao_loi_de_hieu(monkeypatch):
@@ -328,10 +341,11 @@ def test_info_khong_bat_buoc(monkeypatch):
     assert collect(None)[0] == ["OK"]
 
 
-def test_openrouter_stream_mac_dinh_khong_gui_reasoning_va_khong_cong_token(monkeypatch):
+def test_openrouter_stream_mac_dinh_gui_effort_none_va_khong_cong_token(monkeypatch):
     monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)  # dùng mặc định của cấu hình (0)
     _, openrouter = configure(monkeypatch, "openrouter", openrouter=[[o("OK")]])
 
     collect()
 
-    assert "extra_body" not in openrouter.calls[0] and openrouter.calls[0]["max_tokens"] == 800
+    assert openrouter.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert openrouter.calls[0]["max_tokens"] == 800

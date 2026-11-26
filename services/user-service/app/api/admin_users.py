@@ -6,13 +6,16 @@ các route tĩnh như /users/me, /users/health, /users/summary.
 
 import uuid
 
+from common_auth import outbox
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import get_active_user, require_admin
+from app.core import event_outbox
 from app.core.database import get_db
-from app.core.rabbitmq_admin import admin_mq
-from app.core.responses import FORBIDDEN, ApiError, ok
+from app.core.rabbitmq_admin import ROUTING_KEY_USER_BLOCKED, admin_mq
+from app.core.responses import FORBIDDEN, ApiError, ok, request_id
 from app.models import User, UserRole, UserStatus
 from app.repositories import citizen_profile_repository as profiles
 from app.repositories import user_repository as users
@@ -100,15 +103,40 @@ def get_user_citizen_profile(
     return ok(request, profile_service.get_profile(db, service.get_user(db, user_id)))
 
 
+async def _publish_access_revocation(
+    user_id: uuid.UUID, admin_id: uuid.UUID, reason: str, *, db=None, request_id=None,
+) -> None:
+    if db is not None and outbox.enabled() and await run_in_threadpool(
+        event_outbox.enqueue_and_commit,
+        db,
+        ROUTING_KEY_USER_BLOCKED,
+        admin_mq.blocked_payload(str(user_id), str(admin_id), reason, notify_user=False),
+        request_id=request_id,
+    ):
+        return
+    try:
+        await admin_mq.publish_user_blocked(
+            user_id=str(user_id),
+            admin_id=str(admin_id),
+            reason=reason,
+            notify_user=False,
+        )
+    except Exception:
+        pass
+
+
 @router.put("/{user_id:uuid}/role")
-def change_role(
+async def change_role(
     user_id: uuid.UUID,
     body: ChangeRoleRequest,
     request: Request,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    return ok(request, _one(db, service.change_role(db, admin, user_id, body.role)))
+    user, revoke_access = await run_in_threadpool(service.change_role, db, admin, user_id, body.role)
+    if revoke_access:
+        await _publish_access_revocation(user_id, admin.id, "role_changed", db=db, request_id=request_id(request))
+    return ok(request, await run_in_threadpool(_one, db, user))
 
 
 @router.post("/{user_id:uuid}/lock")
@@ -120,12 +148,21 @@ async def lock_user(
     db: Session = Depends(get_db),
 ):
     result = _one(db, service.lock_user(db, admin, user_id, body.reason, body.duration_days))
+    if outbox.enabled() and await run_in_threadpool(
+        event_outbox.enqueue_and_commit,
+        db,
+        ROUTING_KEY_USER_BLOCKED,
+        admin_mq.blocked_payload(str(user_id), str(admin.id), body.reason, body.duration_days, reason_code="locked"),
+        request_id=request_id(request),
+    ):
+        return ok(request, result)
     try:
         await admin_mq.publish_user_blocked(
             user_id=str(user_id),
             admin_id=str(admin.id),
             reason=body.reason,
             duration_days=body.duration_days,
+            reason_code="locked",
         )
     except Exception:
         pass
@@ -143,12 +180,14 @@ def unlock_user(
 
 
 @router.delete("/{user_id:uuid}", status_code=204)
-def delete_user(
+async def delete_user(
     user_id: uuid.UUID,
+    request: Request,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    service.delete_user(db, admin, user_id)
+    await run_in_threadpool(service.delete_user, db, admin, user_id)
+    await _publish_access_revocation(user_id, admin.id, "deleted", db=db, request_id=request_id(request))
     return Response(status_code=204)
 
 

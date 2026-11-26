@@ -535,6 +535,7 @@ paths:
         - InternalToken: []
       parameters:
         - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/FairnessKey"
       requestBody:
         required: true
         content:
@@ -574,7 +575,10 @@ paths:
         "422": { $ref: "#/components/responses/ValidationError" }
         "500": { $ref: "#/components/responses/InternalError" }
         "503":
-          description: Gemini embedding quá tải / hết quota, hoặc không kết nối được database
+          description: |
+            Embedding hoặc database không khả dụng, hết hạn, hoặc hàng đợi DB quá tải.
+            RAG_OVERLOADED báo từ chối trước embedding. RAG_RETRIEVAL_OVERLOADED báo quá tải sau pha embedding.
+            DEADLINE_EXCEEDED báo hết hạn xử lý.
           headers:
             X-Request-ID: { $ref: "#/components/headers/RequestId" }
           content:
@@ -598,6 +602,50 @@ paths:
                       message: Không truy cập được kho văn bản, vui lòng thử lại sau.
                     request_id: req-123
 
+  /internal/v1/rag/search/batch:
+    post:
+      tags: [Internal]
+      operationId: semanticSearchBatch
+      x-status: implemented
+      summary: Tìm kiếm theo một lô truy vấn độc lập
+      description: Giữ nguyên thứ tự item. Lỗi từng item được trả trong phản hồi 200.
+      servers:
+        - url: http://rag-service:8000
+      security:
+        - InternalToken: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/FairnessKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchSearchRequest" }
+      responses:
+        "200":
+          description: Kết quả từng item và tổng usage embedding của lô
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchSearchResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503":
+          description: RAG_OVERLOADED khi hàng đợi đầy trước khi chạy DB hoặc gửi embedding
+          headers:
+            X-Request-ID: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+              example:
+                data: null
+                error:
+                  code: RAG_OVERLOADED
+                  message: Kho văn bản đang quá tải, vui lòng thử lại sau.
+                request_id: req-123
+
 components:
   securitySchemes:
     BearerAuth:
@@ -618,6 +666,12 @@ components:
       required: false
       description: Mã lần gọi. Gateway tự tạo; gọi trực tiếp không có thì service tự tạo.
       schema: { type: string, example: req-123 }
+    FairnessKey:
+      name: X-Fairness-Key
+      in: header
+      required: false
+      description: Khóa lập lịch ẩn danh. Ưu tiên hơn fairness_key trong body, sau đó dùng request_turn_id hoặc X-Request-ID.
+      schema: { type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
     Page:
       name: page
       in: query
@@ -855,11 +909,23 @@ components:
           description: Vị trí trong văn bản để agent-service tạo câu trích dẫn
           properties:
             chuong: { type: string, nullable: true, example: "I" }
+            muc:    { type: string, nullable: true, example: "1" }
             dieu:   { type: string, nullable: true, example: "188" }
             khoan:  { type: string, nullable: true, example: "1" }
             diem:   { type: string, nullable: true, example: "a" }
         document:
           $ref: "#/components/schemas/LegalDocumentBrief"
+        retrieval_sources:
+          type: array
+          nullable: true
+          items: { type: object, additionalProperties: true }
+        rank_sources:
+          type: array
+          nullable: true
+          items: { type: string }
+        rrf_rank: { type: integer, nullable: true, minimum: 1 }
+        document_version: { type: string, nullable: true }
+        effective_date: { type: string, format: date, nullable: true }
 
     # ---------- Body gửi lên ----------
     CreateDocumentRequest:
@@ -945,20 +1011,102 @@ components:
         query:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 20000
           description: Câu hỏi của người dùng (plain text, tiếng Việt)
+        planned:
+          type: boolean
+          default: false
+          description: Agent has already planned this query; skip heuristic splitting.
         top_k:
           type: integer
           minimum: 1
           maximum: 20
           default: 5
-          description: Số chunks muốn lấy về
+          description: Ngân sách kết quả (1-20). Khi câu hỏi có nhiều ý (câu gốc + tối đa 3 ý con), kết quả có thể vượt top_k và trả tối đa 4 đoạn khi top_k nhỏ hơn số câu tìm.
         doc_types:
           type: array
           nullable: true
           description: Lọc theo loại văn bản. Bỏ trống = tìm trong tất cả loại.
           items:
             $ref: "#/components/schemas/DocType"
+        embedding_token_budget: { type: integer, nullable: true, minimum: 0 }
+        request_turn_id: { type: string, nullable: true, maxLength: 128 }
+        fairness_key: { type: string, nullable: true, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+        priority: { type: string, enum: [interactive, batch], default: interactive }
+        deadline_ms: { type: integer, nullable: true, minimum: 100, maximum: 90000 }
+        exact_refs:
+          type: array
+          nullable: true
+          items: { type: object, additionalProperties: true }
+        expand_adjacent_clauses: { type: boolean, default: true }
+        follow_citations: { type: boolean, default: true }
+
+    BatchSearchItem:
+      type: object
+      required: [item_id, query]
+      properties:
+        item_id: { type: string }
+        query: { type: string, minLength: 1, maxLength: 20000 }
+        top_k: { type: integer, minimum: 1, maximum: 20, default: 5 }
+        doc_types:
+          type: array
+          nullable: true
+          items: { type: string }
+        planned: { type: boolean, default: true }
+        embedding_token_budget: { type: integer, nullable: true, minimum: 0 }
+        exact_refs:
+          type: array
+          nullable: true
+          items: { type: object, additionalProperties: true }
+        expand_adjacent_clauses: { type: boolean, default: true }
+        follow_citations: { type: boolean, default: true }
+
+    BatchSearchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: "#/components/schemas/BatchSearchItem" }
+        request_turn_id: { type: string, nullable: true, maxLength: 128 }
+        fairness_key: { type: string, nullable: true, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9_-]+$' }
+        priority: { type: string, enum: [batch], default: batch }
+        deadline_ms: { type: integer, nullable: true, minimum: 100, maximum: 90000 }
+
+    EmbeddingUsage:
+      type: object
+      properties:
+        prompt_tokens: { type: integer, default: 0 }
+        cached_tokens: { type: integer, default: 0 }
+        attempts: { type: integer, default: 0 }
+        cost_nano_usd: { type: integer, default: 0 }
+        budget_capped: { type: boolean, default: false }
+        skipped_reason: { type: string, nullable: true }
+        model: { type: string, nullable: true }
+        request_turn_id: { type: string, nullable: true }
+        usage_uncertain:
+          type: boolean
+          default: false
+          description: Chi phí chưa xác nhận sau dispatch. Giữ nguyên khoản đã giữ trong ledger.
+
+    BatchSearchItemResult:
+      type: object
+      required: [item_id, status]
+      properties:
+        item_id: { type: string }
+        status: { type: string, enum: [ok, degraded, overloaded, error] }
+        chunks:
+          type: array
+          default: []
+          items: { $ref: "#/components/schemas/ChunkSearchResult" }
+        error_code: { type: string, nullable: true }
+        embedding_usage:
+          nullable: true
+          description: Thông tin cache và giới hạn của item. Chi phí provider được ghi ở usage của cả lô.
+          allOf:
+            - $ref: "#/components/schemas/EmbeddingUsage"
 
     # ---------- Kết quả từng API ----------
     DocumentResponse:
@@ -1214,6 +1362,22 @@ components:
             chunks:
               type: array
               items: { $ref: "#/components/schemas/ChunkSearchResult" }
+            embedding_usage: { $ref: "#/components/schemas/EmbeddingUsage" }
+        error:      { $ref: "#/components/schemas/NoError" }
+        request_id: { $ref: "#/components/schemas/RequestIdValue" }
+
+    BatchSearchResponse:
+      type: object
+      required: [data, error, request_id]
+      properties:
+        data:
+          type: object
+          required: [items, embedding_usage]
+          properties:
+            items:
+              type: array
+              items: { $ref: "#/components/schemas/BatchSearchItemResult" }
+            embedding_usage: { $ref: "#/components/schemas/EmbeddingUsage" }
         error:      { $ref: "#/components/schemas/NoError" }
         request_id: { $ref: "#/components/schemas/RequestIdValue" }
 

@@ -235,7 +235,8 @@ async def run_test():
     assert n1 is None, "Should ignore notification without user_id"
 
     n2 = format_notification("document.ocr.completed", {"user_id": "usr-1"})
-    assert n2 is not None and "Tài liệu #None" in n2["message"]
+    assert n2 is not None
+    assert n2["message"] == "Tài liệu đã được quét an toàn và trích xuất dữ liệu."
 
     n3 = format_notification("unknown.system.heartbeat", {"user_id": "usr-1"})
     assert n3 is None, "Should ignore unknown event type"

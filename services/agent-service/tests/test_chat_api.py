@@ -103,8 +103,14 @@ def test_goi_procedure_search_kem_request_id_va_khong_gui_token(main_module, mon
     assert "Authorization" not in request.headers and "X-Internal-Token" not in request.headers
 
 
-@pytest.mark.parametrize("value", ["", "   ", "x" * 2001])
+@pytest.mark.parametrize("value", ["", "   "])
 def test_message_khong_hop_le(client, value):
     r = client.post("/api/v1/agent/chat", json={"message": value})
     assert r.status_code == 422
     assert r.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_message_qua_dai_tra_413(client):
+    r = client.post("/api/v1/agent/chat", json={"message": "x" * 20001})
+    assert r.status_code == 413
+    assert r.json()["error"]["code"] == "QUESTION_TOO_LONG"

@@ -1,0 +1,357 @@
+# Toàn bộ backend trên 1 máy AWS EC2. Local dev vẫn dùng docker-compose.yml.
+#
+#   t3.small (2 GB RAM + swap 2 GB):  docker compose -f docker-compose.ec2.yml up -d --build
+#   Máy 8 GB lúc demo:                docker compose -f docker-compose.ec2.yml --profile full up -d --build
+#
+# Profile "full" thêm document-worker (PaddleOCR), ClamAV và OnlyOffice. KHÔNG bật trên t3.small.
+#
+# Biến dùng cho chính file này lấy từ .env ở thư mục gốc:
+#   bắt buộc:      RABBITMQ_USER, RABBITMQ_PASSWORD, JWT_KEYS_DIR, SITE_ADDRESS, FRONTEND_ORIGIN
+#   tuỳ chọn:      OUTBOX_ENABLED (mặc định false), REDIS_MAXMEMORY
+#   profile full:  ONLYOFFICE_JWT_SECRET (>= 32 ký tự), OFFICE_SITE_ADDRESS, ONLYOFFICE_PUBLIC_URL
+# Biến của từng service lấy từ services/<tên>/.env (mẫu: services/<tên>/.env.example).
+# `environment:` bên dưới ghi đè giá trị cùng tên trong các file .env đó.
+#
+# mem_limit là trần của từng container, tổng lớn hơn RAM thật: máy chủ PHẢI có swap.
+# Không đặt memswap_limit nên mỗi container được dùng thêm swap bằng đúng mem_limit.
+name: ailegal-ec2
+
+x-env: &env
+  JWT_PUBLIC_KEY_PATH: /run/keys/jwt_public.pem
+  RABBITMQ_ENABLED: "true"
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}:${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}@rabbitmq:5672/
+  # Cache dùng chung; Redis chết thì service tự rơi về cache trong RAM.
+  REDIS_URL: redis://redis:6379/0
+  # Chỉ đặt true SAU KHI đã chạy */database/*_event_outbox.sql (user, lawyer, procedure). Thiếu bảng mà bật thì
+  # duyệt luật sư, khoá user, nộp hồ sơ sẽ lỗi DB.
+  OUTBOX_ENABLED: ${OUTBOX_ENABLED:-false}
+  # Chỉ Caddy vào được các service (không mở cổng ra máy chủ) nên tin X-Forwarded-* của nó.
+  FORWARDED_ALLOW_IPS: "*"
+  USER_SERVICE_URL: http://user-service:8000
+  LAWYER_SERVICE_URL: http://lawyer-service:8000
+  PROCEDURE_SERVICE_URL: http://procedure-service:8000
+  AGENT_SERVICE_URL: http://agent-service:8000
+  RAG_SERVICE_URL: http://rag-service:8000
+  CONTRACT_SERVICE_URL: http://contract-service:8000
+  DOCUMENT_SERVICE_URL: http://document-service:8000
+  LOCATION_SERVICE_URL: http://location-service:8000
+  CONSULTATION_SERVICE_URL: http://consultation-service:8000
+  NOTIFICATION_SERVICE_URL: http://notification-service:8000
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: "3" }
+
+x-health: &health
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 60s
+  start_interval: 3s
+
+x-needs-rabbit: &needs-rabbit
+  rabbitmq:
+    condition: service_healthy
+
+# Container chạy không quyền root, filesystem chỉ đọc.
+x-locked: &locked
+  user: "65532:65532"
+  init: true
+  read_only: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+
+services:
+  caddy:
+    <<: *common
+    image: caddy:2-alpine
+    mem_limit: 80m
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "8443:8443" # OnlyOffice (profile full); không chạy full thì không có gì nghe cổng này
+    environment:
+      # localhost = chứng chỉ tự ký (test máy cá nhân); tên miền thật = Let's Encrypt tự động.
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      OFFICE_SITE_ADDRESS: ${OFFICE_SITE_ADDRESS:-https://localhost:8443}
+    volumes:
+      - ./gateway/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2020/health"]
+
+  rabbitmq:
+    <<: *common
+    image: rabbitmq:3-alpine
+    # hostname cố định: RabbitMQ lưu dữ liệu theo tên node, đổi hostname là mất queue.
+    hostname: rabbitmq
+    mem_limit: 224m
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Thieu RABBITMQ_USER trong .env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Thieu RABBITMQ_PASSWORD trong .env}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
+    volumes:
+      - ./gateway/rabbitmq.conf:/etc/rabbitmq/conf.d/90-lowmem.conf:ro
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      <<: *health
+      # Kiểm cổng bằng nc: rabbitmq-diagnostics bật thêm một máy ảo Erlang, tốn RAM của chính container.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5672"]
+
+  redis:
+    <<: *common
+    image: redis:7-alpine
+    mem_limit: 80m
+    # volatile-lru giữ khoá legal:corpus_version (không TTL). Chỉ là cache: không ghi đĩa, không mở cổng ra máy chủ.
+    command: ["redis-server", "--maxmemory", "${REDIS_MAXMEMORY:-48mb}", "--maxmemory-policy", "volatile-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "redis-cli", "ping"]
+
+  user-service:
+    <<: *common
+    build: { context: ./services/user-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 128m
+    depends_on: *needs-rabbit
+    env_file: ./services/user-service/.env
+    environment:
+      <<: *env
+      JWT_PRIVATE_KEY_PATH: /run/keys/jwt_private.pem
+      RUN_LOGOUT_AUDIT_IN_API: "true"
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_private.pem:/run/keys/jwt_private.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/users/health', timeout=3)"]
+
+  lawyer-service:
+    <<: *common
+    build: { context: ./services/lawyer-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 128m
+    depends_on: *needs-rabbit
+    env_file: ./services/lawyer-service/.env
+    environment: *env
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/lawyers/health', timeout=3)"]
+
+  procedure-service:
+    <<: *common
+    build: { context: ./services/procedure-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 160m
+    depends_on: *needs-rabbit
+    env_file: ./services/procedure-service/.env
+    environment:
+      <<: *env
+      # Trình soạn Word chỉ chạy khi bật profile full và đặt ONLYOFFICE_JWT_SECRET; không thì route đó trả 503.
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      ONLYOFFICE_INTERNAL_URL: http://onlyoffice
+      ONLYOFFICE_PUBLIC_URL: ${ONLYOFFICE_PUBLIC_URL:-https://localhost:8443}
+      ONLYOFFICE_CALLBACK_BASE: http://procedure-service:8000/api/v1/procedures
+      ONLYOFFICE_BACKUP_DIR: /app/office-backups
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - office_backups:/app/office-backups
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/procedures/health', timeout=3)"]
+
+  agent-service:
+    <<: *common
+    build: { context: ./services/agent-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 192m
+    env_file: ./services/agent-service/.env
+    environment: *env
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/agent/health', timeout=3)"]
+
+  rag-service:
+    <<: *common
+    build: { context: ./services/rag-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 160m
+    env_file: ./services/rag-service/.env
+    environment:
+      <<: *env
+      RUN_RAG_INDEXING_WORKER_IN_API: "false" # đã có rag-worker
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/rag/health', timeout=3)"]
+
+  # Duyệt/thay văn bản luật chạy nền, nhận việc từ RabbitMQ. Không có HTTP nên không có healthcheck.
+  rag-worker:
+    <<: *common
+    build: { context: ./services/rag-service, additional_contexts: { libs: ./libs } }
+    command: ["python", "-m", "app.rag_indexing_worker"]
+    mem_limit: 160m
+    depends_on: *needs-rabbit
+    env_file: ./services/rag-service/.env
+    environment: *env
+
+  contract-service:
+    <<: [*common, *locked]
+    build: { context: ./services/contract-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 450m
+    depends_on: *needs-rabbit
+    env_file: ./services/contract-service/.env
+    environment: *env
+    pids_limit: 128
+    # LibreOffice (đọc mẫu người dùng tải lên) cần chỗ ghi tạm.
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,mode=1777"]
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/contracts/health', timeout=3)"]
+
+  # Xuất file hợp đồng (preview và bản cuối). Không có HTTP nên không có healthcheck.
+  contract-worker:
+    <<: [*common, *locked]
+    build: { context: ./services/contract-service, additional_contexts: { libs: ./libs } }
+    command: [python, -m, app.services.generation_worker]
+    mem_limit: 450m
+    depends_on: *needs-rabbit
+    env_file: ./services/contract-service/.env
+    environment: *env
+    pids_limit: 128
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=256m,mode=1777"]
+
+  document-service:
+    <<: [*common, *locked]
+    build: { context: ./services/document-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 256m
+    depends_on: *needs-rabbit
+    env_file: ./services/document-service/.env
+    environment:
+      <<: *env
+      DOCUMENT_OCR_MODEL_DIR: /usr/share/tesseract-ocr/5/tessdata
+      DOCUMENT_VIETOCR_MODEL_DIR: /opt/vietocr
+      # VietOCR cần ~1 GB RAM nên tắt: CCCD đọc bằng Tesseract. Muốn đọc bằng VNPT (Tesseract dự phòng) thì đặt
+      # EKYC_ENABLED=1 và 3 token EKYC_* trong services/document-service/.env.
+      DOCUMENT_VIETOCR_ENABLED: "0"
+    pids_limit: 128
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/documents/health', timeout=3)"]
+
+  location-service:
+    <<: *common
+    build: { context: ./services/location-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 96m
+    depends_on: *needs-rabbit
+    env_file: ./services/location-service/.env
+    environment: *env
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/locations/health', timeout=3)"]
+
+  consultation-service:
+    <<: *common
+    build: { context: ./services/consultation-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 128m
+    depends_on: *needs-rabbit
+    env_file: ./services/consultation-service/.env
+    environment: *env
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/consultations/health', timeout=3)"]
+
+  notification-service:
+    <<: *common
+    build: { context: ./services/notification-service, additional_contexts: { libs: ./libs } }
+    mem_limit: 128m
+    depends_on: *needs-rabbit
+    env_file: ./services/notification-service/.env
+    environment:
+      <<: *env
+      # Hai consumer chạy luôn trong API, đỡ một container notification-worker.
+      RUN_NOTIFICATION_HUB_IN_API: "true"
+      RUN_REPORT_ENRICHMENT_IN_API: "true"
+    volumes:
+      - ${JWT_KEYS_DIR:-./.keys}/jwt_public.pem:/run/keys/jwt_public.pem:ro
+      - notification_data:/app/data
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-S", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/api/v1/notifications/health', timeout=3)"]
+
+  # ───────────── profile "full" (máy 8 GB) ─────────────
+  # Mọi file mới phải qua ClamAV. Worker chỉ có trong profile này để không bao giờ chạy thiếu ClamAV
+  # (thiếu thì job bị đánh failed trong DB). PaddleOCR cần tới ~2,2 GB RAM.
+  document-worker:
+    <<: [*common, *locked]
+    profiles: [full]
+    build: { context: ./services/document-service, dockerfile: Dockerfile.worker, additional_contexts: { libs: ./libs } }
+    mem_limit: 3g
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      document-antivirus:
+        condition: service_healthy
+    env_file: ./services/document-service/.env
+    environment:
+      <<: *env
+      DOCUMENT_PADDLE_MODEL_DIR: /opt/document-ocr
+      DOCUMENT_CLAMAV_HOST: document-antivirus
+    pids_limit: 256
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=128m"]
+
+  document-antivirus:
+    <<: *common
+    profiles: [full]
+    image: clamav/clamav:stable@sha256:ebec5bc138401b36ae987caa1a3fa3c3b2a21ed3d51f0bfa5852825e663e67b0
+    mem_limit: 3g
+    # Healthcheck có sẵn trong image.
+    volumes:
+      - clamav_signatures:/var/lib/clamav
+
+  onlyoffice:
+    <<: *common
+    profiles: [full]
+    image: onlyoffice/documentserver:9.3
+    mem_limit: 3g
+    shm_size: 1gb
+    environment:
+      JWT_ENABLED: "true"
+      JWT_HEADER: Authorization
+      ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+    # Không mount private key: thiếu secret thì dừng ngay thay vì chạy với secret rỗng.
+    entrypoint: ["sh", "-c", "[ $${#ONLYOFFICE_JWT_SECRET} -ge 32 ] || { echo 'Dat ONLYOFFICE_JWT_SECRET >= 32 ky tu trong .env' >&2; exit 1; }; exec sh /opt/legal-assistant/start-onlyoffice.sh"]
+    volumes:
+      - ./scripts/start-onlyoffice.sh:/opt/legal-assistant/start-onlyoffice.sh:ro
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    healthcheck:
+      <<: *health
+      test: ["CMD", "curl", "-f", "http://localhost/healthcheck"]
+      start_period: 180s
+
+volumes:
+  caddy_data:
+  caddy_config:
+  rabbitmq_data:
+  office_backups:
+  notification_data:
+  clamav_signatures:
+  onlyoffice_data:
+  onlyoffice_logs:

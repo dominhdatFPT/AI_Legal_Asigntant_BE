@@ -115,5 +115,5 @@ def validate_summary(summary: dict, messages: list[dict]) -> dict:
                 raise SummaryInvalid(f"{name}: source_ids không có trong đầu vào: {unknown}")
             if name in _VERBATIM:
                 needle = _norm(item[_VERBATIM[name]])
-                item["verified"] = any(needle in text_of[i] for i in item["source_ids"])
+                item["verified"] = bool(needle) and any(needle in text_of[i] for i in item["source_ids"])
     return data

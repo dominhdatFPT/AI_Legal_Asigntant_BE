@@ -1,6 +1,15 @@
 from types import SimpleNamespace
 
+import pytest
+
+from app.core.config import get_settings
 from app.services import search
+
+
+@pytest.fixture(autouse=True)
+def vector_only(monkeypatch):
+    monkeypatch.setenv("HYBRID_ENABLED", "false")
+    get_settings.cache_clear()
 
 
 class SpyEmbedder:

@@ -47,6 +47,7 @@ class Consultation(Base):
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     summarized_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summarized_until_message_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow,
                                                  onupdate=utcnow)
@@ -90,13 +91,18 @@ class ConsultationSummary(Base):
         Uuid, ForeignKey("consultations.id", ondelete="CASCADE"), nullable=False)
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end_message_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     message_count: Mapped[int] = mapped_column(Integer, nullable=False)
     summary: Mapped[dict] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
     prompt_version: Mapped[str | None] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
 
-    __table_args__ = (UniqueConstraint("consultation_id", "window_end", name="consultation_summaries_window_key"),)
+    __table_args__ = (
+        UniqueConstraint("consultation_id", "window_end", "window_end_message_id",
+                         name="consultation_summaries_window_key",
+                         postgresql_nulls_not_distinct=True),
+    )
 
 
 class ConsultationReport(Base):
@@ -139,3 +145,11 @@ _index("ix_consultation_messages_history", ConsultationMessage.consultation_id, 
 _index("ix_consultation_messages_unread", ConsultationMessage.consultation_id, ConsultationMessage.sender_id,
        where=ConsultationMessage.is_read.is_(False))
 _index("ix_consultation_reports_admin", ConsultationReport.status, ConsultationReport.created_at)
+
+Index(
+    "consultation_summaries_legacy_window_key",
+    ConsultationSummary.consultation_id,
+    ConsultationSummary.window_end,
+    unique=True,
+    sqlite_where=ConsultationSummary.window_end_message_id.is_(None),
+).ddl_if(dialect="sqlite")

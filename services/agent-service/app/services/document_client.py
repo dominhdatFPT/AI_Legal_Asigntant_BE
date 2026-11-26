@@ -6,6 +6,7 @@ import uuid
 import httpx
 
 from app.core.config import get_settings
+from app.services import rag_client
 
 NOT_READY_MESSAGE = "Tài liệu đang xử lý, vui lòng thử lại sau."
 UNREADABLE_MESSAGE = "Không đọc được nội dung tài liệu hoặc tài liệu không đạt kiểm tra an toàn, vui lòng tải tài liệu khác."
@@ -38,8 +39,13 @@ async def get_extraction(
     if request_id:
         headers["X-Request-ID"] = request_id
     try:
-        async with httpx.AsyncClient(timeout=10.0, transport=transport) as client:
-            resp = await client.get(url, headers=headers)
+        if transport is not None:  # test: MockTransport → client riêng như trước
+            async with httpx.AsyncClient(timeout=10.0, transport=transport) as client:
+                resp = await client.get(url, headers=headers)
+        else:
+            # Dùng lại AsyncClient chung của rag_client (giữ kết nối, đóng ở lifespan); timeout riêng theo request.
+            client = await rag_client._get_http_client(get_settings().rag_timeout_seconds)
+            resp = await client.get(url, headers=headers, timeout=10.0)
     except httpx.TimeoutException as e:
         raise DocumentServiceError("document-service quá thời gian chờ") from e
     except httpx.RequestError as e:

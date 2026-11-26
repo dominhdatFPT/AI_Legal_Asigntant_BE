@@ -1,0 +1,40 @@
+x-health: &health
+  interval: 1s
+  timeout: 3s
+  retries: 45
+
+services:
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    pull_policy: never
+    ports: ["127.0.0.1:55432:5432"]
+    tmpfs: [/var/lib/postgresql/data]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    command: ["postgres", "-c", "cluster_name=legal-test-infra", "-c", "max_connections=400", "-c", "shared_preload_libraries=pg_stat_statements"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+
+  redis-test:
+    image: redis:7-alpine
+    pull_policy: never
+    ports: ["127.0.0.1:56379:6379"]
+    command: ["redis-server", "--maxmemory", "24mb", "--maxmemory-policy", "volatile-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "redis-cli", "ping"]
+
+  rabbitmq-test:
+    image: rabbitmq:3-management-alpine
+    pull_policy: never
+    ports: ["127.0.0.1:55672:5672"]
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users []"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]

@@ -1,0 +1,23 @@
+{
+  "origin": "Bộ hồi quy bổ sung do Codex xây dựng; không phải bộ 17 câu gốc chưa được cung cấp.",
+  "source": "https://datafiles.chinhphu.vn/cpp/files/vbpq/2025/9/113-vbhn-vpqh.pdf",
+  "cases": [
+    {"id":"TM01","question":"Hợp đồng mua bán hàng hóa 1 tỷ có điều khoản phạt 12%, chỉ phần nghĩa vụ 100 triệu bị vi phạm. Không thuộc dịch vụ giám định. Trần phạt tính thế nào?","articles":["301"],"checks":["8\\s*%","8\\s*(triệu|tr)"]},
+    {"id":"TM02","question":"Hợp đồng mua bán giữa hai doanh nghiệp không thỏa thuận phạt vi phạm. Bên mua có tự đòi tiền phạt vì bên bán giao trễ không?","articles":["300"],"checks":["thỏa thuận|thoả thuận"]},
+    {"id":"TM03","question":"Bên bán giao hàng trễ nhưng chưa chứng minh được thiệt hại và quan hệ nhân quả. Tôi có đương nhiên được bồi thường không?","articles":["303"],"checks":["thiệt hại","nhân quả|trực tiếp"]},
+    {"id":"TM04","question":"Trong tranh chấp mua bán hàng hóa, ai phải chứng minh khoản lợi nhuận trực tiếp bị mất khi yêu cầu bồi thường?","articles":["304"],"checks":["chứng minh"]},
+    {"id":"TM05","question":"Nhận hàng lỗi nhưng tôi không áp dụng biện pháp hợp lý hạn chế tổn thất. Yêu cầu bồi thường có thể bị giảm không?","articles":["305"],"checks":["hạn chế|giảm"]},
+    {"id":"TM06","question":"Hai doanh nghiệp thỏa thuận lãi chậm thanh toán tiền hàng. Khi đòi lãi có phải luôn bỏ thỏa thuận và áp lãi thị trường không?","articles":["306"],"checks":["thỏa thuận|thoả thuận"]},
+    {"id":"TM07","question":"Doanh nghiệp nợ tiền hàng nhưng không có thỏa thuận lãi. Có được mặc định dùng 20% một năm không?","articles":["306"],"checks":["nợ quá hạn","trung bình"]},
+    {"id":"TM08","question":"Hợp đồng thương mại có thỏa thuận phạt. Có được yêu cầu đồng thời phạt và bồi thường khi đủ điều kiện không?","articles":["307"],"checks":["bồi thường","phạt"]},
+    {"id":"TM09","question":"Bên bán viện dẫn bất khả kháng để miễn trách nhiệm giao hàng trễ. Ai chịu nghĩa vụ chứng minh?","articles":["294"],"checks":["chứng minh"]},
+    {"id":"TM10","question":"Bên bán được miễn trách nhiệm nhưng thông báo chậm gây thêm thiệt hại. Có phải bồi thường phần phát sinh đó không?","articles":["295"],"checks":["thông báo","bồi thường"]},
+    {"id":"TM11","question":"Hợp đồng mua bán không quy định thời hạn khiếu nại. Khiếu nại về số lượng phải thực hiện trong bao lâu?","articles":["318"],"checks":["3\\s*tháng|ba tháng"]},
+    {"id":"TM12","question":"Tranh chấp mua bán hàng hóa thông thường, không thuộc logistics, thời hiệu khởi kiện theo Luật Thương mại tính thế nào?","articles":["319"],"checks":["2\\s*năm|hai năm"]},
+    {"id":"TM13","question":"Bên bán giao trễ có tự động cho bên mua quyền hủy toàn bộ hợp đồng không, nếu không có điều kiện hủy đã thỏa thuận?","articles":["312"],"checks":["cơ bản"]},
+    {"id":"TM14","question":"Tạm ngừng thực hiện hợp đồng thương mại có đồng nghĩa hợp đồng hết hiệu lực không?","articles":["309"],"checks":["hiệu lực"]},
+    {"id":"TM15","question":"Khi hủy hợp đồng mua bán, điều khoản giải quyết tranh chấp có còn áp dụng không?","articles":["314"],"checks":["tranh chấp"]},
+    {"id":"TM16","question":"An Phát mua hàng Minh Long: hợp đồng 30 tỷ, phần nghĩa vụ bị vi phạm 6 tỷ, thỏa thuận phạt 10% phần bị vi phạm. Đây là mua bán hàng hóa thông thường, không phải giám định. Trần phạt là bao nhiêu?","articles":["301"],"checks":["8\\s*%","480\\s*triệu|0[,.]48\\s*tỷ|480[., ]?000[., ]?000"]},
+    {"id":"TM17","question":"An Phát và Minh Long tranh chấp hợp đồng hàng hóa 30 tỷ, có phạt, nợ tiền hàng và yêu cầu bồi thường. Chưa rõ giá trị nghĩa vụ bị vi phạm, thiệt hại thực tế và mức lãi. Hãy nêu nguyên tắc xử lý, không tự chốt tổng tiền.","articles":["301","303","306"],"checks":["nghĩa vụ","thiệt hại","lãi"]}
+  ]
+}

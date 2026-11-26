@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
@@ -187,7 +186,7 @@ def register_report_models(Base: type[DeclarativeBase]):
         title = Column(String(255), nullable=False)
         message = Column(Text, nullable=False)
         icon = Column(String(64), nullable=False, default="bell")
-        action_url = Column(String(512), nullable=False, default="/")
+        action_url = Column(String(512), nullable=False, default="")
         source_type = Column(String(24), nullable=True)
         source_id = Column(String(64), nullable=True)
         created_by = Column(String(64), nullable=True)
@@ -196,7 +195,7 @@ def register_report_models(Base: type[DeclarativeBase]):
         is_deleted = Column(Boolean, nullable=False, default=False)
 
         def to_dict(self, is_read: bool = False) -> Dict[str, Any]:
-            return {
+            data: Dict[str, Any] = {
                 "id": self.id,
                 "scope": "group",
                 "audience": self.audience,
@@ -206,12 +205,15 @@ def register_report_models(Base: type[DeclarativeBase]):
                 "title": self.title,
                 "message": self.message,
                 "icon": self.icon,
-                "action_url": self.action_url,
-                "source_type": self.source_type,
-                "source_id": self.source_id,
+                "action_url": self.action_url or "",
                 "is_read": is_read,
                 "created_at": self.created_at.isoformat() if self.created_at else None,
             }
+            if self.source_type is not None:
+                data["source_type"] = self.source_type
+            if self.source_id is not None:
+                data["source_id"] = self.source_id
+            return data
 
     class GroupNotificationReadRecord(Base):
         __tablename__ = "group_notification_reads"
@@ -231,11 +233,11 @@ def register_report_models(Base: type[DeclarativeBase]):
         audience = Column(String(16), nullable=False, default="all")
         priority = Column(String(10), nullable=False, default="normal")
         channels = Column(String(120), nullable=False, default="in_app")
-        action_url = Column(String(512), nullable=False, default="/")
+        action_url = Column(String(512), nullable=False, default="")
         status = Column(String(16), nullable=False, default="sent", index=True)
-        scheduled_at = Column(DateTime(timezone=True), nullable=True)
         sent_at = Column(DateTime(timezone=True), nullable=True)
-        expires_at = Column(DateTime(timezone=True), nullable=True)
+        recipient_id = Column(String(255), nullable=True)
+        personal_notification_id = Column(String(64), nullable=True)
         group_notification_id = Column(String(64), nullable=True)
         stats_json = Column(Text, nullable=False, default="{}")
         created_by = Column(String(64), nullable=False)
@@ -243,9 +245,10 @@ def register_report_models(Base: type[DeclarativeBase]):
 
         def to_dict(self) -> Dict[str, Any]:
             try:
-                stats = json.loads(self.stats_json) if self.stats_json else {}
+                raw_stats = json.loads(self.stats_json) if self.stats_json else {}
             except Exception:
-                stats = {}
+                raw_stats = {}
+            stats = {k: v for k, v in raw_stats.items() if v is not None} if isinstance(raw_stats, dict) else {}
             return {
                 "id": self.id,
                 "title": self.title,
@@ -253,11 +256,11 @@ def register_report_models(Base: type[DeclarativeBase]):
                 "audience": self.audience,
                 "priority": self.priority,
                 "channels": [c.strip() for c in (self.channels or "").split(",") if c.strip()],
-                "action_url": self.action_url,
+                "action_url": self.action_url or "",
                 "status": self.status,
-                "scheduled_at": self.scheduled_at.isoformat() if self.scheduled_at else None,
                 "sent_at": self.sent_at.isoformat() if self.sent_at else None,
-                "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+                "recipient_id": self.recipient_id,
+                "personal_notification_id": self.personal_notification_id,
                 "group_notification_id": self.group_notification_id,
                 "stats": stats,
                 "created_by": self.created_by,

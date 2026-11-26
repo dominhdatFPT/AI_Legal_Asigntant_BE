@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -9,42 +11,79 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
+from common_auth import revocation
 
 from app.api.v1 import documents, internal
 from app.core.config import get_settings
-from app.core.database import get_engine
+from app.core.database import get_engine, get_session
+from app.services import hybrid
 from app.services.document_approval import recover_on_startup
-from app.services.embedding import get_embedder
+from app.services.embedding import FakeEmbedder, close_async_embedding_client, get_embedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-
-def warmup() -> None:
-    """Mở sẵn kết nối Supabase và tạo client Gemini + gọi thử 1 lần embedding.
-    Lỗi thì chỉ ghi log, service vẫn chạy (lần tìm kiếm đầu sẽ tự kết nối như trước)."""
+def warmup_database() -> None:
     started = time.perf_counter()
     try:
-        with get_engine().connect() as conn:
-            conn.execute(text("SELECT 1"))
+        settings = get_settings()
+        if settings.hybrid_enabled:
+            model = settings.embedding_model
+            if settings.embedding_provider.lower() == "fake":
+                model = FakeEmbedder(settings.embedding_dim).model_name
+            with get_session() as db:
+                hybrid.warmup_lexical(db, model)
+        else:
+            with get_engine().connect() as conn:
+                conn.execute(text("SELECT 1"))
+        logger.info("rag DB warmup %.2fs", time.perf_counter() - started)
+    except Exception:
+        logger.warning("rag DB warmup failed", exc_info=True)
+
+
+def warmup_provider() -> None:
+    try:
         get_embedder().embed_query("khởi động")
-        logger.info("rag warmup xong sau %.2fs", time.perf_counter() - started)
-    except Exception as e:  # noqa: BLE001 - khởi động không được phép chết vì warmup
-        logger.warning("rag warmup lỗi (bỏ qua): %s", e)
+    except Exception:
+        logger.warning("rag embedding provider warmup failed", exc_info=True)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if get_settings().warmup_on_startup:
-        await run_in_threadpool(warmup)
-    if get_settings().rag_database_url:
-        # Giả định rag-service chạy MỘT tiến trình: văn bản còn processing lúc khởi động là việc nền đã bị ngắt
-        await run_in_threadpool(recover_on_startup)
-    yield
+    settings = get_settings()
+    warmups = []
+    if settings.rag_database_url:
+        try:
+            get_engine()
+        except Exception as exc:
+            logger.warning("rag DB engine initialization failed (%s)", type(exc).__name__)
+        else:
+            # Văn bản còn processing lúc khởi động có thể là việc nền đã bị ngắt.
+            await run_in_threadpool(recover_on_startup)
+            if settings.warmup_on_startup:
+                warmups = [
+                    asyncio.create_task(run_in_threadpool(warmup_database)),
+                    asyncio.create_task(run_in_threadpool(warmup_provider)),
+                ]
+    if os.getenv("RUN_RAG_INDEXING_WORKER_IN_API", "").strip().lower() in ("1", "true", "yes"):
+        from common_auth.events import rabbitmq_url
+
+        if rabbitmq_url():
+            from app import rag_indexing_worker
+
+            warmups.append(asyncio.create_task(rag_indexing_worker.main()))
+    try:
+        yield
+    finally:
+        for task in warmups:
+            task.cancel()
+        await asyncio.gather(*warmups, return_exceptions=True)
+        await close_async_embedding_client()
 
 
 app = FastAPI(title="RAG Service", version="0.2.0", lifespan=lifespan)
+revocation.ensure_started()
 app.include_router(internal.router)
 app.include_router(documents.router)
 

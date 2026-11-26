@@ -1,10 +1,12 @@
 """Việc của admin: xem danh sách, duyệt / từ chối hồ sơ xin làm luật sư."""
 
+import logging
 import uuid
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core import rabbitmq_lawyer
 from app.core.responses import (
     APPLICATION_NOT_FOUND,
     CREDENTIAL_NOT_FOUND,
@@ -27,6 +29,8 @@ from app.models.lawyer import (
 from app.repositories import lawyer_repository as repo
 from app.services import document_client, profile_service, user_client
 from app.services.views import lawyer_view, pagination
+
+logger = logging.getLogger(__name__)
 
 
 def _reviewable(db: Session, application_id: uuid.UUID) -> LawyerApplication:
@@ -80,21 +84,55 @@ def _apply_new(db: Session, application: LawyerApplication) -> None:
 
 
 def approve(db: Session, admin_id: uuid.UUID, application_id: uuid.UUID) -> dict:
+    from common_auth import events, outbox
+    from app.core import event_outbox
+
     application = _reviewable(db, application_id)
     if application.bar_card_number and repo.bar_card_taken(db, application.bar_card_number, application.user_id):
         raise ApiError(409, BAR_CARD_NUMBER_TAKEN)
 
-    # Đổi vai trò trước; lỗi thì đơn vẫn pending. Lưu DB lỗi sau bước này: admin duyệt lại (đổi vai trò lặp lại an toàn).
-    user_client.promote_to_lawyer(application.user_id)
+    # Kiểm tra ràng buộc hồ sơ trước khi đổi vai trò. Nếu User Service lỗi, đơn vẫn pending.
     _apply_new(db, application)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise ApiError(409, BAR_CARD_NUMBER_TAKEN) from None
+    try:
+        user_client.promote_to_lawyer(application.user_id)
+    except Exception:
+        db.rollback()
+        raise
     application.status = APPROVED
     application.reviewed_by = admin_id
     application.reviewed_at = utcnow()
+    payload = None
+    enqueued = False
     try:
+        if outbox.enabled():
+            payload = rabbitmq_lawyer.approved_payload(
+                application.id, application.user_id, application.bar_card_number, str(admin_id),
+            )
+            try:
+                with db.begin_nested():
+                    outbox.enqueue(db, event_outbox.EVENT_OUTBOX, rabbitmq_lawyer.ROUTING_KEY_LAWYER_APPROVED, payload)
+                enqueued = True
+            except Exception as exc:
+                logger.warning("Không ghi được event lawyer.approved vào outbox (%s)", type(exc).__name__)
         db.commit()
     except IntegrityError:
         db.rollback()
         raise ApiError(409, BAR_CARD_NUMBER_TAKEN) from None
+    except Exception:
+        db.rollback()
+        raise
+    if enqueued:
+        event_outbox.relay.kick()
+    elif payload is not None:
+        try:
+            events.publish_event_sync(rabbitmq_lawyer.ROUTING_KEY_LAWYER_APPROVED, payload)
+        except Exception as exc:
+            logger.warning("Không phát trực tiếp được event lawyer.approved (%s)", type(exc).__name__)
     return lawyer_view(application, repo.specialization_names(db))
 
 

@@ -162,7 +162,7 @@ def test_short_question_with_documents_is_not_filtered(fake_services):
 def test_without_documents_behaviour_is_unchanged(fake_services):
     result = asyncio.run(agent.process_message("Sang tên sổ đỏ cần gì?", []))
 
-    assert len(fake_services["searches"]) == 1 and fake_services["search"]["top_k"] == 3
+    assert len(fake_services["searches"]) == 1 and fake_services["search"]["top_k"] == 4
     assert fake_services["generate"]["options"] == {}  # max tokens, timeout, retry theo cấu hình thường
     prompt = fake_services["generate"]["system_prompt"]
     assert "Câu đầu tiên trả lời thẳng câu hỏi" in prompt and "KHÔNG hỏi lại người dùng" not in prompt
@@ -237,10 +237,14 @@ def test_format_documents_is_unchanged_by_clip_document(documents):
 
 
 def test_clip_document_keeps_limit_divided_by_count():
+    limit = prompts.MAX_DOCUMENT_CHARS
+    assert limit == 30000
     assert prompts.clip_document("a" * 100, 1) == ("a" * 100, False)
-    assert prompts.clip_document("a" * 13000, 1) == ("a" * 12000, True)
-    assert prompts.clip_document("a" * 13000, 3) == ("a" * 4000, True)
-    assert prompts.clip_document(("ab " * 8000).strip(), 1) == ("ab " * 3999 + "ab", True)  # cắt đúng chỗ dấu cách, rstrip
+    assert prompts.clip_document("a" * limit, 1) == ("a" * limit, False)
+    assert prompts.clip_document("a" * (limit + 1000), 1) == ("a" * limit, True)
+    assert prompts.clip_document("a" * (limit + 1000), 3) == ("a" * (limit // 3), True)
+    text = ("ab " * (limit // 3 + 1000)).strip()
+    assert prompts.clip_document(text, 1) == (("ab " * (limit // 3)).rstrip(), True)
 
 
 @pytest.mark.parametrize("facts", ["omitted", None, []])
@@ -312,10 +316,12 @@ def test_review_facts_on_puts_checked_facts_before_documents_in_prompt(fake_serv
 def test_review_facts_on_tells_how_much_of_a_long_document_was_read(fake_services, monkeypatch):
     set_facts(monkeypatch)
 
-    review(text="a" * 15000)
+    limit = prompts.MAX_DOCUMENT_CHARS
+    total = limit + 3000
+    review(text="a" * total)
 
     prompt = fake_services["generate"]["system_prompt"]
-    assert "- Hệ thống chỉ đọc 12000 trên 15000 ký tự của tài liệu, phần còn lại không được xem xét." in prompt
+    assert f"- Hệ thống chỉ đọc {limit} trên {total} ký tự của tài liệu, phần còn lại không được xem xét." in prompt
     assert prompts.TRUNCATED_MARK in prompt  # cách cắt không đổi
 
 

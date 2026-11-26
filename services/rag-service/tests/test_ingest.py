@@ -19,6 +19,10 @@ def test_nap_van_ban_luu_doc_va_chunk(db, sample_text):
     assert [c.chunk_index for c in chunks] == list(range(6))
     assert chunks[3].section_info["dieu"] == "4"
     assert chunks[3].embedding_model == "fake-hash-768"
+    assert all(
+        c.section_info["_embedding_format_version"] == "v2_breadcrumb"
+        for c in chunks
+    )
     assert len(chunks[3].embedding) == 768
     assert db.get(LegalDocument, doc.id).content == sample_text
 
@@ -56,6 +60,10 @@ def test_embedding_lai_thay_chunk_cu(db, sample_text):
     reembed_document(db, Other(), doc, max_chars=300)
     models = set(db.scalars(select(DocumentChunk.embedding_model)).all())
     assert models == {"model-moi"}
+    assert all(
+        c.section_info["_embedding_format_version"] == "v2_breadcrumb"
+        for c in db.scalars(select(DocumentChunk))
+    )
     assert doc.chunk_count == db.scalar(select(func.count()).select_from(DocumentChunk)) > 6
 
 

@@ -1,4 +1,5 @@
 """System PDF snapshots use the reviewed catalog path, never text rendering."""
+from pathlib import Path
 from uuid import uuid4
 from unittest import TestCase
 from unittest.mock import patch
@@ -7,7 +8,7 @@ import pymupdf as fitz
 
 from app.core.errors import ContractError
 from app.schemas.generations import validate_generation
-from app.services import catalog_source
+from app.services import catalog_source, personal_renderer
 
 
 def pdf_version():
@@ -23,6 +24,16 @@ def pdf_version():
 
 
 class SystemPdfSourceTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        if not Path(personal_renderer.FONT).is_file():
+            services = Path(__file__).resolve().parents[2]
+            font = services / "procedure-service/app/fonts/LiberationSerif-Regular.ttf"
+            self.assertTrue(font.is_file(), f"Missing fallback font: {font}")
+            font_patch = patch.object(personal_renderer, "FONT", str(font))
+            font_patch.start()
+            self.addCleanup(font_patch.stop)
+
     def test_catalog_accepts_reviewed_pdf_snapshot_only(self):
         version = pdf_version()
         self.assertTrue(catalog_source.catalog_manifest(version))

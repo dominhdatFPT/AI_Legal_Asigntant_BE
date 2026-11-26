@@ -4,16 +4,35 @@ import logging
 import time
 
 from app.core.config import get_settings
-from app.services import contract_review, document_gate, prompts, rag_client, responder
+from app.services import case_budget, contract_review, document_gate, prompts, rag_client, responder
 
 logger = logging.getLogger(__name__)
 
 
-async def search_for_review(queries: list[str], request_id: str | None) -> list[dict]:
-    """Tìm song song từng câu, gộp xen kẽ. Một câu lỗi thì bỏ qua; tất cả lỗi mới ném RAGError."""
-    top_k = get_settings().rag_top_k
+async def search_for_review(
+    queries: list[str], request_id: str | None, budget=None, *, owner_scope: str | None = None,
+) -> list[dict]:
+    """Tìm song song từng câu, gộp xen kẽ. Một câu lỗi thì bỏ qua; tất cả lỗi mới ném RAGError.
+    Có budget: phần embedding còn lại được chia đều cho các câu tìm (mỗi câu giữ chỗ riêng trước khi gọi rag)."""
+    settings = get_settings()
+    top_k = settings.rag_top_k
+    fairness_key = rag_client.make_fairness_key(owner_scope, budget, request_id)
+    if 1 < len(queries) <= 12 and settings.rag_batch_enabled and rag_client.search is rag_client._SINGLE_SEARCH:
+        groups = await rag_client.search_many(
+            [(str(i), query) for i, query in enumerate(queries)], top_k, request_id,
+            budget=budget, fairness_key=fairness_key, priority="batch", planned=False, with_provenance=False,
+        )
+        return contract_review.merge_chunks(groups)
+
+    kw = rag_client.single_scheduling(fairness_key, "batch")
+    share = None
+    if budget is not None and budget.enabled:
+        share = budget.embedding_headroom() // max(1, len(queries))
     results = await asyncio.gather(
-        *(rag_client.search(q, top_k=top_k, request_id=request_id) for q in queries), return_exceptions=True,
+        *(rag_client.search(q, top_k=top_k, request_id=request_id,
+                            **kw, **({"budget": budget, "embedding_tokens": min(share, case_budget.estimate_text_tokens(q))}
+                                     if share is not None else {}))
+          for q in queries), return_exceptions=True,
     )
     failed = [r for r in results if isinstance(r, BaseException)]
     for error in failed:
@@ -50,6 +69,8 @@ async def review(
     history: list[dict],
     documents: list[dict],
     request_id: str | None = None,
+    budget=None,
+    *, owner_scope: str | None = None,
 ) -> dict:
     """documents: chữ đã trích của tài liệu đính kèm (document_client.get_extractions), không rỗng.
     Ném rag_client.RAGError hoặc llm_client.LLMError khi dịch vụ ngoài lỗi (nơi gọi đổi thành 503)."""
@@ -71,7 +92,11 @@ async def review(
     queries = contract_review.review_queries(contract_type, user_content, documents[0]["text"])
     # Không tìm được câu nào (tài liệu rỗng, câu hỏi chung chung) thì tìm theo câu hỏi như thường
     queries = queries or [user_content]
-    chunks = await search_for_review(queries, request_id)
+    budget = budget if budget is not None and budget.enabled else None
+    chunks = await search_for_review(
+        queries, request_id, **({"budget": budget} if budget else {}),
+        **({"owner_scope": owner_scope} if owner_scope is not None else {}),
+    )
     facts = None
     if settings.document_facts_enabled or settings.document_checklist_enabled:
         facts = _document_facts(documents, request_id, include_checklist=settings.document_checklist_enabled)
@@ -82,6 +107,10 @@ async def review(
         "max_retries": 0,
     }
     metadata_extra = {"mode": "contract_review", "contract_type": contract_type}
+    if budget is not None and not settings.llm_bypass:  # cùng sổ cái $0.01: bớt đoạn luật cho vừa, rồi mọi lần gọi đi qua budget
+        chunks = responder.fit_chunks(budget, lambda c: prompts.build_review_prompt(c, documents, facts=facts), chunks, history,
+                                      user_content, llm_options["max_output_tokens"])
+        llm_options.update(model=case_budget.resolve_effective_models(settings)[0], budget=budget, budget_stage="responder")
     logger.info(
         "agent rà soát request_id=%s contract_type=%s queries=%d chunks=%d rag=%.2fs",
         request_id, contract_type, len(queries), len(chunks), time.perf_counter() - started,
@@ -90,5 +119,5 @@ async def review(
     return await responder.respond(
         prompts.build_review_prompt(chunks, documents, facts=facts), chunks, history, user_content,
         queries=queries, request_id=request_id, started=started, rag_done=rag_done,
-        llm_options=llm_options, metadata_extra=metadata_extra,
+        llm_options=llm_options, metadata_extra=metadata_extra, **({"budget": budget} if budget else {}),
     )

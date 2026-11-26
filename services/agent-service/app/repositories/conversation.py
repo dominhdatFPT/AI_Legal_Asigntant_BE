@@ -36,17 +36,21 @@ def list_conversations(
     db: Session, user_id: uuid.UUID, page: int = 1, page_size: int = 20,
 ) -> tuple[list[Conversation], int]:
     """Hội thoại của 1 user, mới nhất trước. Trả về (danh sách của trang, tổng số)."""
-    total = db.scalar(
-        select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id)
-    )
-    items = db.scalars(
-        select(Conversation)
+    # 1 câu: trang + tổng (window count tính trước LIMIT); chỉ đếm riêng khi trang vượt cuối danh sách.
+    rows = db.execute(
+        select(Conversation, func.count().over().label("total"))
         .where(Conversation.user_id == user_id)
         .order_by(Conversation.updated_at.desc(), Conversation.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
     ).all()
-    return list(items), total or 0
+    if rows:
+        total = rows[0].total
+    elif page > 1:
+        total = db.scalar(select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id))
+    else:
+        total = 0
+    return [row[0] for row in rows], total or 0
 
 
 def get_conversation(db: Session, conversation_id: uuid.UUID) -> Conversation | None:
@@ -91,17 +95,17 @@ def get_messages_for_transcript(
     db: Session, conversation_id: uuid.UUID, limit: int = TRANSCRIPT_MAX_MESSAGES,
 ) -> tuple[list[Message], int]:
     """Kịch bản hội thoại: tối đa `limit` tin ĐẦU TIÊN (cũ → mới, bằng thời gian thì theo id cho ổn định), không áp
-    HISTORY_LIMIT. Trả về (tin nhắn, tổng số tin của hội thoại); tổng lớn hơn số tin trả về nghĩa là đã bị cắt."""
-    total = db.scalar(
-        select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
-    )
-    messages = db.scalars(
-        select(Message)
+    giới hạn history_max_messages. Trả về (tin nhắn, tổng số tin của hội thoại); tổng lớn hơn số tin trả về nghĩa là đã bị cắt."""
+    count = select(func.count()).select_from(Message).where(Message.conversation_id == conversation_id)
+    rows = db.execute(
+        select(Message, func.count().over().label("total"))
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.created_at, Message.id)
         .limit(limit)
     ).all()
-    return list(messages), total or 0
+    # Không có dòng nào thì hội thoại rỗng (trừ khi limit <= 0 — khi đó đếm riêng).
+    total = rows[0].total if rows else (db.scalar(count) if limit <= 0 else 0)
+    return [row[0] for row in rows], total or 0
 
 
 def add_message_pair(
@@ -132,6 +136,8 @@ def add_message_pair(
 
     db.add_all([user_message, assistant_message])
     db.commit()
+    # Load all response fields even for sessions that expire on commit. The chat
+    # caller closes the read transaction from refresh before writing Redis history.
     db.refresh(user_message)
     db.refresh(assistant_message)
     return user_message, assistant_message

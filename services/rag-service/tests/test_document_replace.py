@@ -10,6 +10,7 @@ from app.models import DocumentChunk, DocumentVersion, IngestLog, LegalDocument
 from app.services import document_approval as approval
 from app.services import document_replace as replace
 from app.services.chunking import Chunk, chunk_legal_text, embedding_text
+from app.services.chunking import EMBEDDING_FORMAT_VERSION, embedded_chunk
 from app.services.embedding import EmbeddingError, FakeEmbedder
 from app.services.ingest import ingest_document
 
@@ -104,7 +105,10 @@ def test_embedder_tra_sai_so_vector_la_loi():
 
 
 def chunks_of(content, model=MODEL):
-    return [(c.content, c.section_info, model) for c in chunk_legal_text(content)]
+    return [
+        (c.content, embedded_chunk(c, [])["section_info"], model)
+        for c in chunk_legal_text(content)
+    ]
 
 
 def test_so_sanh_dem_dung_va_liet_ke_dieu_doi():
@@ -488,3 +492,112 @@ def test_recover_van_ban_active_dang_processing_thanh_failed_giu_nguyen_status(d
     assert (status, ingest_status, chunk_count, content) == ("active", "failed", 4, OLD)
     assert error == approval.INTERRUPTED_MESSAGE
     assert db.get(LegalDocument, document_id).is_processed is True  # vẫn tìm kiếm được
+
+
+@pytest.mark.parametrize("version", [None, "v1_legacy", "v3_future"])
+def test_preview_khong_reuse_vector_thieu_hoac_khac_format(version):
+    old = []
+    for content, info, model in chunks_of(OLD):
+        info = dict(info)
+        if version is None:
+            info.pop("_embedding_format_version")
+        else:
+            info["_embedding_format_version"] = version
+        old.append((content, info, model))
+
+    result = replace.compare_chunks(TITLE, old, chunk_legal_text(OLD), MODEL)
+
+    assert result["reused_chunk_count"] == 0
+    assert result["embed_chunk_count"] == 4
+
+
+def test_preview_section_info_null_khong_reuse():
+    old = [(c.content, None, MODEL) for c in chunk_legal_text(OLD)]
+
+    result = replace.compare_chunks(TITLE, old, chunk_legal_text(OLD), MODEL)
+
+    assert result["reused_chunk_count"] == 0
+    assert result["embed_chunk_count"] == 4
+
+
+def test_chunk_legacy_khong_chiem_slot_cua_chunk_cung_text_hop_le():
+    assert replace.reuse_plan(
+        [(None, MODEL), ("same", MODEL)],
+        ["same", "same"],
+        MODEL,
+    ) == [1, None]
+
+
+def test_embedded_chunk_khong_sua_metadata_dau_vao():
+    chunk = Chunk("Nội dung", {"dieu": "1"})
+    vector = [1.0]
+
+    payload = embedded_chunk(chunk, vector)
+
+    assert chunk.section_info == {"dieu": "1"}
+    assert payload["section_info"] == {
+        "dieu": "1",
+        "_embedding_format_version": EMBEDDING_FORMAT_VERSION,
+    }
+    assert payload["embedding"] is vector
+
+
+def test_thay_vector_legacy_phai_embed_lai_va_lan_sau_reuse_duoc(db, opened, calls):
+    document_id = add_active_doc(db)
+    old_chunks = list(db.scalars(
+        select(DocumentChunk)
+        .where(DocumentChunk.document_id == document_id)
+        .order_by(DocumentChunk.chunk_index)
+    ))
+
+    # Dựng vector bằng đúng format cũ trong latest.patch.
+    legacy_texts = []
+    for chunk in old_chunks:
+        info = dict(chunk.section_info or {})
+        info.pop("_embedding_format_version", None)
+        chunk.section_info = info
+        chuong = info.get("chuong")
+        head = f"{TITLE} - Chương {chuong}" if chuong else TITLE
+        legacy_texts.append(f"{head}\n{chunk.content}")
+
+    legacy_vectors = FakeEmbedder(768).embed_documents(legacy_texts)
+    for chunk, vector in zip(old_chunks, legacy_vectors):
+        chunk.embedding = vector
+    db.commit()
+
+    before = vectors_by_content(db, document_id)
+    claim(db, document_id)
+    replace.replace_document_background(document_id, NEW)
+
+    assert state(db, document_id)[:3] == ("active", "done", None)
+    assert calls == [texts(NEW)]
+    assert log_rows(db)[-1].detail == "dùng lại 0, embed 4"
+
+    after = vectors_by_content(db, document_id)
+    new_chunks = chunk_legal_text(NEW)
+    expected_vectors = FakeEmbedder(768).embed_documents(texts(NEW))
+    assert after == {
+        chunk.content: vector
+        for chunk, vector in zip(new_chunks, expected_vectors)
+    }
+    for content in before.keys() & after.keys():
+        assert after[content] != before[content]
+
+    db.expire_all()
+    saved = list(db.scalars(
+        select(DocumentChunk).where(DocumentChunk.document_id == document_id)
+    ))
+    assert all(
+        chunk.section_info["_embedding_format_version"] == EMBEDDING_FORMAT_VERSION
+        for chunk in saved
+    )
+    assert {chunk.embedding_model for chunk in saved} == {MODEL}
+
+    # Sau nâng cấp, chỉ Điều 2 đổi khi thay ngược lại OLD.
+    calls.clear()
+    claim(db, document_id)
+    replace.replace_document_background(document_id, OLD)
+
+    assert state(db, document_id)[:3] == ("active", "done", None)
+    assert calls == [[texts(OLD)[1]]]
+    assert log_rows(db)[-1].detail == "dùng lại 3, embed 1"

@@ -28,12 +28,6 @@ def contract_admin(user: CurrentUser = Depends(contract_user)):
     return user
 
 
-def require_owner(owner_user_id, user):
-    # Call after fetching Contract's own row; admins do not bypass private ownership.
-    if str(owner_user_id) != user.id:
-        raise ContractError("CONTRACT_NOT_FOUND", "Không tìm thấy hợp đồng.", 404)
-
-
 def get_user_gate():
     from app.services.user_gate import UserGate
     return UserGate.from_env()

@@ -1,10 +1,10 @@
 """Format {data, error, request_id}, mã lỗi và handler lỗi của Consultation Service."""
 
-import contextvars
 import logging
 import uuid
 from typing import Any
 
+from common_auth.context import request_id_var, sanitize_request_id
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -66,13 +66,13 @@ def invalid(field: str, message: str) -> ApiError:
 
 
 # Mã lần gọi của request đang xử lý; client gọi service khác đọc ở đây để truyền tiếp X-Request-ID.
-current_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("consultation_request_id", default=None)
+current_request_id = request_id_var
 
 
 def request_id(request: Request) -> str:
     rid = getattr(request.state, "request_id", None)
     if rid is None:
-        rid = request.headers.get("X-Request-ID") or f"req-{uuid.uuid4()}"
+        rid = sanitize_request_id(request.headers.get("X-Request-ID")) or f"req-{uuid.uuid4()}"
         request.state.request_id = rid
     return rid
 

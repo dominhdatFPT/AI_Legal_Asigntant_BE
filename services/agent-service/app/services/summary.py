@@ -1,7 +1,8 @@
 """Tóm tắt một hội thoại cho luật sư (API nội bộ của consultation-service). Không lưu bản tóm tắt, không log nội dung tin nhắn."""
 import asyncio
 
-from app.services import llm_client, prompts
+from app.core.config import get_settings
+from app.services import case_budget, llm_client, prompts
 
 # Giới hạn đầu vào: hội thoại dài thì bỏ tin CŨ NHẤT, giữ phần gần mốc `until`
 MAX_MESSAGES = 60  # số tin lấy từ DB (gần `until` nhất)
@@ -37,12 +38,20 @@ def build_transcript(messages: list[tuple[str, str]]) -> tuple[str, int]:
 
 
 async def summarize(transcript: str) -> tuple[str, str | None]:
-    """Nhờ LLM tóm tắt. Trả về (bản tóm tắt, model). Lỗi hoặc quá giờ thì ném llm_client.LLMError."""
+    """Nhờ LLM tóm tắt. Trả về (bản tóm tắt, model). Lỗi hoặc quá giờ thì ném llm_client.LLMError / BudgetExhaustedError."""
+    s = get_settings()
+    cap_micro = int(getattr(s, "case_cost_budget_micro_usd", 0) or 0)
+    budget = (
+        case_budget.CaseBudget(max_cost_nano_usd=cap_micro * 1000, responder_reserved_output=0, branch="summary")
+        if cap_micro > 0 else None
+    )
+    budget_kwargs = {"budget": budget, "budget_stage": "summary"} if budget is not None else {}
     try:
         text, _tokens, model = await asyncio.wait_for(
             llm_client.generate(
                 prompts.SUMMARY_SYSTEM_PROMPT, [], transcript,
                 max_output_tokens=MAX_OUTPUT_TOKENS, timeout_seconds=PROVIDER_TIMEOUT_SECONDS, max_retries=0,
+                **budget_kwargs,
             ),
             timeout=TOTAL_TIMEOUT_SECONDS,
         )

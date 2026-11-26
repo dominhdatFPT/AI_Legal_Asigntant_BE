@@ -6,8 +6,9 @@ Hai phần:
 - Việc nền `replace_document_background`: ba giai đoạn đọc / embed / ghi như `document_approval.approve_document_background`.
   Văn bản vẫn active và chunk cũ vẫn phục vụ tìm kiếm cho tới giai đoạn ghi, rồi đổi sang bản mới trong MỘT giao dịch.
 
-Quy tắc khớp: hai chunk dùng lại được vector khi CÙNG chuỗi `embedding_text(title, chunk)` và chunk cũ có CÙNG
-`embedding_model` với model đang dùng; khớp theo đa tập (một chunk cũ chỉ khớp một chunk mới).
+Quy tắc khớp: hai chunk dùng lại được vector khi CÙNG phiên bản định dạng, CÙNG chuỗi
+`embedding_text(title, chunk)` và CÙNG `embedding_model`; khớp theo đa tập.
+Chunk thiếu phiên bản định dạng hoặc khác phiên bản hiện tại phải được embed lại.
 """
 
 import hashlib
@@ -25,8 +26,9 @@ from app.core.config import get_settings
 from app.models import LegalDocument
 from app.repositories import document as document_repo
 from app.services import document_approval as approval
-from app.services import ingest_log
+from app.services import corpus_version, ingest_log
 from app.services.chunking import Chunk, chunk_legal_text, embedding_text, normalize_text
+from app.services.chunking import EMBEDDING_FORMAT_VERSION, embedded_chunk
 from app.services.document_approval import DocumentChangedError
 from app.services.document_preview import _article_number, analyze_document
 from app.services.embedding import EmbeddingError, get_embedder
@@ -45,13 +47,20 @@ def same_content(old: str, new: str) -> bool:
     return normalize_text(old) == normalize_text(new)
 
 
-def reuse_plan(old: list[tuple[str, str]], new_texts: list[str], model: str) -> list[int | None]:
-    """Với mỗi chunk mới, chỉ số của chunk cũ được dùng lại vector, hoặc None nếu phải embed.
-    old: [(chuỗi embedding_text, embedding_model)] của chunk cũ theo thứ tự; new_texts: chuỗi embedding_text của chunk mới.
-    Chỉ chunk cũ có embedding_model == model mới khớp được; đa tập: mỗi chunk cũ chỉ khớp một lần, theo thứ tự xuất hiện."""
+def _stored_embedding_text(title: str, content: str, info: dict | None) -> str | None:
+    """Chỉ dựng lại text khi vector có phiên bản định dạng tương thích."""
+    if not info or info.get("_embedding_format_version") != EMBEDDING_FORMAT_VERSION:
+        return None
+    return embedding_text(title, Chunk(content, info))
+
+
+def reuse_plan(old: list[tuple[str | None, str]], new_texts: list[str], model: str) -> list[int | None]:
+    """Với mỗi chunk mới, trả chỉ số vector cũ dùng lại được hoặc None.
+    old chứa (text tương thích định dạng hoặc None, embedding_model).
+    Chỉ text hợp lệ và cùng model được đưa vào đa tập; mỗi chunk cũ khớp tối đa một lần."""
     pool: dict[str, deque[int]] = defaultdict(deque)
     for i, (text, old_model) in enumerate(old):
-        if old_model == model:
+        if text is not None and old_model == model:
             pool[text].append(i)
     return [pool[t].popleft() if pool.get(t) else None for t in new_texts]
 
@@ -95,7 +104,10 @@ def compare_chunks(
 ) -> dict:
     """So chunk cũ (content, section_info, embedding_model) với chunk mới. Cùng quy tắc khớp với việc thay thật."""
     batch_size = batch_size or get_settings().embedding_batch_size
-    old_texts = [(embedding_text(title, Chunk(content, info or {})), m) for content, info, m in old_chunks]
+    old_texts = [
+        (_stored_embedding_text(title, content, info), m)
+        for content, info, m in old_chunks
+    ]
     new_texts = [embedding_text(title, c) for c in new_chunks]
     plan = reuse_plan(old_texts, new_texts, model)
     matched = {i for i in plan if i is not None}
@@ -205,7 +217,10 @@ def replace_document_background(
             raise EmptyDocumentError("Văn bản rỗng, không cắt được đoạn nào")
         embedder = get_embedder()
         new_texts = [embedding_text(title, c) for c in new_chunks]
-        old_texts = [(embedding_text(title, Chunk(content, info or {})), m) for content, info, _, m in old_chunks]
+        old_texts = [
+            (_stored_embedding_text(title, content, info), m)
+            for content, info, _, m in old_chunks
+        ]
         plan = reuse_plan(old_texts, new_texts, embedder.model_name)
         vectors, reused, embedded = fill_vectors(plan, [v for _, _, v, _ in old_chunks], new_texts, embedder.embed_documents)
 
@@ -218,7 +233,7 @@ def replace_document_background(
         document_repo.replace_chunks(
             db,
             doc,
-            [{"content": c.content, "section_info": c.section_info, "embedding": v} for c, v in zip(new_chunks, vectors)],
+            [embedded_chunk(c, v) for c, v in zip(new_chunks, vectors)],
             embedding_model=embedder.model_name,
         )
         doc.content = new_content
@@ -239,6 +254,7 @@ def replace_document_background(
             "Thay nội dung văn bản %s xong: %d chunk (dùng lại %d, embed %d), %.2fs",
             document_id, len(new_chunks), reused, embedded, time.perf_counter() - started,
         )
+        corpus_version.bump_corpus_version()  # đã commit xong: cache tìm luật/câu trả lời của agent-service tự mất hiệu lực; không ném lỗi
         ingest_log.record(
             "replace_done", actor_user_id=actor_user_id, actor_role=actor_role, document_id=document_id,
             doc_number=doc_number, title=title, chunk_count=len(new_chunks),

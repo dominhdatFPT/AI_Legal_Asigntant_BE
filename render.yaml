@@ -10,6 +10,8 @@
 envVarGroups:
   - name: ailegal-shared
     envVars:
+      - key: ENVIRONMENT
+        value: production
       - key: INTERNAL_TOKEN
         generateValue: true
       - key: JWT_PUBLIC_KEY_PATH
@@ -36,6 +38,18 @@ envVarGroups:
       - key: NOTIFICATION_SERVICE_URL
         value: https://ailegal-notification-service.onrender.com
 
+  - name: ailegal-lawyer-auth
+    envVars:
+      - key: LAWYER_SERVICE_TOKEN
+        generateValue: true
+
+  # Thêm secret REDIS_URL vào group này trên Dashboard, rồi xoá REDIS_URL riêng ở agent/rag.
+  # Redis bên ngoài phải đặt maxmemory-policy=volatile-lru.
+  - name: ailegal-cache
+    envVars:
+      - key: CORPUS_VERSION_KEY
+        value: legal:corpus_version
+
 services:
   # ───────────── Gateway (FE chỉ gọi vào đây) ─────────────
   - type: web
@@ -51,6 +65,9 @@ services:
       # Origin của FE đã deploy, vd. https://ten-app.vercel.app (không có "/" cuối)
       - key: FRONTEND_ORIGIN
         sync: false
+      # Chỉ đổi thành "true" khi domain public đứng sau Cloudflare Proxy; mặc định "false" để chống giả mạo CF-Connecting-IP
+      - key: TRUST_CLOUDFLARE_HEADERS
+        value: "false"
 
   # ───────────── user-service ─────────────
   - type: web
@@ -63,8 +80,18 @@ services:
     healthCheckPath: /api/v1/users/health
     envVars:
       - fromGroup: ailegal-shared
+      - fromGroup: ailegal-lawyer-auth
+      # Bắt buộc đặt trên dashboard = origin FE (như FRONTEND_ORIGIN); thiếu → login/refresh trả 403 CSRF_ORIGIN_DENIED
+      - key: AUTH_BROWSER_ORIGINS
+        sync: false
+      - key: RABBITMQ_URL
+        sync: false
       - key: USER_DATABASE_URL
         sync: false
+      - key: OUTBOX_ENABLED
+        value: "true"
+      - key: RUN_LOGOUT_AUDIT_IN_API
+        value: "true"
       - key: JWT_PRIVATE_KEY_PATH
         value: /etc/secrets/jwt_private.pem
       - key: FIREBASE_PROJECT_ID
@@ -77,7 +104,7 @@ services:
       - key: AUTH_COOKIE_SAMESITE
         value: none
       - key: AUTH_REFRESH_COOKIE_PATH
-        value: /api
+        value: /api/users/auth
 
   # ───────────── lawyer-service ─────────────
   - type: web
@@ -90,8 +117,13 @@ services:
     healthCheckPath: /api/v1/lawyers/health
     envVars:
       - fromGroup: ailegal-shared
+      - fromGroup: ailegal-lawyer-auth
+      - key: RABBITMQ_URL
+        sync: false
       - key: LAWYER_DATABASE_URL
         sync: false
+      - key: OUTBOX_ENABLED
+        value: "true"
       - key: LAWYER_REAPPLY_COOLDOWN_HOURS
         value: "24"
 
@@ -108,11 +140,15 @@ services:
       - fromGroup: ailegal-shared
       - key: CONSULTATION_DATABASE_URL
         sync: false
+      - key: USER_ACTIVE_CACHE_SECONDS
+        value: "30"
       # Origin FE được mở WebSocket chat (domain Vercel), ngăn bằng dấu phẩy
       - key: CONSULTATION_ALLOWED_ORIGINS
         sync: false
       - key: CONSULTATION_TERMS_VERSION
         value: "2026-11-01"
+      - key: RABBITMQ_URL
+        sync: false
 
   # ───────────── agent-service ─────────────
   - type: web
@@ -125,11 +161,16 @@ services:
     healthCheckPath: /api/v1/agent/health
     envVars:
       - fromGroup: ailegal-shared
+      - fromGroup: ailegal-cache
       - key: AGENT_DATABASE_URL
         sync: false
-      # OpenRouter trước, lỗi thì tự chuyển sang Gemini
+      - key: RABBITMQ_URL
+        sync: false
+      # Chỉ OpenRouter: tuyến duy nhất đã xác minh giá + trần $0.01/câu (đồng bộ docker-compose.yml và config.py)
       - key: LLM_PROVIDER
-        value: openrouter,gemini
+        value: openrouter
+      - key: LLM_BYPASS
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
@@ -143,13 +184,84 @@ services:
       - key: OPENROUTER_BASE_URL
         value: https://openrouter.ai/api/v1
       - key: OPENROUTER_MODEL
-        value: recursive/flint-v1.0:free
+        value: deepseek/deepseek-v4.1-flash
+      - key: OPENROUTER_AUX_MODEL
+        value: deepseek/deepseek-v4.1-flash
+      - key: OPENROUTER_MAX_RETRIES
+        value: "0"
       - key: OPENROUTER_SITE_URL
         sync: false
       - key: OPENROUTER_APP_NAME
         sync: false
+      # Ngân sách $0.01/câu (gồm embedding) + chất lượng; giá trị khớp config.py và docker-compose.yml
       - key: OPENROUTER_REASONING_MAX_TOKENS
+        value: "0"
+      - key: LLM_AUX_REASONING_MAX_TOKENS
+        value: "0"
+      - key: CASE_COST_BUDGET_MICRO_USD
+        value: "10000"
+      - key: CASE_TOKEN_BUDGET_MAX
+        value: "0"
+      - key: CASE_TOKEN_BUDGET_TARGET
+        value: "0"
+      - key: DAILY_TOKEN_QUOTA_ENABLED
+        value: "true"
+      - key: DAILY_TOKEN_LIMIT
+        value: "20000"
+      - key: TRUST_CLOUDFLARE_HEADERS
+        value: "false"
+      - key: SSE_HEARTBEAT_SECONDS
+        value: "10"
+      - key: MINUTES_COST_BUDGET_MICRO_USD
+        value: "30000"
+      - key: TEST_UNLIMITED_USERS
+        sync: false
+      - key: PLANNER_MAX_OUTPUT_TOKENS
+        value: "896"
+      - key: CASE_COMPLEX_MAX_OUTPUT_TOKENS
+        value: "3500"
+      - key: CASE_MAX_OUTPUT_TOKENS
+        value: "3500"
+      - key: CASE_TOTAL_DEADLINE_SECONDS
+        value: "90"
+      - key: ADAPTIVE_RAG_ENABLED
+        value: "true"
+      - key: RAG_BATCH_ENABLED
+        value: "true"
+      - key: RELEVANCE_CHECK
+        value: "true"
+      - key: CASE_RELEVANCE_DEDUP_ENABLED
+        value: "true"
+      - key: QUERY_REWRITE_ENABLED
+        value: "false"
+      - key: CASE_MAX_ISSUES
+        value: "8"
+      - key: CASE_MAX_RETRIEVAL_QUERIES
+        value: "8"
+      - key: CASE_MAX_RETRIEVAL_ROUNDS
+        value: "2"
+      - key: CASE_RETRIEVAL_CONCURRENCY
+        value: "3"
+      - key: CASE_CANDIDATE_K_PER_ISSUE
+        value: "12"
+      - key: CASE_MAX_CANDIDATES
+        value: "48"
+      - key: CASE_SELECT_MAX
+        value: "16"
+      - key: RESPONDER_INPUT_TARGET
+        value: "8000"
+      - key: CASE_CONTEXT_TOKEN_BUDGET
+        value: "6000"
+      - key: RELEVANCE_TOTAL_INPUT_TOKENS
+        value: "3600"
+      - key: RELEVANCE_TOTAL_OUTPUT_TOKENS
+        value: "320"
+      - key: EMBEDDING_TOTAL_INPUT_TOKENS
         value: "1024"
+      - key: RELEVANCE_CHUNK_CHARS
+        value: "800"
+      - key: EMBEDDING_PRICE_NANO_PER_TOKEN
+        value: "150"
 
   # ───────────── rag-service ─────────────
   - type: web
@@ -162,16 +274,40 @@ services:
     healthCheckPath: /api/v1/rag/health
     envVars:
       - fromGroup: ailegal-shared
+      - fromGroup: ailegal-cache
+      - key: RABBITMQ_URL
+        sync: false
       - key: RAG_DATABASE_URL
         sync: false
+      - key: RUN_RAG_INDEXING_WORKER_IN_API
+        value: "true"
+      - key: RAG_DB_CONCURRENCY_LIMIT
+        value: "4"
+      - key: RAG_DB_QUEUE_MAX_WAITING
+        value: "96"
+      - key: RAG_DB_QUEUE_WAIT_SECONDS
+        value: "25"
+      - key: RAG_DB_INTERACTIVE_BURST
+        value: "3"
+      - key: RAG_DB_PER_TENANT_BURST
+        value: "3"
       - key: GEMINI_API_KEY
         sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      # Một tuyến embedding online trên cả Compose và Render (OpenRouter), đồng bộ với agent-service
       - key: EMBEDDING_PROVIDER
-        value: gemini
+        value: openrouter
+      - key: OPENROUTER_EMBEDDING_MODEL
+        value: google/gemini-embedding-001
       - key: EMBEDDING_MODEL
         value: gemini-embedding-001
       - key: EMBEDDING_DIM
         value: "768"
+      - key: EMBEDDING_ONLINE_MAX_RETRIES
+        value: "0"
+      - key: EMBEDDING_PRICE_NANO_PER_TOKEN
+        value: "150"
 
   # ───────────── procedure-service ─────────────
   - type: web
@@ -184,6 +320,10 @@ services:
     healthCheckPath: /api/v1/procedures/health
     envVars:
       - fromGroup: ailegal-shared
+      - key: OUTBOX_ENABLED
+        value: "true"
+      - key: RABBITMQ_URL
+        sync: false
       - key: PROCEDURE_DATABASE_URL
         sync: false
       # OnlyOffice Document Server (cần host riêng, Render free không chạy nổi). JWT secret phải trùng với server OnlyOffice
@@ -224,6 +364,8 @@ services:
     healthCheckPath: /api/v1/contracts/health
     envVars:
       - fromGroup: ailegal-shared
+      - key: RABBITMQ_URL
+        sync: false
       - key: CONTRACT_DATABASE_URL
         sync: false
       - key: CONTRACT_SUPABASE_URL
@@ -247,8 +389,12 @@ services:
     healthCheckPath: /api/v1/notifications/health
     envVars:
       - fromGroup: ailegal-shared
+      - key: RABBITMQ_URL
+        sync: false
       - key: NOTIFICATION_DATABASE_URL
         sync: false
+      - key: RUN_REPORT_ENRICHMENT_IN_API
+        value: "true"
 
   # ───────────── document-service (TẮT mặc định) ─────────────
   # Image có torch + VietOCR + Tesseract, cần >= 2 GB RAM → gói free không chạy được, phải dùng gói trả phí

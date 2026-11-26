@@ -25,7 +25,7 @@ import config
 from common_auth import events, revocation
 
 notif_hub = config.load_service_module("notification-service", "app.core.rabbitmq_notification_hub")
-notif_store = config.load_service_module("notification-service", "app.core.notification_store")
+notif_store = notif_hub.notification_store
 logout_worker = config.load_service_module("user-service", "app.services.logout_worker")
 user_rabbitmq = config.load_service_module("user-service", "app.core.rabbitmq")
 
@@ -187,24 +187,33 @@ async def run_test():
     # =============================================================
     print("\n--- 3. Testing Notification Hub (q.notification.events) ---")
 
-    # Use a clean SQLite DB in tmp for testing
-    from pathlib import Path
-    Path("data").mkdir(parents=True, exist_ok=True)
-    test_db_path = str(Path("data/test_notif.db").resolve()).replace("\\", "/")
-    if os.path.exists("data/test_notif.db"):
-        try:
-            os.remove("data/test_notif.db")
-        except Exception:
-            pass
-    os.environ["NOTIFICATION_DATABASE_URL"] = f"sqlite:///{test_db_path}"
-    notif_store._engine = None
-    notif_store._SessionFactory = None
+    # The three-layer runner supplies its migrated PostgreSQL URL.
+    if not os.getenv("NOTIFICATION_DATABASE_URL"):
+        from pathlib import Path
+        db_path = Path("data/test_notif.db").resolve()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        db_path.unlink(missing_ok=True)
+        os.environ["NOTIFICATION_DATABASE_URL"] = f"sqlite:///{db_path.as_posix()}"
     notif_store.get_engine()
 
     # Purge existing inbox queue
     inbox_q = await events.declare_work_queue(channel, notif_hub.QUEUE_NOTIFICATION_INBOX)
     await inbox_q.purge()
 
+    dedup_event_id = f"evt-dedup-{uuid.uuid4().hex[:10]}"
+    dedup_finished = asyncio.Event()
+    dedup_deliveries = 0
+    handle_event = notif_hub.handle_event
+
+    async def observe_delivery(routing_key, event):
+        nonlocal dedup_deliveries
+        await handle_event(routing_key, event)
+        if event.get("event_id") == dedup_event_id:
+            dedup_deliveries += 1
+            if dedup_deliveries == 2:
+                dedup_finished.set()
+
+    notif_hub.handle_event = observe_delivery
     notif_hub_task = asyncio.create_task(notif_hub.start_notification_hub())
     await asyncio.sleep(0.5)
 
@@ -253,7 +262,7 @@ async def run_test():
         "document.ocr.completed",
         {"user_id": target_user, "document_id": "DOC-DUPLICATE-TEST"}
     )
-    fixed_event["event_id"] = f"evt-dedup-{uuid.uuid4().hex[:10]}"
+    fixed_event["event_id"] = dedup_event_id
 
     # Send exact same message TWICE
     await exchange.publish(
@@ -270,14 +279,16 @@ async def run_test():
         ),
         routing_key="document.ocr.completed",
     )
-    await asyncio.sleep(1.0)
+    await asyncio.wait_for(dedup_finished.wait(), timeout=10)
 
-    dedup_notifs = [n for n in notif_store.get_user_notifications(target_user) if "DOC-DUPLICATE-TEST" in n["action_url"]]
+    dedup_notifs = [n for n in notif_store.get_user_notifications(target_user) if n["id"] == f"notif-{dedup_event_id}"]
     dedup_ok = len(dedup_notifs) == 1
     print(f"[{'PASS' if dedup_ok else 'FAIL'}] Deduplication: sent 2 copies with same event_id, stored count = {len(dedup_notifs)}")
     results.append(("Notification Deduplication", dedup_ok, f"count={len(dedup_notifs)}"))
 
     notif_hub_task.cancel()
+    await asyncio.gather(notif_hub_task, return_exceptions=True)
+    notif_hub.handle_event = handle_event
 
     # =============================================================
     # COMPONENT 4: User Logout Audit Worker (q.audit.user_logout)

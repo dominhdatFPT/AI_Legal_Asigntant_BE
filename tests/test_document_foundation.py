@@ -27,9 +27,14 @@ def foundation():
         from app.core.config import Settings, ConfigurationError
         from app.core.errors import DocumentError
         from app.core.security import document_user
-        from app.repositories.database import Database
+        from app.repositories import database
         from app.services.storage import Storage, MIME_TYPES
-        yield app, Settings, ConfigurationError, DocumentError, document_user, Database, Storage, MIME_TYPES
+        try:
+            yield app, Settings, ConfigurationError, DocumentError, document_user, database.Database, Storage, MIME_TYPES
+        finally:
+            # Each foundation loads a new database module, so its pools cannot be reused by the next test.
+            for pool in database._pools.values():
+                pool.close()
     finally:
         sys.path.remove(str(SERVICE))
         for name in list(sys.modules):

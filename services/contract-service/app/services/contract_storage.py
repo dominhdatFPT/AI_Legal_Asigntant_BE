@@ -12,6 +12,7 @@ import httpx
 from app.core.config import DatabaseSettings
 from app.core.errors import ContractError
 from app.services.user_gate import unique_object
+from app.core.http import http_client
 import json
 
 MIMES={"docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document","pdf":"application/pdf"}
@@ -66,7 +67,7 @@ class ContractStorage:
             headers["Content-Type"]=MIMES[format]
         deadline=time.monotonic()+25
         try:
-            with httpx.Client(transport=self.transport,timeout=10,trust_env=False,follow_redirects=False) as client:
+            with http_client(self.transport,timeout=10,trust_env=False,follow_redirects=False) as client:
                 with client.stream(method,self.settings.url+"/storage/v1"+path,headers=headers,json=body,content=content) as response:
                     if not 200 <= response.status_code < 300:
                         raise storage_error()

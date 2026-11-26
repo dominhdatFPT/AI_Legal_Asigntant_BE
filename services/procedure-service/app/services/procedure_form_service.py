@@ -11,6 +11,7 @@ from app.schemas.form_schema import (
     FormSection,
     ProcedureFormSchema,
 )
+from app.services.submission_recipient import is_submission_recipient
 
 logger = logging.getLogger(__name__)
 
@@ -834,6 +835,694 @@ def get_fields_dd_012() -> List[FormField]:
     return fields
 
 
+def get_fields_dd_013() -> List[FormField]:
+    """DD-013: Giao đất, thuê đất, chuyển mục đích sử dụng đất (Mẫu số 02d)"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="allocation_request_type",
+            label="Hình thức đề nghị giải quyết",
+            field_type=FieldType.select,
+            required=True,
+            default_value="land_allocation_with_fee",
+            options=[
+                FormFieldOption(value="land_allocation_with_fee", label="Giao đất có thu tiền sử dụng đất"),
+                FormFieldOption(value="land_allocation_no_fee", label="Giao đất không thu tiền sử dụng đất"),
+                FormFieldOption(value="land_lease_annual", label="Thuê đất trả tiền thuê đất hằng năm"),
+                FormFieldOption(value="land_lease_lump_sum", label="Thuê đất trả tiền thuê đất một lần cho cả thời gian thuê"),
+                FormFieldOption(value="purpose_conversion", label="Cho phép chuyển mục đích sử dụng đất"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="receiving_authority",
+            label="Kính gửi (Cơ quan có thẩm quyền tiếp nhận)",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân cấp huyện nơi có đất",
+            placeholder="Ủy ban nhân dân tỉnh/thành phố hoặc UBND quận/huyện...",
+            section="request",
+        ),
+        FormField(
+            name="rice_land_area",
+            label="Diện tích đất chuyên trồng lúa (m², nếu có)",
+            field_type=FieldType.number,
+            required=False,
+            placeholder="0",
+            section="request",
+        ),
+        FormField(
+            name="topsoil_strip_area",
+            label="Diện tích phải bóc tách tầng đất mặt (m², nếu có)",
+            field_type=FieldType.number,
+            required=False,
+            placeholder="0",
+            section="request",
+        ),
+        FormField(
+            name="proposed_land_use_term",
+            label="Thời hạn sử dụng đất đề nghị",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Lâu dài (hoặc 50 năm theo dự án)",
+            section="request",
+        ),
+        FormField(
+            name="fee_exemption_request",
+            label="Đề nghị miễn, giảm tiền sử dụng đất / tiền thuê đất (nếu có)",
+            field_type=FieldType.textarea,
+            required=False,
+            placeholder="Ghi rõ căn cứ miễn, giảm nếu thuộc đối tượng ưu đãi...",
+            section="request",
+        ),
+        FormField(
+            name="attached_documents",
+            label="Tài liệu gửi kèm theo đơn",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="1. Bản sao giấy tờ nhân thân / pháp nhân;\n2. Văn bản phê duyệt dự án hoặc trích lục bản đồ địa chính thửa đất.",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_014() -> List[FormField]:
+    """DD-014: Hòa giải tranh chấp đất đai"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="mediation_commune_committee",
+            label="Kính gửi Ủy ban nhân dân cấp xã nơi có đất tranh chấp",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân phường/xã...",
+            section="request",
+        ),
+        FormField(
+            name="disputing_party_name",
+            label="Họ và tên người / hộ gia đình phía bên kia tranh chấp",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="TRẦN VĂN B",
+            section="request",
+        ),
+        FormField(
+            name="disputing_party_address",
+            label="Địa chỉ cư trú của bên có tranh chấp",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Số nhà, thôn/xóm, xã/phường, quận/huyện, tỉnh/thành phố",
+            section="request",
+        ),
+        FormField(
+            name="disputed_area",
+            label="Diện tích đất đang tranh chấp (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="25.5",
+            section="request",
+        ),
+        FormField(
+            name="dispute_summary",
+            label="Tóm tắt nguồn gốc đất, nội dung và nguyên nhân phát sinh tranh chấp",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Trình bày rõ nguồn gốc sử dụng đất, thời điểm phát sinh tranh chấp ranh giới hoặc quyền sử dụng...",
+            section="request",
+        ),
+        FormField(
+            name="mediation_request_content",
+            label="Yêu cầu, kiến nghị hòa giải tại UBND cấp xã",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Đề nghị UBND cấp xã tổ chức hòa giải, xác định lại mốc giới thửa đất theo đúng Giấy chứng nhận...",
+            section="request",
+        ),
+        FormField(
+            name="attached_evidence",
+            label="Tài liệu, chứng cứ gửi kèm theo đơn",
+            field_type=FieldType.textarea,
+            required=False,
+            default_value="Bản sao Giấy chứng nhận QSDĐ, bản vẽ hiện trạng thửa đất, biên bản làm việc tại thôn/tổ dân phố...",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_015() -> List[FormField]:
+    """DD-015: Yêu cầu đo đạc địa chính, tách thửa phục vụ đăng ký đất đai"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="survey_receiving_agency",
+            label="Đơn vị tiếp nhận yêu cầu đo đạc",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Chi nhánh Văn phòng Đăng ký đất đai / Ủy ban nhân dân cấp xã",
+            section="request",
+        ),
+        FormField(
+            name="applicant_land_relation",
+            label="Tư cách của người yêu cầu đối với thửa đất",
+            field_type=FieldType.select,
+            required=True,
+            default_value="owner",
+            options=[
+                FormFieldOption(value="owner", label="Người sử dụng đất đứng tên trên Giấy chứng nhận"),
+                FormFieldOption(value="transferee", label="Người nhận chuyển nhượng, tặng cho, thừa kế quyền sử dụng đất"),
+                FormFieldOption(value="first_time_applicant", label="Người đang sử dụng đất đề nghị cấp GCN lần đầu"),
+                FormFieldOption(value="related_party", label="Người có quyền lợi, nghĩa vụ liên quan"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="survey_purpose",
+            label="Mục đích yêu cầu đo đạc địa chính",
+            field_type=FieldType.select,
+            required=True,
+            default_value="boundary_area_check",
+            options=[
+                FormFieldOption(value="boundary_area_check", label="Xác định lại ranh giới, diện tích thực tế thửa đất"),
+                FormFieldOption(value="split_merge_plot", label="Lập bản vẽ trích đo phục vụ tách thửa, hợp thửa đất"),
+                FormFieldOption(value="new_or_reissue_cert", label="Lập bản vẽ phục vụ cấp mới / cấp đổi Giấy chứng nhận"),
+                FormFieldOption(value="dispute_resolution", label="Đo đạc hiện trạng phục vụ hòa giải / giải quyết tranh chấp"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="survey_detail_reason",
+            label="Nội dung sự việc và yêu cầu đo đạc cụ thể",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Trình bày rõ hiện trạng sử dụng đất và yêu cầu trích đo hiện trạng...",
+            section="request",
+        ),
+        FormField(
+            name="adjacent_owners_info",
+            label="Thông tin các hộ sử dụng đất giáp ranh (Đông, Tây, Nam, Bắc - nếu có)",
+            field_type=FieldType.textarea,
+            required=False,
+            placeholder="Phía Đông giáp hộ ông/bà...; Phía Tây giáp...",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_016() -> List[FormField]:
+    """DD-016: Xác nhận lại thời hạn sử dụng đất nông nghiệp của hộ gia đình, cá nhân (Mẫu số 09)"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="current_expired_date",
+            label="Thời hạn sử dụng đất ghi trên Giấy chứng nhận hết hạn ngày",
+            field_type=FieldType.date,
+            required=True,
+            section="request",
+        ),
+        FormField(
+            name="proposed_confirm_until_date",
+            label="Đề nghị xác nhận tiếp tục sử dụng đất nông nghiệp đến ngày",
+            field_type=FieldType.date,
+            required=True,
+            section="request",
+        ),
+        FormField(
+            name="attached_documents",
+            label="Giấy tờ nộp kèm theo đơn",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="Bản gốc Giấy chứng nhận quyền sử dụng đất đã cấp.",
+            section="request",
+        ),
+        FormField(
+            name="direct_agricultural_commitment",
+            label="Cam kết trực tiếp sản xuất nông nghiệp",
+            field_type=FieldType.checkbox,
+            required=True,
+            default_value=True,
+            description="Tôi cam kết hộ gia đình, cá nhân đang trực tiếp sử dụng đất để sản xuất nông nghiệp ổn định và có nhu cầu tiếp tục sử dụng",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_017() -> List[FormField]:
+    """DD-017: Chuyển hình thức giao đất, cho thuê đất (Mẫu số 02)"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="previous_decision_info",
+            label="Quyết định giao đất / cho thuê đất / chuyển mục đích sử dụng đất trước đây",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Quyết định số .../QĐ-UBND ngày .../.../... của UBND...",
+            section="conversion",
+        ),
+        FormField(
+            name="current_allocation_form",
+            label="Hình thức giao đất / thuê đất hiện tại",
+            field_type=FieldType.select,
+            required=True,
+            default_value="lease_annual",
+            options=[
+                FormFieldOption(value="lease_annual", label="Thuê đất trả tiền thuê đất hằng năm"),
+                FormFieldOption(value="lease_lump_sum", label="Thuê đất trả tiền thuê đất một lần cho cả thời gian thuê"),
+                FormFieldOption(value="allocation_no_fee", label="Giao đất không thu tiền sử dụng đất"),
+                FormFieldOption(value="allocation_with_fee", label="Giao đất có thu tiền sử dụng đất"),
+            ],
+            section="conversion",
+        ),
+        FormField(
+            name="target_allocation_form",
+            label="Hình thức giao đất / thuê đất đề nghị chuyển sang",
+            field_type=FieldType.select,
+            required=True,
+            default_value="lease_lump_sum",
+            options=[
+                FormFieldOption(value="lease_lump_sum", label="Thuê đất trả tiền thuê đất một lần cho cả thời gian thuê"),
+                FormFieldOption(value="lease_annual", label="Thuê đất trả tiền thuê đất hằng năm"),
+                FormFieldOption(value="allocation_with_fee", label="Giao đất có thu tiền sử dụng đất"),
+            ],
+            section="conversion",
+        ),
+        FormField(
+            name="conversion_reason",
+            label="Lý do và căn cứ đề nghị chuyển hình thức sử dụng đất",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Chuyển hình thức thuê đất theo quy định tại Luật Đất đai 2024 để thực hiện dự án đầu tư...",
+            section="conversion",
+        ),
+        FormField(
+            name="financial_commitment",
+            label="Cam kết thực hiện nghĩa vụ tài chính",
+            field_type=FieldType.checkbox,
+            required=True,
+            default_value=True,
+            description="Tôi cam kết chấp hành đúng quy định của pháp luật đất đai và nộp đầy đủ tiền sử dụng đất / tiền thuê đất theo thông báo",
+            section="conversion",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_018() -> List[FormField]:
+    """DD-018: Thủ tục cấp Giấy phép xây dựng mới đối với nhà ở riêng lẻ"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="licensing_authority",
+            label="Cơ quan cấp phép xây dựng (Kính gửi)",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân Quận/Huyện nơi có công trình",
+            section="request",
+        ),
+        FormField(
+            name="building_type",
+            label="Loại công trình nhà ở riêng lẻ",
+            field_type=FieldType.select,
+            required=True,
+            default_value="urban_detached_house",
+            options=[
+                FormFieldOption(value="urban_detached_house", label="Nhà ở riêng lẻ tại đô thị"),
+                FormFieldOption(value="rural_detached_house", label="Nhà ở riêng lẻ tại nông thôn"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="building_grade",
+            label="Cấp công trình xây dựng",
+            field_type=FieldType.select,
+            required=True,
+            default_value="grade_3",
+            options=[
+                FormFieldOption(value="grade_3", label="Công trình cấp III"),
+                FormFieldOption(value="grade_4", label="Công trình cấp IV"),
+                FormFieldOption(value="grade_2", label="Công trình cấp II"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="design_organization_name",
+            label="Tổ chức / cá nhân lập thiết kế xây dựng",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Công ty TNHH Tư vấn Thiết kế Xây dựng...",
+            section="request",
+        ),
+        FormField(
+            name="building_footprint_area",
+            label="Diện tích xây dựng tầng 1 (tầng trệt) (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="85.0",
+            section="request",
+        ),
+        FormField(
+            name="total_floor_area",
+            label="Tổng diện tích sàn xây dựng (bao gồm tầng hầm, lửng, tum) (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="260.0",
+            section="request",
+        ),
+        FormField(
+            name="building_height",
+            label="Chiều cao công trình tính từ cốt nền (m)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="11.5",
+            section="request",
+        ),
+        FormField(
+            name="number_of_floors",
+            label="Tổng số tầng xây dựng",
+            field_type=FieldType.number,
+            required=True,
+            default_value=3,
+            section="request",
+        ),
+        FormField(
+            name="expected_completion_months",
+            label="Thời gian dự kiến hoàn thành công trình (số tháng)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=6,
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_019() -> List[FormField]:
+    """DD-019: Thủ tục cấp Giấy phép sửa chữa, cải tạo công trình nhà ở riêng lẻ"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="licensing_authority",
+            label="Cơ quan cấp phép xây dựng (Kính gửi)",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân Quận/Huyện nơi có công trình",
+            section="request",
+        ),
+        FormField(
+            name="existing_building_info",
+            label="Quy mô công trình nhà ở hiện hữu (diện tích xây dựng, tổng diện tích sàn, chiều cao, số tầng)",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Nhà ở cấp III hiện trạng 2 tầng, diện tích xây dựng tầng 1: 75m², tổng diện tích sàn: 150m², chiều cao: 7.6m...",
+            section="request",
+        ),
+        FormField(
+            name="renovation_content",
+            label="Nội dung đề nghị sửa chữa, cải tạo và quy mô sau cải tạo",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Cải tạo mặt tiền, gia cố kết cấu và nâng thêm 1 tầng; tổng diện tích sàn sau cải tạo: 225m², chiều cao: 11.2m...",
+            section="request",
+        ),
+        FormField(
+            name="design_organization_name",
+            label="Tổ chức / cá nhân lập thiết kế sửa chữa, cải tạo",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Công ty Cổ phần Tư vấn Thiết kế Kiến trúc...",
+            section="request",
+        ),
+        FormField(
+            name="expected_completion_months",
+            label="Thời gian dự kiến hoàn thành sửa chữa, cải tạo (số tháng)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=4,
+            section="request",
+        ),
+        FormField(
+            name="adjacent_safety_commitment",
+            label="Cam kết đảm bảo an toàn công trình và công trình lân cận",
+            field_type=FieldType.checkbox,
+            required=True,
+            default_value=True,
+            description="Tôi cam kết đảm bảo an toàn cho công trình, các công trình lân cận và tuân thủ quy định bảo vệ môi trường khi thi công",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_020() -> List[FormField]:
+    """DD-020: 38. Mẫu biên bản nghiệm thu công việc xây dựng"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="acceptance_report_number",
+            label="Số biên bản nghiệm thu công việc xây dựng",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="BBNT-01/2026",
+            section="request",
+        ),
+        FormField(
+            name="project_item_name",
+            label="Tên công trình / hạng mục công trình xây dựng",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Công trình nhà ở riêng lẻ / Hạng mục kết cấu móng và khung bê tông cốt thép",
+            section="request",
+        ),
+        FormField(
+            name="accepted_work_object",
+            label="Đối tượng nghiệm thu (Tên công việc xây dựng được nghiệm thu)",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Nghiệm thu công tác lắp dựng cốt thép, cốp pha và đổ bê tông sàn tầng...",
+            section="request",
+        ),
+        FormField(
+            name="supervision_representative",
+            label="Họ tên người giám sát thi công xây dựng (Đại diện Chủ đầu tư / Ban QLDA)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Kỹ sư giám sát: NGUYỄN VĂN B",
+            section="request",
+        ),
+        FormField(
+            name="contractor_representative",
+            label="Họ tên người phụ trách kỹ thuật thi công trực tiếp (Đại diện Nhà thầu)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Chỉ huy trưởng: LÊ VĂN C",
+            section="request",
+        ),
+        FormField(
+            name="acceptance_date",
+            label="Ngày tiến hành nghiệm thu",
+            field_type=FieldType.date,
+            required=True,
+            section="request",
+        ),
+        FormField(
+            name="quality_evaluation",
+            label="Đánh giá chất lượng công việc xây dựng đã thực hiện",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="Công việc xây dựng được thi công đúng hồ sơ thiết kế bản vẽ thi công được duyệt và đạt yêu cầu theo quy chuẩn, tiêu chuẩn kỹ thuật hiện hành.",
+            section="request",
+        ),
+        FormField(
+            name="acceptance_conclusion",
+            label="Kết luận nghiệm thu",
+            field_type=FieldType.select,
+            required=True,
+            default_value="approved",
+            options=[
+                FormFieldOption(value="approved", label="Đồng ý nghiệm thu, cho phép triển khai công việc xây dựng tiếp theo"),
+                FormFieldOption(value="rework_required", label="Yêu cầu nhà thầu khắc phục tồn tại và tổ chức nghiệm thu lại"),
+                FormFieldOption(value="rejected", label="Không đồng ý nghiệm thu"),
+            ],
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_021() -> List[FormField]:
+    """DD-021: 37.Mẫu đơn Giấy phép sửa chữa, cải tạo công trình (Phụ lục II - Mẫu số 01)"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="licensing_authority",
+            label="Kính gửi (Cơ quan có thẩm quyền cấp giấy phép xây dựng)",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân Quận/Huyện / Sở Xây dựng",
+            section="request",
+        ),
+        FormField(
+            name="investor_representative",
+            label="Người đại diện chủ đầu tư và chức vụ (nếu chủ đầu tư là tổ chức)",
+            field_type=FieldType.text,
+            required=False,
+            placeholder="Ghi họ tên, chức vụ người đại diện nếu là tổ chức/doanh nghiệp",
+            section="request",
+        ),
+        FormField(
+            name="design_unit_name",
+            label="Tổ chức/cá nhân lập thiết kế xây dựng và mã số chứng chỉ năng lực/hành nghề",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Công ty... - Mã số chứng chỉ: ... - Chủ trì thiết kế: ...",
+            section="request",
+        ),
+        FormField(
+            name="verification_unit_name",
+            label="Tổ chức/cá nhân thẩm tra thiết kế xây dựng (nếu có)",
+            field_type=FieldType.text,
+            required=False,
+            placeholder="Tên đơn vị thẩm tra, mã số chứng chỉ và tên chủ trì thẩm tra",
+            section="request",
+        ),
+        FormField(
+            name="project_category_grade",
+            label="Loại công trình và cấp công trình",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Công trình dân dụng (Nhà ở riêng lẻ / Công trình cải tạo) - Cấp III",
+            section="request",
+        ),
+        FormField(
+            name="building_footprint_area",
+            label="Diện tích xây dựng tầng 1 (tầng trệt) (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="90.0",
+            section="request",
+        ),
+        FormField(
+            name="total_floor_area",
+            label="Tổng diện tích sàn xây dựng (bao gồm tầng hầm, lửng, kỹ thuật, tum) (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="280.0",
+            section="request",
+        ),
+        FormField(
+            name="ground_elevation_and_height",
+            label="Cốt xây dựng và chiều cao toàn bộ công trình (m)",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Cốt nền +0.45m; Chiều cao công trình: 11.8m",
+            section="request",
+        ),
+        FormField(
+            name="number_of_floors",
+            label="Số tầng công trình (tầng nổi, tầng hầm)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=3,
+            section="request",
+        ),
+        FormField(
+            name="renovation_scope_detail",
+            label="Nội dung đề nghị cấp phép sửa chữa, cải tạo chi tiết",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Mô tả rõ hiện trạng công trình trước khi cải tạo và các hạng mục xin phép sửa chữa, cải tạo...",
+            section="request",
+        ),
+        FormField(
+            name="expected_completion_months",
+            label="Thời gian dự kiến hoàn thành công trình (số tháng)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=6,
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_dd_022() -> List[FormField]:
+    """DD-022: Phương án sử dụng tầng đất mặt"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend(get_land_plot_block(section="property"))
+    fields.extend([
+        FormField(
+            name="project_name",
+            label="Tên công trình / dự án chuyển mục đích sử dụng từ đất chuyên trồng lúa",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Dự án xây dựng hạ tầng / nhà ở tại...",
+            section="conversion",
+        ),
+        FormField(
+            name="rice_land_strip_area",
+            label="Diện tích đất chuyên trồng lúa phải bóc tách tầng đất mặt (m²)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="500.0",
+            section="conversion",
+        ),
+        FormField(
+            name="topsoil_depth_meters",
+            label="Độ sâu tầng đất mặt bóc tách (m)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=0.3,
+            section="conversion",
+        ),
+        FormField(
+            name="topsoil_volume_m3",
+            label="Khối lượng tầng đất mặt phải bóc tách (m³)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="150.0",
+            section="conversion",
+        ),
+        FormField(
+            name="topsoil_reuse_location",
+            label="Vị trí, địa điểm khu đất sử dụng tầng đất mặt sau khi bóc tách",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Khu đất nông nghiệp tại thôn..., xã..., huyện... (diện tích sử dụng ... m²)",
+            section="conversion",
+        ),
+        FormField(
+            name="topsoil_reuse_purpose",
+            label="Mục đích và phương án sử dụng tầng đất mặt",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="Bổ sung, cải tạo độ màu mỡ cho đất nông nghiệp / phục vụ trồng cây xanh cảnh quan theo quy định.",
+            section="conversion",
+        ),
+        FormField(
+            name="environmental_commitment",
+            label="Cam kết thực hiện đúng phương án bóc tách và bảo vệ môi trường",
+            field_type=FieldType.checkbox,
+            required=True,
+            default_value=True,
+            description="Tôi cam kết bóc tách, vận chuyển và sử dụng tầng đất mặt đúng khối lượng, vị trí đã kê khai",
+            section="conversion",
+        ),
+    ])
+    return fields
+
+
 # ==============================================================================
 # 13 HÀM CHI TIẾT LĨNH VỰC KINH DOANH (BUSINESS PROCEDURES)
 # ==============================================================================
@@ -947,12 +1636,12 @@ def get_fields_hkd_002() -> List[FormField]:
 
 
 def get_fields_hkd_003() -> List[FormField]:
-    """HKD-003: Chấm dứt hoạt động hộ kinh doanh"""
+    """HKD-003: Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh"""
     fields = get_applicant_block(prefix="applicant", section="applicant")
     fields.extend([
         FormField(
             name="business_name_vn",
-            label="Tên Hộ kinh doanh chấm dứt",
+            label="Tên Hộ kinh doanh (viết bằng chữ in hoa)",
             field_type=FieldType.text,
             required=True,
             placeholder="HỘ KINH DOANH HOÀNG PHÁT",
@@ -960,7 +1649,7 @@ def get_fields_hkd_003() -> List[FormField]:
         ),
         FormField(
             name="business_code",
-            label="Mã số đăng ký Hộ kinh doanh / Mã số thuế",
+            label="Mã số Hộ kinh doanh / Mã số thuế",
             field_type=FieldType.text,
             required=True,
             placeholder="01E8012345",
@@ -975,31 +1664,41 @@ def get_fields_hkd_003() -> List[FormField]:
             section="business",
         ),
         FormField(
-            name="termination_reason",
-            label="Lý do chấm dứt hoạt động",
-            field_type=FieldType.textarea,
+            name="headquarters_phone",
+            label="Số điện thoại liên hệ hộ kinh doanh",
+            field_type=FieldType.text,
             required=True,
-            placeholder="Kinh doanh không hiệu quả / Chuyển hướng kinh doanh...",
-            section="dissolution",
+            placeholder="0912345678",
+            section="business",
         ),
         FormField(
-            name="tax_clearance_status",
-            label="Tình trạng nghĩa vụ thuế",
+            name="receiving_authority",
+            label="Cơ quan đăng ký kinh doanh tiếp nhận",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Phòng Tài chính - Kế hoạch / Cơ quan đăng ký kinh doanh",
+            section="request",
+        ),
+        FormField(
+            name="reissue_reason",
+            label="Lý do đề nghị cấp lại Giấy chứng nhận đăng ký hộ kinh doanh",
             field_type=FieldType.select,
             required=True,
-            default_value="completed",
+            default_value="lost",
             options=[
-                FormFieldOption(value="completed", label="Đã hoàn thành toàn bộ nghĩa vụ nộp thuế"),
-                FormFieldOption(value="committed", label="Cam kết thanh toán toàn bộ nợ thuế phát sinh"),
+                FormFieldOption(value="lost", label="Giấy chứng nhận đăng ký hộ kinh doanh bị mất"),
+                FormFieldOption(value="damaged", label="Giấy chứng nhận bị cháy, rách, nát"),
+                FormFieldOption(value="destroyed", label="Giấy chứng nhận bị tiêu hủy dưới hình thức khác"),
             ],
-            section="dissolution",
+            section="request",
         ),
         FormField(
-            name="termination_date",
-            label="Thời điểm dự kiến chấm dứt hoạt động",
-            field_type=FieldType.date,
-            required=True,
-            section="dissolution",
+            name="reissue_detail_note",
+            label="Trình bày cụ thể hoàn cảnh mất hoặc hư hỏng Giấy chứng nhận (nếu có)",
+            field_type=FieldType.textarea,
+            required=False,
+            placeholder="Trình bày thời điểm, lý do thất lạc hoặc rách nát Giấy chứng nhận...",
+            section="request",
         ),
     ])
     return fields
@@ -1425,12 +2124,281 @@ def get_fields_dn_011() -> List[FormField]:
     return fields
 
 
+def get_fields_dn_012() -> List[FormField]:
+    """DN-012: Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ (Mẫu 01/GTGT)"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend([
+        FormField(
+            name="business_name_vn",
+            label="Tên người nộp thuế (Doanh nghiệp / Tổ chức)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="CÔNG TY TNHH...",
+            section="business",
+        ),
+        FormField(
+            name="business_code",
+            label="Mã số thuế doanh nghiệp",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="0312345678",
+            section="business",
+        ),
+        FormField(
+            name="headquarters_address",
+            label="Địa chỉ trụ sở người nộp thuế",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Số nhà, đường/phố, phường/xã, quận/huyện, tỉnh/thành phố",
+            section="business",
+        ),
+        FormField(
+            name="headquarters_phone",
+            label="Điện thoại liên hệ người nộp thuế",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="02838123456",
+            section="business",
+        ),
+        FormField(
+            name="tax_period_type",
+            label="Hình thức kỳ tính thuế GTGT",
+            field_type=FieldType.select,
+            required=True,
+            default_value="quarterly",
+            options=[
+                FormFieldOption(value="quarterly", label="Kê khai theo Quý"),
+                FormFieldOption(value="monthly", label="Kê khai theo Tháng"),
+            ],
+            section="tax",
+        ),
+        FormField(
+            name="tax_period_label",
+            label="Kỳ tính thuế cụ thể",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="Quý IV năm 2026 (hoặc Tháng 11 năm 2026)",
+            section="tax",
+        ),
+        FormField(
+            name="declaration_type",
+            label="Loại tờ khai",
+            field_type=FieldType.select,
+            required=True,
+            default_value="first_time",
+            options=[
+                FormFieldOption(value="first_time", label="Tờ khai lần đầu"),
+                FormFieldOption(value="supplementary", label="Tờ khai bổ sung"),
+            ],
+            section="tax",
+        ),
+        FormField(
+            name="prev_period_deductible_vat",
+            label="Chỉ tiêu [22] - Thuế GTGT còn được khấu trừ kỳ trước chuyển sang (VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            default_value=0,
+            section="tax",
+        ),
+        FormField(
+            name="purchased_goods_value",
+            label="Chỉ tiêu [23] - Giá trị hàng hóa, dịch vụ mua vào trong kỳ (chưa thuế GTGT, VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="150000000",
+            section="tax",
+        ),
+        FormField(
+            name="purchased_goods_vat",
+            label="Chỉ tiêu [24] - Thuế GTGT của hàng hóa, dịch vụ mua vào được khấu trừ (VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="15000000",
+            section="tax",
+        ),
+        FormField(
+            name="sold_goods_total_revenue",
+            label="Chỉ tiêu [34] - Tổng doanh thu hàng hóa, dịch vụ bán ra chịu thuế GTGT (VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="250000000",
+            section="tax",
+        ),
+        FormField(
+            name="sold_goods_total_vat",
+            label="Chỉ tiêu [35] - Tổng thuế GTGT của hàng hóa, dịch vụ bán ra phát sinh trong kỳ (VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="25000000",
+            section="tax",
+        ),
+        FormField(
+            name="payable_or_deductible_vat",
+            label="Chỉ tiêu [40]/[43] - Thuế GTGT còn phải nộp hoặc còn được khấu trừ chuyển kỳ sau (VNĐ)",
+            field_type=FieldType.number,
+            required=True,
+            placeholder="10000000",
+            section="tax",
+        ),
+    ])
+    return fields
+
+
+def get_fields_htx_001() -> List[FormField]:
+    """HTX-001: Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã"""
+    fields = get_applicant_block(prefix="applicant", section="applicant")
+    fields.extend([
+        FormField(
+            name="business_name_vn",
+            label="Tên Hợp tác xã / Liên hiệp hợp tác xã (viết chữ in hoa)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="HỢP TÁC XÃ NÔNG NGHIỆP...",
+            section="business",
+        ),
+        FormField(
+            name="business_code",
+            label="Mã số hợp tác xã / Mã số thuế",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="0101234567",
+            section="business",
+        ),
+        FormField(
+            name="headquarters_address",
+            label="Địa chỉ trụ sở chính của Hợp tác xã",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Số nhà, đường/thôn, xã/phường, quận/huyện, tỉnh/thành phố",
+            section="business",
+        ),
+        FormField(
+            name="headquarters_phone",
+            label="Số điện thoại liên hệ của Hợp tác xã",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="0912345678",
+            section="business",
+        ),
+        FormField(
+            name="coop_unit_type",
+            label="Loại đơn vị phụ thuộc đăng ký hoạt động",
+            field_type=FieldType.select,
+            required=True,
+            default_value="branch",
+            options=[
+                FormFieldOption(value="branch", label="Đăng ký thành lập Chi nhánh của Hợp tác xã"),
+                FormFieldOption(value="rep_office", label="Đăng ký thành lập Văn phòng đại diện của Hợp tác xã"),
+                FormFieldOption(value="business_location", label="Đăng ký lập Địa điểm kinh doanh của Hợp tác xã"),
+            ],
+            section="request",
+        ),
+        FormField(
+            name="coop_unit_name_vn",
+            label="Tên Chi nhánh / Văn phòng đại diện / Địa điểm kinh doanh (viết chữ in hoa)",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="CHI NHÁNH HỢP TÁC XÃ...",
+            section="request",
+        ),
+        FormField(
+            name="coop_unit_address",
+            label="Địa chỉ Chi nhánh / Văn phòng đại diện / Địa điểm kinh doanh",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Số nhà, đường/thôn, xã/phường, quận/huyện, tỉnh/thành phố",
+            section="request",
+        ),
+        FormField(
+            name="coop_unit_head_name",
+            label="Họ và tên người đứng đầu Chi nhánh / VPĐD / Địa điểm kinh doanh",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="NGUYỄN VĂN B",
+            section="request",
+        ),
+        FormField(
+            name="coop_unit_head_id",
+            label="Số CCCD / Định danh cá nhân của người đứng đầu",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="001095012345",
+            validation_regex="^[0-9]{9,12}$",
+            section="request",
+        ),
+        FormField(
+            name="coop_unit_business_lines",
+            label="Nội dung hoạt động / Ngành nghề kinh doanh của đơn vị phụ thuộc",
+            field_type=FieldType.textarea,
+            required=True,
+            placeholder="Tiêu thụ nông sản, cung ứng vật tư nông nghiệp, dịch vụ hỗ trợ thành viên...",
+            section="request",
+        ),
+    ])
+    return fields
+
+
+def get_fields_bhxh_001() -> List[FormField]:
+    """BHXH-001: Ủy quyền thực hiện thủ tục bảo hiểm xã hội (Mẫu 13-HSB)"""
+    fields = get_applicant_block(prefix="authorizer", section="authorizer")
+    fields.extend(get_applicant_block(prefix="authorized_person", section="authorized_person"))
+    fields.extend([
+        FormField(
+            name="authorizer_social_insurance_code",
+            label="Mã số Bảo hiểm xã hội của người ủy quyền",
+            field_type=FieldType.text,
+            required=True,
+            placeholder="7912345678",
+            section="scope",
+        ),
+        FormField(
+            name="authorizer_health_card_number",
+            label="Số thẻ Bảo hiểm y tế / Số sổ lương hưu (nếu có)",
+            field_type=FieldType.text,
+            required=False,
+            placeholder="DN4797912345678",
+            section="scope",
+        ),
+        FormField(
+            name="authorization_scope",
+            label="Nội dung ủy quyền thực hiện thủ tục BHXH / BHYT / BHTN",
+            field_type=FieldType.textarea,
+            required=True,
+            default_value="Thay mặt tôi nộp hồ sơ, nhận kết quả giải quyết chế độ bảo hiểm xã hội và nhận tiền lương hưu / trợ cấp BHXH theo quy định.",
+            section="scope",
+        ),
+        FormField(
+            name="authorization_from_date",
+            label="Thời hạn ủy quyền từ ngày",
+            field_type=FieldType.date,
+            required=True,
+            section="scope",
+        ),
+        FormField(
+            name="authorization_to_date",
+            label="Thời hạn ủy quyền đến ngày",
+            field_type=FieldType.date,
+            required=True,
+            section="scope",
+        ),
+        FormField(
+            name="certifying_authority",
+            label="Cơ quan chứng thực chữ ký người ủy quyền",
+            field_type=FieldType.text,
+            required=True,
+            default_value="Ủy ban nhân dân cấp xã / Văn phòng Công chứng",
+            section="scope",
+        ),
+    ])
+    return fields
+
+
 # ==============================================================================
 # HÀM TRUNG GIAN (DISPATCHER FUNCTION)
 # ==============================================================================
 
 PROCEDURE_FIELD_DISPATCHER: Dict[str, Callable[[], List[FormField]]] = {
-    # 12 Đất đai
+    # Đất đai & Xây dựng
     "DD-001": get_fields_dd_001,
     "DD-002": get_fields_dd_002,
     "DD-003": get_fields_dd_003,
@@ -1443,7 +2411,17 @@ PROCEDURE_FIELD_DISPATCHER: Dict[str, Callable[[], List[FormField]]] = {
     "DD-010": get_fields_dd_010,
     "DD-011": get_fields_dd_011,
     "DD-012": get_fields_dd_012,
-    # 13 Kinh doanh
+    "DD-013": get_fields_dd_013,
+    "DD-014": get_fields_dd_014,
+    "DD-015": get_fields_dd_015,
+    "DD-016": get_fields_dd_016,
+    "DD-017": get_fields_dd_017,
+    "DD-018": get_fields_dd_018,
+    "DD-019": get_fields_dd_019,
+    "DD-020": get_fields_dd_020,
+    "DD-021": get_fields_dd_021,
+    "DD-022": get_fields_dd_022,
+    # Kinh doanh, Hợp tác xã & Bảo hiểm xã hội
     "HKD-001": get_fields_hkd_001,
     "HKD-002": get_fields_hkd_002,
     "HKD-003": get_fields_hkd_003,
@@ -1458,6 +2436,9 @@ PROCEDURE_FIELD_DISPATCHER: Dict[str, Callable[[], List[FormField]]] = {
     "DN-009": get_fields_dn_009,
     "DN-010": get_fields_dn_010,
     "DN-011": get_fields_dn_011,
+    "DN-012": get_fields_dn_012,
+    "HTX-001": get_fields_htx_001,
+    "BHXH-001": get_fields_bhxh_001,
 }
 
 PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
@@ -1473,9 +2454,19 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
     "DD-010": {"name": "Thủ tục đăng ký thế chấp quyền sử dụng đất, tài sản gắn liền với đất", "domain": "land", "template": "Thủ tục đăng ký thế chấp quyền sử dụng đất - Đơn đăng ký thế chấp.doc"},
     "DD-011": {"name": "Thủ tục xóa đăng ký thế chấp quyền sử dụng đất (Giải chấp Sổ đỏ)", "domain": "land", "template": "Thủ tục xóa đăng ký thế chấp quyền sử dụng đất (Giải chấp Sổ đỏ).doc"},
     "DD-012": {"name": "Thủ tục cung cấp thông tin, dữ liệu đất đai, trích lục bản đồ địa chính", "domain": "land", "template": None},
+    "DD-013": {"name": "Giao đất, thuê đất, chuyển mục đích sử dụng đất", "domain": "land", "template": "Đơn đề nghị giao đất, thuê đất, chuyển mục đích sử dụng đất (Mẫu số 02d).docx"},
+    "DD-014": {"name": "Hòa giải tranh chấp đất đai", "domain": "land", "template": "Đơn đề nghị hòa giải tranh chấp đất đai.docx"},
+    "DD-015": {"name": "Yêu cầu đo đạc địa chính, tách thửa phục vụ đăng ký đất đai", "domain": "land", "template": "Đơn yêu cầu đo đạc đất.docx"},
+    "DD-016": {"name": "Xác nhận lại thời hạn sử dụng đất nông nghiệp của hộ gia đình, cá nhân", "domain": "land", "template": "Đơn xin xác nhận lại thời hạn sử dụng đất nông nghiệp (Mẫu số 09).docx"},
+    "DD-017": {"name": "Chuyển hình thức giao đất, cho thuê đất", "domain": "land", "template": "Đơn đề nghị chuyển hình thức giao đất, cho thuê đất (Mẫu số 02).docx"},
+    "DD-018": {"name": "Thủ tục cấp Giấy phép xây dựng mới đối với nhà ở riêng lẻ", "domain": "land", "template": "Đơn đề nghị cấp Giấy phép xây dựng mới đối với nhà ở riêng lẻ (Mẫu số 01).pdf"},
+    "DD-019": {"name": "Thủ tục cấp Giấy phép sửa chữa, cải tạo công trình nhà ở riêng lẻ", "domain": "land", "template": "Đơn đề nghị cấp Giấy phép sửa chữa, cải tạo nhà ở riêng lẻ (Mẫu số 01).pdf"},
+    "DD-020": {"name": "38. Mẫu biên bản nghiệm thu công việc xây dựng", "domain": "land", "template": "38. Mẫu biên bản nghiệm thu công việc xây dựng.pdf"},
+    "DD-021": {"name": "37.Mẫu đơn Giấy phép sửa chữa, cải tạo công trình", "domain": "land", "template": "37.Mẫu đơn Giấy phép sửa chữa, cải tạo công trình.pdf"},
+    "DD-022": {"name": "Phương án sử dụng tầng đất mặt", "domain": "land", "template": "Phương án sử dụng tầng đất mặt.docx"},
     "HKD-001": {"name": "Đăng ký thành lập hộ kinh doanh", "domain": "business", "template": "Thủ tục đăng ký thành lập Hộ kinh doanh.doc"},
     "HKD-002": {"name": "Thay đổi nội dung đăng ký hộ kinh doanh", "domain": "business", "template": "Thủ tục đăng ký thay đổi nội dung Đăng ký Hộ kinh doanh.doc"},
-    "HKD-003": {"name": "Chấm dứt hoạt động hộ kinh doanh", "domain": "business", "template": "Thủ tục chấm dứt hoạt động Hộ kinh doanh.doc"},
+    "HKD-003": {"name": "Cấp lại Giấy chứng nhận đăng ký hộ kinh doanh", "domain": "business", "template": "Giấy đề nghị cấp lại Giấy chứng nhận đăng ký hộ kinh doanh.docx"},
     "DN-001": {"name": "Thủ tục ủy quyền thực hiện thủ tục đăng ký doanh nghiệp", "domain": "business", "template": "Thủ tục ủy quyền thực hiện thủ tục đăng ký doanh nghiệp.docx"},
     "DN-002": {"name": "Thủ tục đề nghị cấp lại Giấy chứng nhận đăng ký doanh nghiệp", "domain": "business", "template": "Thủ tục đề nghị cấp lại Giấy chứng nhận đăng ký doanh nghiệp.docx"},
     "DN-003": {"name": "Thủ tục đăng ký thành lập Công ty Cổ phần", "domain": "business", "template": "Thủ tục đăng ký thành lập Công ty Cổ phần.pdf"},
@@ -1487,6 +2478,9 @@ PROCEDURE_METADATA: Dict[str, Dict[str, str]] = {
     "DN-009": {"name": "Thủ tục đăng ký giải thể doanh nghiệp", "domain": "business", "template": "Thủ tục đăng ký giải thể doanh nghiệp.doc"},
     "DN-010": {"name": "Thủ tục thông báo tạm ngừng / Cấp đổi thông tin ĐKDN", "domain": "business", "template": "Thủ tục thông báo tạm ngừng - Cấp đổi thông tin ĐKDN.docx"},
     "DN-011": {"name": "Thủ tục đăng ký thay đổi nội dung Đăng ký doanh nghiệp", "domain": "business", "template": "Thủ tục đăng ký thay đổi nội dung Đăng ký doanh nghiệp.docx"},
+    "DN-012": {"name": "Kê khai thuế giá trị gia tăng theo phương pháp khấu trừ (Mẫu 01/GTGT)", "domain": "business", "template": "Tờ khai thuế giá trị gia tăng theo phương pháp khấu trừ (01/GTGT).docx"},
+    "HTX-001": {"name": "Đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã", "domain": "business", "template": "Giấy đề nghị đăng ký chi nhánh, văn phòng đại diện hoặc địa điểm kinh doanh của hợp tác xã.pdf"},
+    "BHXH-001": {"name": "Ủy quyền thực hiện thủ tục bảo hiểm xã hội (Mẫu 13-HSB)", "domain": "business", "template": "Giấy ủy quyền thực hiện thủ tục bảo hiểm xã hội (Mẫu 13-HSB).pdf"},
 }
 
 
@@ -1537,11 +2531,15 @@ def _convert_dynamic_template_to_schema(row_dict: dict, content: dict, code_uppe
                         )
                         for option in field["options"]
                     ]
+                excluded_from_entry = is_submission_recipient(
+                    {**field, "name": field_name}, block.get("block_key")
+                )
                 fields.append(FormField(
                     name=field_name,
                     label=field.get("label") or raw_key,
                     field_type=field_type,
-                    required=bool(field.get("required", False)),
+                    required=bool(field.get("required", False)) and not excluded_from_entry,
+                    excluded_from_entry=excluded_from_entry,
                     placeholder=field.get("placeholder"),
                     options=options,
                     section=section_key,
@@ -1569,24 +2567,16 @@ def get_dynamic_form_schema(procedure_code: str) -> Optional[ProcedureFormSchema
             return None
         code_upper = procedure_code.strip().upper()
         with engine.connect() as conn:
-            procedure_row = conn.execute(
-                text("SELECT id FROM public.procedures WHERE UPPER(code) = :code LIMIT 1"),
-                {"code": code_upper},
-            ).fetchone()
-            params = {"code": code_upper}
-            where_clause = "(UPPER(procedure_id) = :code OR UPPER(code) = :code"
-            if procedure_row:
-                params["procedure_uuid"] = str(procedure_row[0])
-                where_clause += " OR procedure_id = :procedure_uuid"
-            where_clause += ")"
-            row = conn.execute(text(f"""
+            row = conn.execute(text("""
                 SELECT * FROM public.dynamic_form_templates
-                WHERE {where_clause}
+                WHERE (UPPER(procedure_id) = :code OR UPPER(code) = :code
+                       OR procedure_id = (SELECT CAST(id AS text) FROM public.procedures
+                                          WHERE UPPER(code) = :code LIMIT 1))
                   AND status = 'published'
                   AND deleted_at IS NULL
-                ORDER BY version DESC, updated_at DESC
+                ORDER BY version DESC, updated_at DESC, id DESC
                 LIMIT 1
-            """), params).fetchone()
+            """), {"code": code_upper}).fetchone()
             if not row:
                 return None
             record = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
@@ -1624,8 +2614,12 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
     domain = meta["domain"]
     target_table = "land_procedure_records" if domain == "land" else "business_procedure_records"
 
-    # Gọi hàm chi tiết
     fields = handler()
+    for field in fields:
+        if is_submission_recipient({"name": field.name, "label": field.label}):
+            field.required = False
+            field.default_value = None
+            field.excluded_from_entry = True
 
     # Nhóm các section theo field (Loại bỏ số thứ tự cứng - L5)
     section_map = {
@@ -1687,6 +2681,23 @@ def get_procedure_form_schema(procedure_code: str) -> ProcedureFormSchema:
         sections=final_sections,
         fields=fields,
     )
+
+
+def get_entry_form_schema(procedure_code: str) -> ProcedureFormSchema:
+    """Expose input fields while keeping legacy fields in the validation schema."""
+    schema = get_procedure_form_schema(procedure_code)
+    fields = [field for field in schema.fields if not field.excluded_from_entry]
+    used_sections = {field.section for field in fields}
+    sections = []
+    for section in schema.sections:
+        if section.key not in used_sections:
+            continue
+        order = len(sections) + 1
+        title = section.title
+        if title.startswith(f"{section.order}. "):
+            title = f"{order}. {title.split('. ', 1)[1]}"
+        sections.append(section.model_copy(update={"order": order, "title": title}))
+    return schema.model_copy(update={"fields": fields, "sections": sections})
 
 
 # ==============================================================================

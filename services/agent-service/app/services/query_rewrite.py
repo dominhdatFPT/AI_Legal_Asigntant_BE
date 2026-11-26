@@ -7,7 +7,7 @@ import re
 import time
 
 from app.core.config import get_settings
-from app.services import llm_client, prompts
+from app.services import case_budget, llm_client, prompts
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ def _clean(text: str) -> str:
     return _PREFIX.sub("", line).strip(_QUOTES)
 
 
-async def rewrite(user_content: str, history: list[dict], request_id: str | None = None) -> str:
+async def rewrite(user_content: str, history: list[dict], request_id: str | None = None, budget=None) -> str:
     """Câu tìm kiếm đã viết lại; trả đúng `user_content` khi LLM lỗi, quá giờ hoặc kết quả không dùng được
     (rỗng, ngắn hơn MIN_REWRITE_CHARS, dài hơn MAX_REWRITE_CHARS). history: [{"role", "content"}] cũ -> mới."""
     settings = get_settings()
@@ -39,13 +39,15 @@ async def rewrite(user_content: str, history: list[dict], request_id: str | None
     started = time.perf_counter()
     # Model phụ riêng (chỉ OpenRouter); rỗng thì không truyền, dùng OPENROUTER_MODEL như cũ
     aux_model = {"model": settings.openrouter_aux_model.strip()} if settings.openrouter_aux_model.strip() else {}
+    if budget is not None and budget.enabled:
+        aux_model = {"model": case_budget.resolve_effective_models(settings)[1], "budget": budget, "budget_stage": "rewrite"}
     try:
         text, _tokens, _model = await llm_client.generate(
             prompts.REWRITE_PROMPT, recent, user_content,
             max_output_tokens=MAX_OUTPUT_TOKENS, timeout_seconds=settings.query_rewrite_timeout_seconds, max_retries=0,
             reasoning_max_tokens=settings.llm_aux_reasoning_max_tokens, **aux_model,
         )
-    except (llm_client.LLMError, asyncio.TimeoutError) as e:
+    except (llm_client.LLMError, case_budget.BudgetExhaustedError, asyncio.TimeoutError) as e:
         logger.warning("agent viết lại câu hỏi lỗi, dùng câu gốc request_id=%s: %s", request_id, e)
         return user_content
     rewritten = _clean(text)

@@ -7,7 +7,7 @@ import re
 
 from app.core.config import get_settings
 from app.schemas.minutes import MinutesRequest
-from app.services import llm_client, minutes_prompt
+from app.services import case_budget, llm_client, minutes_prompt
 
 PROVIDER_TIMEOUT_SECONDS = 140.0
 TOTAL_TIMEOUT_SECONDS = 145.0  # consultation-service chờ tối đa 150 giây (việc nền, không có người chờ)
@@ -86,14 +86,24 @@ def parse_json_object(text: str) -> dict:
 
 
 async def summarize(req: MinutesRequest) -> tuple[dict, str | None]:
-    """Trả (biên bản, model). llm_client.LLMError nếu LLM lỗi / quá giờ; ValueError nếu kết quả không phải JSON object."""
-    model = get_settings().minutes_model or None
+    """Trả (biên bản, model). llm_client.LLMError / BudgetExhaustedError nếu lỗi / quá giờ / vượt trần; ValueError nếu không phải JSON object."""
+    s = get_settings()
+    model = (getattr(s, "minutes_model", "") or "").strip() or None
+    cap_micro = int(getattr(s, "minutes_cost_budget_micro_usd", 0) or 0)
+    budget = None
+    if cap_micro > 0:
+        # Nếu operator chủ động chỉ định MINUTES_MODEL tuỳ biến chưa khai bảng giá thì không khoá cứng;
+        # còn tuyến chuẩn mặc định (MINUTES_MODEL rỗng) luôn áp trần chi phí fail-closed.
+        if model is None or case_budget.is_verified_route("openrouter", model):
+            budget = case_budget.CaseBudget(max_cost_nano_usd=cap_micro * 1000, responder_reserved_output=0, branch="minutes")
+    budget_kwargs = {"budget": budget, "budget_stage": "minutes"} if budget is not None else {}
     try:
         text, _tokens, model = await asyncio.wait_for(
             llm_client.generate(
                 minutes_prompt.SYSTEM_PROMPT, [], build_user_prompt(req),
                 max_output_tokens=MAX_OUTPUT_TOKENS, timeout_seconds=PROVIDER_TIMEOUT_SECONDS, max_retries=0,
                 model=model, reasoning_max_tokens=0 if model else None,  # model riêng: tắt suy luận (model free không tắt được)
+                **budget_kwargs,
             ),
             timeout=TOTAL_TIMEOUT_SECONDS,
         )

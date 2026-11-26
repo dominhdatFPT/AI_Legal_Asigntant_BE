@@ -10,14 +10,22 @@ from app.core.internal_auth import require_internal_token, require_lawyer_servic
 from app.core.responses import FORBIDDEN, USER_NOT_FOUND, ApiError, ok
 from app.repositories import user_repository as users
 from app.repositories import citizen_profile_repository as profiles
-from app.schemas.admin_user import AdminUserOut, InternalChangeRoleRequest
-from app.services import admin_user_service, user_status_service
+from app.schemas.admin_user import AdminUserOut, InternalChangeRoleRequest, UserLookupRequest
+from app.services import account_guard, admin_user_service, user_status_service
 from app.services.auth_service import parse_user_id
 
 router = APIRouter(
     prefix="/internal/v1/users",
     tags=["Internal"],
 )
+
+
+@router.post("/lookup", dependencies=[Depends(require_internal_token)])
+def lookup_users(body: UserLookupRequest, request: Request, db: Session = Depends(get_db)):
+    if users.release_expired_locks(db, account_guard.now_utc()):
+        db.commit()
+    found = users.get_many_including_deleted(db, body.user_ids)
+    return ok(request, {"items": [AdminUserOut.model_validate(user) for user in found]})
 
 
 @router.get("/{user_id}/status", dependencies=[Depends(require_internal_token)])

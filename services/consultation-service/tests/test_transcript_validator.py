@@ -112,3 +112,17 @@ def test_thieu_truong_bi_tu_choi():
     del data["deadlines"]
     with pytest.raises(SummaryInvalid):
         validate_summary(data, MESSAGES)
+
+
+@pytest.mark.parametrize("value", ["", " \t\r\n ", "\u00a0\u2003"])
+@pytest.mark.parametrize("name,field,item", [
+    ("facts", "value", VALID["facts"][0]),
+    ("legal_references", "raw_text", VALID["legal_references"][0]),
+    ("deadlines", "value", {
+        "value": "năm 2019", "description": "Hạn", "stated_by": "citizen", "source_ids": ["m101"],
+    }),
+])
+def test_verbatim_rong_khong_duoc_verified(name, field, item, value):
+    data = case()
+    data[name] = [{**item, field: value}]
+    assert validate_summary(data, MESSAGES)[name][0]["verified"] is False

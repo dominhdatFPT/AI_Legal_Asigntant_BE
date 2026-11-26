@@ -146,7 +146,8 @@ def test_lifespan_chi_phuc_hoi_khi_co_cau_hinh_database(monkeypatch, url, expect
     monkeypatch.setenv("WARMUP_ON_STARTUP", "false")
     get_settings.cache_clear()
     calls = []
-    monkeypatch.setattr("app.main.recover_on_startup", lambda: calls.append(1))
+    monkeypatch.setattr("app.main.get_engine", lambda: calls.append("engine"))
+    monkeypatch.setattr("app.main.recover_on_startup", lambda: calls.append("recovery"))
     with TestClient(app):
         pass
-    assert len(calls) == expected_calls
+    assert calls == ["engine", "recovery"] * expected_calls

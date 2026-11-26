@@ -1,25 +1,16 @@
 import os
 import sys
-import requests
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sqlalchemy import text
+from app.repositories.procedure_repository import db_connection
+from app.core.catalog_cache import catalog_cache
 
 SERVICE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BIZ_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục kinh doanh")
 LAND_DIR = os.path.join(SERVICE_DIR, "Template các thủ tục đất đai")
 PREVIEW_DIR = os.path.join(SERVICE_DIR, "database", "form_templates_preview")
-
-SUPABASE_URL = "https://qqwuhiymixomwrdunfkz.supabase.co"
-SUPABASE_ANON_KEY = (
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
-    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFxd3VoaXltaXhvbXdyZHVuZmt6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE0MzgxNzAsImV4cCI6MjEwNzAxNDE3MH0."
-    "SHNvLsI4fVZTbm1gS0pidZWjOLJnQBTgbQ-chLA5aTA"
-)
-
-HEADERS = {
-    "apikey": SUPABASE_ANON_KEY,
-    "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation"
-}
 
 # Mapping thủ tục theo tên file
 FILE_MAPPING = {
@@ -63,8 +54,17 @@ FILE_MAPPING = {
     "Thủ tục hòa giải tranh chấp đất đai": ("DD-014", "Thủ tục hòa giải tranh chấp đất đai", "Đơn yêu cầu hòa giải tranh chấp đất đai tại UBND cấp xã"),
 }
 
+def _upsert_statement(payload):
+    columns = list(payload)
+    updates = [f"{column} = EXCLUDED.{column}" for column in columns if column not in ("domain", "file_name")]
+    return text(
+        f"INSERT INTO public.form_templates ({', '.join(columns)}) "
+        f"VALUES ({', '.join(':' + column for column in columns)}) "
+        f"ON CONFLICT (domain, file_name) DO UPDATE SET {', '.join(updates)}"
+    )
+
+
 def sync_all():
-    rest_url = f"{SUPABASE_URL}/rest/v1/form_templates"
     print("Bắt đầu đồng bộ tất cả file PDF và Word lên cơ sở dữ liệu Supabase...")
     
     folders = [
@@ -99,7 +99,6 @@ def sync_all():
             file_size = os.path.getsize(read_path)
             with open(read_path, "rb") as f:
                 raw_bytes = f.read()
-            hex_data = "\\x" + raw_bytes.hex()
             
             mtype = "application/pdf" if ext == "PDF" else (
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == "DOCX" else "application/msword"
@@ -114,27 +113,15 @@ def sync_all():
                 "format": ext,
                 "media_type": mtype,
                 "file_size": file_size,
-                "file_data": hex_data,
+                "file_data": raw_bytes,
                 "is_active": True,
             }
             
-            # Check existing
-            check_url = f"{rest_url}?domain=eq.{domain}&file_name=eq.{requests.utils.quote(fname)}&select=id"
-            check_res = requests.get(check_url, headers=HEADERS)
-            existing = check_res.json() if check_res.ok else []
-            
-            if existing:
-                rec_id = existing[0]["id"]
-                res = requests.patch(f"{rest_url}?id=eq.{rec_id}", headers=HEADERS, json=payload)
-            else:
-                res = requests.post(rest_url, headers=HEADERS, json=payload)
-                
-            if res.ok:
-                synced += 1
-                print(f"[{synced}] Đồng bộ thành công: [{p_code}] {fname} ({file_size:,} bytes)")
-            else:
-                print(f"Lỗi đồng bộ {fname}: {res.status_code} - {res.text[:100]}")
-                
+            with db_connection(write=True) as conn:
+                conn.execute(_upsert_statement(payload), payload)
+            synced += 1
+
+    catalog_cache.invalidate("templates")
     print(f"\n HOÀN TẤT: Đã đồng bộ tổng cộng {synced} file biểu mẫu lên Supabase Database!")
 
 if __name__ == "__main__":

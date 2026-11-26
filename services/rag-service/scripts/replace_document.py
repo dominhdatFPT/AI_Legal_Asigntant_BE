@@ -194,6 +194,11 @@ def main() -> int:
                 embedding_model=embedder.model_name,
             )
             db.commit()
+            from app.services.corpus_version import bump_corpus_version
+
+            if bump_corpus_version() is None:  # REDIS_URL rỗng (chạy ngoài Docker) hoặc Redis lỗi: không ném lỗi
+                print("ℹ Chưa tăng được số phiên bản kho luật: cache tìm luật/câu trả lời của agent-service có thể còn bản cũ. "
+                      "Tăng tay: docker compose exec redis redis-cli INCR legal:corpus_version")
         except Exception as e:
             db.rollback()
             print(f"❌ Ghi database lỗi, đã rollback, văn bản vẫn như cũ: {type(e).__name__}: {e}")

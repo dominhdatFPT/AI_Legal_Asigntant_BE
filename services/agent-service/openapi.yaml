@@ -966,6 +966,12 @@ components:
           nullable: true
           description: "Model LLM đã dùng (Groq, Gemini hoặc OpenRouter, theo `LLM_PROVIDER`); `null` khi không gọi AI (câu vô nghĩa); câu ngoài phạm vi (`type` = `out_of_scope`) là model đã chấm độ liên quan"
           example: qwen/qwen3.8-27b
+        budget_summary:
+          type: object
+          description: >-
+            Admission uses empirical UTF-8 estimates by default; without a verified tokenizer,
+            configured token and cost limits are not guaranteed hard caps.
+          additionalProperties: true
         tokens_used:
           type: integer
           nullable: true
@@ -989,7 +995,9 @@ components:
             thì lượt đó rà soát bình thường
         cache_hit:
           type: boolean
-          description: Chỉ có (luôn `true`) khi server bật `ANSWER_CACHE_ENABLED` và câu trả lời lấy từ cache câu trả lời (câu đầu hội thoại, không kèm tài liệu, đã có người hỏi giống hệt); khi đó `tokens_used` là `0` (lượt này không gọi AI), `model` và `rag_chunk_ids` giữ như lúc lưu cache
+          deprecated: true
+          description: >-
+            Không còn được trả (tương đương `false`): cache câu trả lời đã bị gỡ khỏi agent-service nên mọi lượt hỏi đều đi qua rag và AI (cache tìm luật chỉ giúp bước tìm luật, không đổi `tokens_used` hay `model`). Giữ khai báo để client cũ không vỡ; client không nên dựa vào trường này
         llm_bypass:
           type: boolean
           description: Chỉ có khi server bật `LLM_BYPASS` (chế độ test, không qua LLM); khi đó `model` là `no-llm`, `content` là các đoạn luật rag tìm được
@@ -1066,7 +1074,7 @@ components:
         content:
           type: string
           minLength: 1
-          maxLength: 2000
+          maxLength: 20000
           description: Nội dung câu hỏi của người dùng
         document_ids:
           type: array

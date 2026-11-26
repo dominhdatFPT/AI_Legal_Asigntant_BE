@@ -12,5 +12,5 @@ def require_internal_token(request: Request) -> None:
     expected = os.getenv("INTERNAL_TOKEN", "")
     given = request.headers.get("X-Internal-Token", "")
     # Chưa cấu hình INTERNAL_TOKEN thì chặn hết, không bao giờ mở cửa.
-    if not expected or not hmac.compare_digest(given, expected):
+    if not expected or not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
         raise ApiError(401, UNAUTHORIZED)

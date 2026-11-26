@@ -13,6 +13,7 @@ from app.core.config import service_base
 from app.core.errors import ContractError
 from app.services.contract_storage import MIMES
 from app.services.user_gate import unique_object
+from app.core.http import http_client
 
 MAX_FILE = 9437184
 
@@ -43,7 +44,7 @@ class DocumentImport:
         base = service_base(self.base, "document-service")
         document_id, owner = str(document_id), str(owner)
         headers = {"Authorization": "Bearer " + token, "X-Request-ID": request_id, "Accept-Encoding": "identity"}
-        with httpx.Client(transport=self.transport, timeout=5, follow_redirects=False, trust_env=False) as client:
+        with http_client(self.transport, timeout=5, follow_redirects=False, trust_env=False) as client:
             def read(suffix, limit, binary=False):
                 deadline = time.monotonic() + 5
                 try:

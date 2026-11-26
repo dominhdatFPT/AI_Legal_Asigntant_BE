@@ -1,14 +1,10 @@
 import os
 import logging
-from typing import Optional
 from fastapi import Request
 
 from common_auth.core import (
     ACCESS_COOKIE,
-    AuthError,
     CurrentUser,
-    decode_access_token,
-    extract_token,
 )
 from common_auth.fastapi_dep import (
     AuthHTTPException,
@@ -62,32 +58,3 @@ def get_current_user(request: Request) -> CurrentUser:
                 return CurrentUser(id=dev_user_id, role="citizen")
 
     return _common_get_current_user(request)
-
-
-def get_optional_user(request: Request) -> Optional[CurrentUser]:
-    """
-    Lấy thông tin user nếu có gửi Bearer token hoặc cookie.
-    Nếu không có token hoặc token không hợp lệ, trả về None (không chặn 401).
-    Chỉ hỗ trợ fallback X-User-Id khi ALLOW_DEV_AUTH=true và ENVIRONMENT != production.
-    """
-    auth_header = request.headers.get("Authorization")
-    cookie_token = request.cookies.get(ACCESS_COOKIE)
-
-    if auth_header or cookie_token:
-        try:
-            token = extract_token(auth_header, cookie_token)
-            return decode_access_token(token)
-        except AuthError as e:
-            logger.debug(f"Optional token decode failed: {e}")
-            pass
-
-    # Fallback cho kiểm thử / dev nội bộ (khi được kích hoạt rõ ràng)
-    if _is_dev_auth_allowed():
-        dev_user_id = request.headers.get("X-User-Id")
-        if dev_user_id:
-            logger.warning(
-                f"[SECURITY WARNING] Sử dụng optional DEV auth fallback X-User-Id={dev_user_id}."
-            )
-            return CurrentUser(id=dev_user_id, role="citizen")
-
-    return None

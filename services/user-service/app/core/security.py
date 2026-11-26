@@ -22,7 +22,7 @@ def _load_private_key() -> str:
     raise RuntimeError("Chưa cấu hình JWT_PRIVATE_KEY hoặc JWT_PRIVATE_KEY_PATH")
 
 
-def create_access_token(user_id: str, role: str) -> str:
+def create_access_token(user_id: str, role: str, username: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -33,6 +33,8 @@ def create_access_token(user_id: str, role: str) -> str:
         "exp": now + ACCESS_TOKEN_TTL,
         "jti": uuid.uuid4().hex,
     }
+    if username:
+        payload["username"] = username
     return jwt.encode(payload, _load_private_key(), algorithm=ALGORITHM)
 
 

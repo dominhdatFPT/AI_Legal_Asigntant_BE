@@ -221,7 +221,22 @@ def test_openrouter_tat_tham_so_reasoning(openrouter, monkeypatch):
     get_settings.cache_clear()
     fake = openrouter([_or_resp()])
     _run()
-    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert fake.calls[0]["max_tokens"] == 800
+
+
+@pytest.mark.parametrize("model", ["deepseek/deepseek-v4.1-flash", "deepseek/deepseek-chat"])
+def test_deepseek_chat_explicitly_disables_reasoning(openrouter, monkeypatch, model):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_MODEL", model)
+    monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "0")
+    get_settings.cache_clear()
+    fake = openrouter([_or_resp()])
+    _run()
+    assert fake.calls[0]["model"] == model
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert fake.calls[0]["max_tokens"] == 800
 
 
 def test_openrouter_het_token_suy_luan_bao_ro(openrouter):
@@ -241,7 +256,11 @@ def test_openrouter_loi_khong_thu_lai_va_de_hieu(openrouter, status, match):
     assert len(fake.calls) == 1 and openrouter.sleeps == []
 
 
-def test_openrouter_429_thu_lai_roi_bao_loi_de_hieu(openrouter):
+def test_openrouter_429_thu_lai_roi_bao_loi_de_hieu(openrouter, monkeypatch):
+    from app.core.config import get_settings
+
+    monkeypatch.setenv("OPENROUTER_MAX_RETRIES", "1")  # mặc định mới là 0 (không retry ngầm khi có trần tiền)
+    get_settings.cache_clear()
     fake = openrouter([_or_error(429), _or_error(429)])
     with pytest.raises(llm_client.LLMError, match="giới hạn lượt gọi"):
         _run()
@@ -252,6 +271,7 @@ def test_openrouter_qua_thoi_gian_thu_lai(openrouter, monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("OPENROUTER_TIMEOUT_SECONDS", "0.05")
+    monkeypatch.setenv("OPENROUTER_MAX_RETRIES", "1")
     get_settings.cache_clear()
     fake = openrouter(["hang", _or_resp("OK")])
     assert _run()[0] == "OK"
@@ -462,32 +482,33 @@ def test_openrouter_khong_truyen_reasoning_max_tokens_giu_nhu_cu(openrouter):
         assert call["extra_body"] == {"reasoning": {"max_tokens": 1024}} and call["max_tokens"] == 800 + 1024
 
 
-def test_openrouter_khong_truyen_va_cau_hinh_chung_la_0_van_bo_tham_so(openrouter, monkeypatch):
+def test_openrouter_cau_hinh_0_gui_effort_none(openrouter, monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "0")
     get_settings.cache_clear()
     fake = openrouter([_or_resp()])
     _run_aux()
-    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert fake.calls[0]["max_tokens"] == 800
 
 
 def test_openrouter_truyen_0_tat_suy_luan_du_cau_hinh_chung_la_1024(openrouter):
     fake = openrouter([_or_resp()])
     _run_aux(reasoning_max_tokens=0)
     call = fake.calls[0]
-    # enabled=false (không chỉ bỏ tham số) và không chừa token suy luận trong max_tokens
-    assert call["extra_body"] == {"reasoning": {"enabled": False}} and call["max_tokens"] == 800
+    # effort=none (không chỉ bỏ tham số) và không chừa token suy luận trong max_tokens
+    assert call["extra_body"] == {"reasoning": {"effort": "none"}} and call["max_tokens"] == 800
 
 
-def test_openrouter_truyen_0_van_gui_enabled_false_khi_cau_hinh_chung_la_0(openrouter, monkeypatch):
+def test_openrouter_truyen_0_van_gui_effort_none_khi_cau_hinh_chung_la_0(openrouter, monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("OPENROUTER_REASONING_MAX_TOKENS", "0")
     get_settings.cache_clear()
     fake = openrouter([_or_resp()])
     _run_aux(reasoning_max_tokens=0)
-    assert fake.calls[0]["extra_body"] == {"reasoning": {"enabled": False}}
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
 
 
 def test_openrouter_truyen_so_duong_thay_cho_cau_hinh_chung(openrouter):
@@ -501,7 +522,7 @@ def test_openrouter_truyen_so_am_coi_nhu_0(openrouter):
     fake = openrouter([_or_resp()])
     _run_aux(reasoning_max_tokens=-5)
     call = fake.calls[0]
-    assert call["extra_body"] == {"reasoning": {"enabled": False}} and call["max_tokens"] == 800
+    assert call["extra_body"] == {"reasoning": {"effort": "none"}} and call["max_tokens"] == 800
 
 
 def test_gemini_bo_qua_reasoning_max_tokens(gemini):
@@ -597,11 +618,11 @@ def test_openrouter_model_phu_loi_thi_chuyen_sang_gemini_voi_ten_gemini(openrout
     assert len(fake.calls) == 1 and fake.calls[0]["model"] == "x"  # không thử lại bằng model chính
 
 
-def test_openrouter_model_phu_la_tham_so_rieng_cua_generate_khong_phai_cua_stream():
+def test_openrouter_model_phu_duoc_ho_tro_boi_generate_va_stream():
     import inspect
 
     assert "model" in inspect.signature(llm_client.generate).parameters
-    assert "model" not in inspect.signature(llm_client.generate_stream).parameters
+    assert "model" in inspect.signature(llm_client.generate_stream).parameters
 
 
 def test_openrouter_aux_model_trong_cau_hinh_khong_doi_model_cua_lan_goi_khong_truyen_model(openrouter, monkeypatch):
@@ -614,7 +635,7 @@ def test_openrouter_aux_model_trong_cau_hinh_khong_doi_model_cua_lan_goi_khong_t
     assert fake.calls[0]["model"] == "recursive/flint-v1.0:free"
 
 
-# ── Mặc định OPENROUTER_REASONING_MAX_TOKENS = 0 (không gửi tham số reasoning cho câu trả lời chính) ──
+# ── Mặc định OPENROUTER_REASONING_MAX_TOKENS = 0 (gửi effort=none cho câu trả lời chính) ──
 
 
 def test_mac_dinh_openrouter_reasoning_max_tokens_la_0(monkeypatch):
@@ -627,14 +648,15 @@ def test_mac_dinh_openrouter_reasoning_max_tokens_la_0(monkeypatch):
     assert Settings.model_fields["openrouter_reasoning_max_tokens"].default == 0
 
 
-def test_openrouter_mac_dinh_khong_gui_reasoning_va_khong_cong_token(openrouter, monkeypatch):
+def test_openrouter_mac_dinh_gui_effort_none_va_khong_cong_token(openrouter, monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.delenv("OPENROUTER_REASONING_MAX_TOKENS", raising=False)  # bỏ giá trị 1024 của fixture: dùng mặc định
     get_settings.cache_clear()
     fake = openrouter([_or_resp()])
     assert _run()[2] == "recursive/flint-v1.0:free"
-    assert "extra_body" not in fake.calls[0] and fake.calls[0]["max_tokens"] == 800
+    assert fake.calls[0]["extra_body"] == {"reasoning": {"effort": "none"}}
+    assert fake.calls[0]["max_tokens"] == 800
 
 
 def test_openrouter_van_dat_lai_1024_cho_model_suy_luan_bat_buoc(openrouter, monkeypatch):
@@ -647,3 +669,16 @@ def test_openrouter_van_dat_lai_1024_cho_model_suy_luan_bat_buoc(openrouter, mon
     fake = openrouter([_or_resp()])
     _run()
     assert fake.calls[0]["extra_body"] == {"reasoning": {"max_tokens": 1024}} and fake.calls[0]["max_tokens"] == 800 + 1024
+
+
+def test_openrouter_model_defaults(monkeypatch):
+    from app.core.config import Settings, get_settings
+
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("OPENROUTER_AUX_MODEL", raising=False)
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.openrouter_model == "deepseek/deepseek-v4.1-flash"
+    assert settings.openrouter_aux_model == "deepseek/deepseek-v4.1-flash"
+    assert Settings.model_fields["openrouter_model"].default == settings.openrouter_model
+    assert Settings.model_fields["openrouter_aux_model"].default == settings.openrouter_aux_model
