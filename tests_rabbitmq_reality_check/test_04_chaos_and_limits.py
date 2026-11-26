@@ -88,7 +88,7 @@ async def run_chaos_and_limits():
     # 2. Broker Outage / Timeout & 10s Circuit-Breaker Backoff
     # =========================================================================
     print("\n--- 2. Testing Fault Tolerance: Circuit Breaker & 10s Backoff ---")
-    dead_broker_url = "amqp://guest:guest@127.0.0.1:59999/"  # Non-existent port
+    dead_broker_url = "amqp://legal_admin:LegalSecPass2026!@127.0.0.1:59999/"  # Non-existent port
     os.environ["RABBITMQ_URL"] = dead_broker_url
 
     test_pub = events.EventPublisher()

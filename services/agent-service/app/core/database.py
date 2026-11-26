@@ -65,6 +65,12 @@ def get_engine() -> Engine:
     return _engine
 
 
+def new_session() -> Session:
+    """Mở một session giao dịch mới cho tác vụ nền (người gọi đóng bằng context manager `with`)."""
+    get_engine()
+    return _session_factory()
+
+
 def get_db(request: Request = None) -> Iterator[Session]:
     """GET/HEAD/OPTIONS dùng kết nối autocommit, còn lại dùng transaction; ngoài FastAPI (request None) → transaction."""
     get_engine()

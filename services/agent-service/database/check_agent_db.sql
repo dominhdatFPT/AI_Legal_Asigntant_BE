@@ -32,10 +32,10 @@ select 5, 'Xóa hội thoại thì xóa luôn tin nhắn (ON DELETE CASCADE)',
                          where tc.table_name = 'messages' and rc.delete_rule = 'CASCADE')
             then 'OK' else 'THIẾU → chạy 001_agent_schema.sql' end
 union all
-select 6, 'Index idx_conversations_user_updated, idx_messages_conversation_created',
+select 6, 'Index idx_conversations_user_updated, idx_conversations_updated_at, idx_messages_conversation_created',
        case when (select count(*) from pg_indexes where schemaname = 'public'
-                  and indexname in ('idx_conversations_user_updated', 'idx_messages_conversation_created')) = 2
-            then 'OK' else 'THIẾU → chạy 001_agent_schema.sql' end
+                  and indexname in ('idx_conversations_user_updated', 'idx_conversations_updated_at', 'idx_messages_conversation_created')) = 3
+            then 'OK' else 'THIẾU → chạy 001_agent_schema.sql và 003_conversation_retention.sql' end
 union all
 select 7, 'Số hội thoại hiện có',
        case when (select has_conv from t)

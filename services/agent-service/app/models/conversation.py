@@ -18,9 +18,9 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
-    # Thời điểm có tin nhắn mới nhất, dùng để sắp xếp danh sách hội thoại.
+    # Thời điểm có tin nhắn mới nhất, dùng để sắp xếp và quét xóa hội thoại quá hạn không chat.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
 
     messages: Mapped[list["Message"]] = relationship(  # noqa: F821

@@ -77,8 +77,6 @@ http {
 
     server {
         listen ${PORT};
-        # Redirect tự động của nginx/FastAPI phải là đường dẫn tương đối, không thì lộ http://host:10000 và bị chặn mixed content.
-        absolute_redirect off;
         client_max_body_size 10m;
 
         add_header Access-Control-Allow-Origin $cors_origin always;
@@ -269,7 +267,7 @@ http {
         location /api/consultations/ {
             limit_req zone=general_api burst=60 nodelay;
             set $up "${CONSULTATION_SERVICE_URL}";
-            rewrite ^/api/consultations(/.*)?$ /api/v1/consultations$1 break;
+            rewrite ^/api/consultations/(.*)$ /api/v1/consultations/$1 break;
             proxy_pass $up;
         }
 
@@ -310,7 +308,7 @@ http {
         location /api/notifications/ {
             limit_req zone=general_api burst=60 nodelay;
             set $up "${NOTIFICATION_SERVICE_URL}";
-            rewrite ^/api/notifications(/.*)?$ /api/v1/notifications$1 break;
+            rewrite ^/api/notifications/(.*)$ /api/v1/notifications/$1 break;
             proxy_pass $up;
         }
 

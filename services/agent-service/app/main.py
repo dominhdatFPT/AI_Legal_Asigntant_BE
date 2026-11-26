@@ -18,7 +18,7 @@ from app.api.v1.form_check import router as form_check_router
 from app.api.v1.internal import minutes_router, router as internal_router
 from app.core.config import get_settings
 from app.core.database import get_engine
-from app.services import admission, agent, case_budget, llm_client, quota, rag_client
+from app.services import admission, agent, case_budget, conversation_cleanup, llm_client, quota, rag_client
 
 # Hiện log INFO của app (ví dụ "agent timing") trong docker logs
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -54,12 +54,22 @@ async def _close_procedure_client() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if get_settings().agent_database_url:
+    settings = get_settings()
+    cleanup_task = None
+    if settings.agent_database_url:
         get_engine()
+        if (
+            settings.conversation_retention_days > 0
+            and settings.conversation_cleanup_interval_seconds > 0
+        ):
+            cleanup_task = asyncio.create_task(conversation_cleanup.cleanup_loop())
     revocation.ensure_started()
     try:
         yield
     finally:
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
         await _close_procedure_client()
         await rag_client.close_http_client()
 

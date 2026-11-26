@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     case_relevance_dedup_enabled: bool = True
     case_max_retrieval_rounds: int = Field(default=2, ge=1, le=2)
     case_total_deadline_seconds: float = Field(default=90, gt=0)
+    # Tự động xóa hội thoại (và toàn bộ tin nhắn ON DELETE CASCADE) khỏi DB sau N ngày không có tin nhắn mới (updated_at).
+    # 0 = tắt tự động xóa. Chu kỳ quét nền mặc định 900 giây (15 phút), xóa theo lô ngắn để tránh khóa bảng lâu.
+    conversation_retention_days: int = Field(default=3, ge=0)
+    conversation_cleanup_interval_seconds: int = Field(default=900, ge=0)
+    conversation_cleanup_batch_size: int = Field(default=200, ge=1, le=2000)
     # Số tin nhắn gần nhất của mỗi hội thoại mà AI nhớ (mỗi lượt hỏi-đáp là 2 tin). MỘT nguồn duy nhất: nơi đọc Supabase trong
     # conversations._load_for_chat và nơi cắt trong cache lịch sử (history_cache.append) cùng dùng giá trị này nên không bao giờ lệch nhau
     history_max_messages: int = Field(default=12, ge=1)

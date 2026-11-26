@@ -3,7 +3,8 @@ param(
     [ValidateSet('1', '2', '3', 'all')]
     [string]$Layer = 'all',
     [switch]$KeepInfra,
-    [switch]$SkipExistingUnit
+    [switch]$SkipExistingUnit,
+    [switch]$Perf
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +57,17 @@ function Resolve-Python {
         return $realExe.Trim()
     }
     return $candidate
+}
+
+function Resolve-PerfBrowser {
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
+        if (-not $root) { continue }
+        foreach ($relative in @('Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe')) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
+    return (Resolve-Tool @('chrome', 'msedge'))
 }
 
 function Invoke-Step([string]$Name, [string]$Program, [string[]]$Arguments) {
@@ -211,6 +223,8 @@ function Invoke-DockerLayer([string]$Number) {
         if ($isE2E) {
             Set-RunEnv 'LEGAL_TEST_KEYS_DIR' (Join-Path $scratch 'jwt')
             if ((Invoke-Step 'Generate temporary RSA test keys' $python @('-m', 'tests_3layer.support')) -ne 0) { return }
+            # gateway-perf mounts nginx.perf.conf, so it must exist before compose up.
+            if ((Invoke-Step 'Derive perf gateway config' $python @('-m', 'tests_3layer.layer3_perf.gateway_conf')) -ne 0) { return }
         }
         if ((Invoke-Step "Validate $name Compose" $docker ($compose + @('config', '-q'))) -ne 0) { return }
         $existing = @(& $docker @compose ps -a -q)
@@ -245,6 +259,28 @@ function Invoke-DockerLayer([string]$Number) {
                 Set-RunEnv 'BACKEND_TEST_TOKEN' $token
                 Invoke-Pytest 'Existing Gateway HTTP integration' @((Join-Path $be 'tests/test_docker_http.py')) '' $scratch `
                     @('-p', 'tests_3layer.no_skips')
+            }
+            # Perf tools and preflight run only after the functional Layer 3 suites, so a
+            # missing k6/browser or a busy port 3000 fails the perf steps, not the whole layer.
+            $perfReady = $false
+            try {
+                Set-RunEnv 'LEGAL_PERF_DOCKER' $docker
+                Set-RunEnv 'LEGAL_PERF_RUN_ID' ([DateTime]::UtcNow.ToString("yyyyMMdd'T'HHmmssfffffff'Z'"))
+                Set-RunEnv 'LEGAL_PERF_NODE' (Resolve-Tool 'node')
+                Set-RunEnv 'LEGAL_PERF_K6' (Resolve-Tool 'k6')
+                Set-RunEnv 'K6_BROWSER_EXECUTABLE_PATH' (Resolve-PerfBrowser)
+                Set-PythonPath
+                $perfReady = (Invoke-Step 'Layer 3 performance preflight' $python @('-m', 'tests_3layer.layer3_perf.probes')) -eq 0
+            } catch {
+                Add-Failure "Layer 3 performance tools: $($_.Exception.Message)" 1
+            }
+            if ($perfReady) {
+                $perfOptions = @('-v', '-p', 'tests_3layer.no_skips')
+                Invoke-Pytest 'Layer 3 performance gate' @((Join-Path $suite 'layer3_perf/test_l3_perf_gate.py')) '' $scratch $perfOptions
+                if ($Perf) {
+                    Set-RunEnv 'TEST_LAYER3_PERF_ENABLED' '1'
+                    Invoke-Pytest 'Layer 3 performance load' @((Join-Path $suite 'layer3_perf/test_l3_perf_load.py')) '' $scratch $perfOptions
+                }
             }
         } else {
             Set-RunEnv 'TEST_LAYER2_ENABLED' '1'
@@ -289,7 +325,7 @@ function Invoke-DockerLayer([string]$Number) {
 
 try {
     foreach ($entry in Get-ChildItem Env:) {
-        if ($entry.Name -match '^(PG|COMPOSE_|PYTEST_|OPENROUTER_|OPENAI_|GEMINI_|GOOGLE_|GROQ_|EKYC_|FIREBASE_|RABBITMQ_|REDIS_|JWT_|SUPABASE_|TEST_LAYER|BACKEND_TEST_|DOCKER_HOST$)|(_DATABASE_URL|_SERVICE_URL|_SUPABASE_.*|_API_KEY|_TEST_URL|_TEST_DATABASE_URL|_TEST_POSTGRES_URL)$|^(DATABASE_URL|INTERNAL_TOKEN|LAWYER_SERVICE_TOKEN|PROCEDURE_WRITE_MODE|TEST_POSTGRES_URL|TEST_REFERENCE_DATABASE_URL|LLM_BYPASS|RELEVANCE_CHECK|ALL_PROXY|HTTPS?_PROXY)$') {
+        if ($entry.Name -match '^(PG|COMPOSE_|PYTEST_|K6_|OPENROUTER_|OPENAI_|GEMINI_|GOOGLE_|GROQ_|EKYC_|FIREBASE_|RABBITMQ_|REDIS_|JWT_|SUPABASE_|TEST_LAYER|BACKEND_TEST_|DOCKER_HOST$)|(_DATABASE_URL|_SERVICE_URL|_SUPABASE_.*|_API_KEY|_TEST_URL|_TEST_DATABASE_URL|_TEST_POSTGRES_URL)$|^(DATABASE_URL|INTERNAL_TOKEN|LAWYER_SERVICE_TOKEN|PROCEDURE_WRITE_MODE|TEST_POSTGRES_URL|TEST_REFERENCE_DATABASE_URL|LLM_BYPASS|RELEVANCE_CHECK|ALL_PROXY|HTTPS?_PROXY)$') {
             Set-RunEnv $entry.Name $null
         }
     }

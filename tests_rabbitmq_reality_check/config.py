@@ -13,11 +13,10 @@ if str(LIBS_DIR) not in sys.path:
     sys.path.insert(0, str(LIBS_DIR))
 
 # 1. URL from BE/.env as configured in the repository
-_RMQ_AUTH = f"{os.getenv('RABBITMQ_USER', 'guest')}:{os.getenv('RABBITMQ_PASSWORD', 'guest')}"
-ENV_CONFIGURED_URL = f"amqp://{_RMQ_AUTH}@localhost:5672/"
+ENV_CONFIGURED_URL = "amqp://legal_admin:LegalSecPass2026!@localhost:5672/"
 
 # 2. Direct IPv4 URL (used to test actual AMQP broker performance when IPv4 is specified)
-DIRECT_IPV4_URL = f"amqp://{_RMQ_AUTH}@127.0.0.1:5672/"
+DIRECT_IPV4_URL = "amqp://legal_admin:LegalSecPass2026!@127.0.0.1:5672/"
 
 # By default, use DIRECT_IPV4_URL for deep testing, but test suite will explicitly verify both!
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", DIRECT_IPV4_URL)

@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message
@@ -13,6 +13,15 @@ TRANSCRIPT_MAX_MESSAGES = 500  # trần an toàn của kịch bản hội thoạ
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def is_expired(conversation: Conversation, cutoff: datetime | None) -> bool:
+    """True nếu hội thoại đã quá mốc thời gian không hoạt động (`updated_at <= cutoff`)."""
+    return cutoff is not None and _as_utc(conversation.updated_at) <= _as_utc(cutoff)
 
 
 def make_title(question: str) -> str:
@@ -33,13 +42,17 @@ def create_conversation(db: Session, user_id: uuid.UUID, title: str | None = Non
 
 
 def list_conversations(
-    db: Session, user_id: uuid.UUID, page: int = 1, page_size: int = 20,
+    db: Session, user_id: uuid.UUID, page: int = 1, page_size: int = 20, *, cutoff: datetime | None = None,
 ) -> tuple[list[Conversation], int]:
-    """Hội thoại của 1 user, mới nhất trước. Trả về (danh sách của trang, tổng số)."""
+    """Hội thoại của 1 user, mới nhất trước. Trả về (danh sách của trang, tổng số).
+    Khi truyền `cutoff`, tự loại các hội thoại đã quá hạn không hoạt động (`updated_at <= cutoff`)."""
     # 1 câu: trang + tổng (window count tính trước LIMIT); chỉ đếm riêng khi trang vượt cuối danh sách.
+    conditions = [Conversation.user_id == user_id]
+    if cutoff is not None:
+        conditions.append(Conversation.updated_at > _as_utc(cutoff))
     rows = db.execute(
         select(Conversation, func.count().over().label("total"))
-        .where(Conversation.user_id == user_id)
+        .where(*conditions)
         .order_by(Conversation.updated_at.desc(), Conversation.id)
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -47,7 +60,7 @@ def list_conversations(
     if rows:
         total = rows[0].total
     elif page > 1:
-        total = db.scalar(select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id))
+        total = db.scalar(select(func.count()).select_from(Conversation).where(*conditions))
     else:
         total = 0
     return [row[0] for row in rows], total or 0
@@ -58,11 +71,14 @@ def get_conversation(db: Session, conversation_id: uuid.UUID) -> Conversation | 
     return db.get(Conversation, conversation_id)
 
 
-def get_conversation_of_user(db: Session, conversation_id: uuid.UUID, user_id: uuid.UUID) -> Conversation | None:
-    """Hội thoại có đúng `id` VÀ đúng chủ. Không có hoặc của người khác đều trả None (API nội bộ không phân biệt hai trường hợp)."""
-    return db.scalar(
-        select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
-    )
+def get_conversation_of_user(
+    db: Session, conversation_id: uuid.UUID, user_id: uuid.UUID, *, cutoff: datetime | None = None,
+) -> Conversation | None:
+    """Hội thoại có đúng `id` VÀ đúng chủ (và còn hạn nếu truyền `cutoff`). Không có hoặc của người khác đều trả None."""
+    conditions = [Conversation.id == conversation_id, Conversation.user_id == user_id]
+    if cutoff is not None:
+        conditions.append(Conversation.updated_at > _as_utc(cutoff))
+    return db.scalar(select(Conversation).where(*conditions))
 
 
 def get_messages_before(
@@ -80,6 +96,35 @@ def get_messages_before(
 def delete_conversation(db: Session, conversation: Conversation) -> None:
     db.delete(conversation)  # tin nhắn bị xóa theo (CASCADE)
     db.commit()
+
+
+def delete_expired_conversations(
+    db: Session, cutoff: datetime, batch_size: int = 200,
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """Xóa tối đa `batch_size` hội thoại có `updated_at <= cutoff` (tin nhắn xóa theo ON DELETE CASCADE).
+    Kiểm lại điều kiện `updated_at <= cutoff` ngay trong lệnh DELETE để tránh xóa nhầm hội thoại vừa có tin mới.
+    Trả về danh sách `(user_id, conversation_id)` đã thực sự xóa khỏi DB."""
+    limit = max(1, batch_size)
+    bound = _as_utc(cutoff)
+    ids = list(
+        db.scalars(
+            select(Conversation.id)
+            .where(Conversation.updated_at <= bound)
+            .order_by(Conversation.updated_at.asc(), Conversation.id.asc())
+            .limit(limit)
+        ).all()
+    )
+    if not ids:
+        return []
+    deleted = db.execute(
+        delete(Conversation)
+        .where(Conversation.id.in_(ids), Conversation.updated_at <= bound)
+        .returning(Conversation.user_id, Conversation.id)
+        .execution_options(synchronize_session=False)
+    ).all()
+    db.commit()
+    db.expire_all()
+    return [(row[0], row[1]) for row in deleted]
 
 
 def get_messages(db: Session, conversation_id: uuid.UUID, limit: int | None = None) -> list[Message]:

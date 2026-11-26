@@ -20,6 +20,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.perf-reports/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -59,6 +60,3 @@ postman/
 sonar-project.local.properties
 
 
-
-# Bí mật cục bộ của wrangler, không commit
-.dev.vars

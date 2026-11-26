@@ -142,11 +142,8 @@ services:
         sync: false
       - key: USER_ACTIVE_CACHE_SECONDS
         value: "30"
-      # Origin FE được mở WebSocket chat (domain Vercel), ngăn bằng dấu phẩy
       - key: CONSULTATION_ALLOWED_ORIGINS
         sync: false
-      - key: CONSULTATION_TERMS_VERSION
-        value: "2026-11-01"
       - key: RABBITMQ_URL
         sync: false
 
@@ -322,20 +319,11 @@ services:
       - fromGroup: ailegal-shared
       - key: OUTBOX_ENABLED
         value: "true"
+      - key: ONLYOFFICE_JWT_SECRET
+        generateValue: true
       - key: RABBITMQ_URL
         sync: false
       - key: PROCEDURE_DATABASE_URL
-        sync: false
-      # OnlyOffice Document Server (cần host riêng, Render free không chạy nổi). JWT secret phải trùng với server OnlyOffice
-      - key: ONLYOFFICE_JWT_SECRET
-        sync: false
-      - key: ONLYOFFICE_PUBLIC_URL
-        sync: false
-      - key: ONLYOFFICE_INTERNAL_URL
-        sync: false
-      - key: ONLYOFFICE_CALLBACK_BASE
-        value: https://ailegal-procedure-service.onrender.com/api/v1/procedures
-      - key: SUPABASE_ANON_KEY
         sync: false
 
   # ───────────── location-service ─────────────

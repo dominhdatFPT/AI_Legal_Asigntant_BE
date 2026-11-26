@@ -34,7 +34,9 @@ from app.schemas.conversation import (
 )
 from app.schemas.message import MessageOut, SendMessageRequest, SendMessageResponse
 from app.schemas.transcript import Transcript, TranscriptMessage, TranscriptTurn
-from app.services import admission, cache, case_budget, agent, document_client, history_cache, llm_client, quota, rag_client, responder
+from app.services import (
+    admission, cache, case_budget, agent, conversation_cleanup, document_client, history_cache, llm_client, quota, rag_client, responder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,9 @@ def _user_id(user: TokenPayload) -> uuid.UUID:
 
 def _owned_conversation(db: Session, conversation_id: uuid.UUID, user: TokenPayload) -> Conversation:
     conversation = repo.get_conversation(db, conversation_id)
-    if conversation is None:
+    if conversation is None or repo.is_expired(conversation, conversation_cleanup.retention_cutoff()):
+        if conversation is not None and conversation.user_id == _user_id(user):
+            history_cache.invalidate(conversation.user_id, conversation.id)
         raise _error(404, "CONVERSATION_NOT_FOUND", "Không tìm thấy hội thoại.")
     if conversation.user_id != _user_id(user):
         raise _error(403, "CONVERSATION_FORBIDDEN", "Bạn không có quyền truy cập hội thoại này.")
@@ -92,7 +96,9 @@ def list_conversations(
     db: Session = Depends(get_db),
     x_request_id: str | None = Header(default=None),
 ):
-    items, total = repo.list_conversations(db, _user_id(user), page, page_size)
+    items, total = repo.list_conversations(
+        db, _user_id(user), page, page_size, cutoff=conversation_cleanup.retention_cutoff(),
+    )
     data = ConversationList(
         items=[ConversationOut.model_validate(c) for c in items],
         pagination=Pagination(

@@ -1,0 +1,8 @@
+{
+  "project": {
+    "projectKey": "my-local-project_ai-legal",
+    "path": ".",
+    "region": "eu",
+    "organization": "my-local-project"
+  }
+}

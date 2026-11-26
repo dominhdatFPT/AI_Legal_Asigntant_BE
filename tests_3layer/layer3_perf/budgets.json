@@ -1,0 +1,82 @@
+{
+  "preflight": {"cpus": 4, "ram_bytes": 6442450944, "quiet_pct": 10, "quiet_seconds": 3, "quiet_timeout_seconds": 35},
+  "browser": {
+    "origin": "http://127.0.0.1:3000",
+    "desktop": {"ttfb": 200, "fcp": 1000, "lcp": 1500, "auth_ready": 1200, "cls": 0.1, "tbt": 200, "runs": 1},
+    "mobile": {"fcp": 1800, "lcp": 2500, "auth_ready": 2500, "cls": 0.1, "tbt": 300, "runs": 3, "rtt_ms": 150, "down_bps": 1600000, "up_bps": 750000, "cpu": 4, "width": 390, "height": 844, "max_duration": "10m"},
+    "network": {"api_duplicates": 0, "sessions": 2, "eventsource": 1, "websocket": 1, "errors": 0, "unstubbed": 0, "js_bytes": 150000, "admin_js_bytes": 250000, "css_bytes": 60000, "image_bytes": 300000, "gzip_min_bytes": 1024, "gzip_failures": 0, "cache_fraction": 0.95, "warm_byte_fraction": 0.1, "blocking": 3,
+      "cache_note": "cache_fraction and warm_byte_fraction are telemetry-only targets (M1): page.route disables the Chrome HTTP cache, so the browser 'warm' phase is a reload with a cold HTTP cache and no gate reads these two values. Static caching is gated by P2.4 (Cache-Control, ETag/Last-Modified, 304). Restore the gates if k6/browser can keep the HTTP cache with routes active."},
+    "interaction": {"inp": 200, "frame_p95": 33, "dropped_fraction": 0.1, "scroll_ms": 2000, "chat_open": 500, "chat_first_text": 2000},
+    "pages": {
+      "welcome": {"path": "/", "gateway_calls": 0, "requests": 30, "interaction": "#chat-launcher"},
+      "login": {"path": "/login", "gateway_calls": 1, "requests": 30, "interaction": "#gov-identifier",
+        "debt": "Raised from the design target 0. /login sends one POST /api/users/auth/session to redirect an already signed-in user; the original target did not count this session pre-check. Keep 1 only while that pre-check exists. Return to 0 when FE resolves the session without a gateway call on /login (for example a server-side redirect), or delete this note if the design doc is updated to accept 1."},
+      "user-dashboard": {"path": "/user-dashboard", "role": "citizen", "gateway_calls": 16, "requests": 65, "interaction": "#dashboard-search-input"},
+      "chatbox": {"path": "/chatbox", "role": "citizen", "gateway_calls": 16, "requests": 65, "interaction": "[data-chat-zoom]"},
+      "form-library": {"path": "/form-library", "role": "citizen", "gateway_calls": 16, "requests": 65, "interaction": "#form-search"},
+      "dashboard": {"path": "/dashboard", "role": "admin", "gateway_calls": 24, "requests": 75, "interaction": "#ai-chat-facade-toggle"}
+    },
+    "image_debt": {
+      "pages": ["welcome", "login"],
+      "path": "/images/login/dong-son-drum-face.png",
+      "bytes": 1120539,
+      "expires": "2027-01-31",
+      "debt": "The existing drum PNG exceeds the 300 KB page image target. The allowance covers only cold desktop image bytes for this exact asset on these two pages. It ends at the earlier of two events: a compressed replacement (<= 300000 B) lands in FE, or the expires date passes. browser_pages.js stops applying it after expires, so the PNG then counts against image_bytes. Delete this block in the same change that lands the replacement.",
+      "mobile_lcp": "Not covered by this debt. Mobile LCP on welcome and login stays gated at browser.mobile.lcp. A failure there is a real finding, attributed to this asset in the Phase 0 report."
+    },
+    "calibration": "Protected gateway request caps and same-origin request caps are provisional. Replace protected gateway caps with the largest observed clean cold or warm count across three runs plus one.",
+    "exclusions": "location-search requires an external provinces API. Stubbed font loading and real font-swap CLS are outside the isolated browser measurement."
+  },
+  "rate_limit": {
+    "rejection_status": 429,
+    "p95_429_ms": 50,
+    "general": {"requests": 140, "burst": 60, "rate_per_second": 30, "path": "/api/procedures/health", "accepted_status": 200,
+      "sample_note": "requests is the burst sample size, not a limit (design doc still says 100). 140 leaves enough 429s after the burst plus replenished tokens; the gate stays accepted in [burst+1, burst+1+ceil(rate*elapsed)+1]."},
+    "heavy": {"requests": 40, "burst": 20, "rate_per_second": 5, "path": "/api/rag/health", "accepted_status": 200},
+    "auth": {"requests": 10, "burst": 5, "rate_per_second": 0.1666666667, "path": "/api/users/auth/login", "accepted_status": 422},
+    "chat": {"requests": 8, "burst": 3, "rate_per_second": 0.2, "path": "/api/agent/chat", "accepted_status": 422}
+  },
+  "sse": {
+    "cold_ms": 1000, "warm_ms": 300, "replay_ms": 150, "duplicate_ms": 200, "connected_ms": 500,
+    "warm_rag_calls": 0, "replay_writes": 0, "replay_rag_calls": 0, "replay_reads": 2,
+    "replay_debt": "The agent loads the conversation (ownership check, BOLA rule 3) and, on a history-cache miss, its messages before the Redis idempotency lookup. replay_reads caps SELECTs on conversations/messages at those two. Phase 0 replaces the cap with the largest count observed across three clean runs, never above 2. The debt ends at the earlier of two events: an authorized ownership cache lands, or replay_debt_expires passes. After expires the gate enforces 0 replay reads.",
+    "replay_debt_expires": "2027-01-31",
+    "multi_part_cache_bug": "Open product finding for the Phase 0 report/ticket: a multi-part question is split by rag-service split_question (search.py:261); the original plus its parts exceed the per-item embedding token budget, budgeted_inputs sets budget_capped=True (embedding.py:493), and agent rag_client._cache_store skips degraded results (rag_client.py:225-233). Such questions are never cached in Redis, so every repeat re-runs RAG. P5.1 uses a one-sentence question and does not cover this case.",
+    "chat": {"streams": 50, "rounds": 3, "p95_ms": 1500, "p99_ms": 3000, "errors": 0},
+    "notification": {"streams": 200, "hold_seconds": 60, "keepalives": 2, "connect_p95_ms": 1000, "fanout_p95_ms": 2000, "fanout_fraction": 1, "drops": 0, "api_rps": 20, "api_p95_ms": 200, "memory_bytes_per_stream": 200000}
+  },
+  "resources": {
+    "queries": {"procedure_cold": 3, "procedure_warm": 0, "domains": 2, "user": 2, "notification": 3, "n_plus_one_delta": 0, "small_rows": 1, "large_rows": 20},
+    "connections": {"agent_db": 8, "consultation_db": 8, "contract_db": 2, "document_db": 10, "lawyer_db": 8, "location_db": 0, "notification_db": 12, "procedure_db": 3, "rag_db": 10, "user_db": 10},
+    "api_connections_with_workers": {"notification_db": 6, "rag_db": 5},
+    "worker_application_names": {"notification_db": "legal-perf-notification-worker", "rag_db": "legal-perf-rag-worker"},
+    "connection_ceiling": 15,
+    "connection_sample_ms": 250,
+    "cpu_ms": {"cached": 5, "db_read": 10},
+    "cpu_calibration": "Phase 0 may raise CPU budgets to the larger of target and measured × 1.2 with debt per changed budget.",
+    "cpu_idle_seconds": 3,
+    "app_services": ["agent-service", "consultation-service", "contract-service", "document-service", "lawyer-service", "location-service", "notification-service", "procedure-service", "rag-service", "user-service", "rag-worker", "notification-worker", "gateway", "gateway-perf"],
+    "memory_note": "idle_bytes and soak growth gate working_set (memory.current - inactive_file). peak_bytes gates memory.peak, which still includes page cache. Only app_services are gated. Postgres, Redis and RabbitMQ are reported only.",
+    "render_cpu_ms_per_second": 100,
+    "render_utilization": 0.7,
+    "target_rps": 100,
+    "idle_bytes": 300000000,
+    "peak_bytes": 400000000,
+    "redis_peak_bytes": 20000000,
+    "redis_evictions": 0,
+    "payload_bytes": {"procedures": 15000, "procedure_detail": 25000, "user": 2000, "notifications": 8000},
+    "gzip_min_bytes": 1024,
+    "cold_start": {"healthy_ms": 15000, "first_ms": 1000, "warm_ms": 50},
+    "report_drift_fraction": 0.25
+  },
+  "load": {
+    "origin": "http://127.0.0.1:18081",
+    "virtual_ips": 1000, "users": 200, "warmup_rate": 20, "warmup_seconds": 15, "minimum_samples": 1000,
+    "rejections": 0, "dropped_iterations": 0, "dropped_iterations_scenarios": ["baseline", "soak", "domains"], "request_max_ms": 10000, "checks": 1,
+    "baseline": {"rate": 100, "seconds": 60, "p95_ms": 150, "p99_ms": 400, "failure_rate": 0.001, "groups": {"cached": 50, "db_read": 150, "domains": 200}},
+    "stress": {"seconds": 180, "targets": [50, 100, 150, 200, 250, 300], "failure_to_rps": 200, "failure_rate": 0.01, "knee_ms": 300, "min_knee_rps": 150},
+    "spike": {"low_rate": 10, "peak_rate": 250, "baseline_seconds": 20, "up_seconds": 20, "peak_seconds": 10, "down_seconds": 1, "recovery_seconds": 15, "failure_rate": 0.02, "recovery_ratio": 1.2, "recovery_floor_ms": 20, "restarts": 0, "unhealthy": 0},
+    "soak": {"rate": 50, "minutes": 5, "min_minutes": 2, "p95_drift_fraction": 0.2, "memory_growth_fraction": 0.1, "failure_rate": 0},
+    "domains": {"rate": 60, "seconds": 30, "p99_ms": 3500, "overload_status": 503, "unexpected_errors": 0}
+  }
+}

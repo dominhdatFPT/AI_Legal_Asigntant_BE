@@ -7,6 +7,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import jwt
 from cryptography import x509
@@ -59,11 +60,11 @@ def create_database_tls(path):
     (path / "postgres_tls.crt").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
 
-def auth_headers(keys, subject, role):
+def auth_headers(keys, subject, role, minutes=15):
     now = datetime.now(timezone.utc)
     token = jwt.encode({
         "sub": str(subject), "role": role, "iss": ISSUER, "type": "access",
-        "iat": now, "exp": now + timedelta(minutes=15),
+        "iat": now, "exp": now + timedelta(minutes=minutes), "jti": uuid4().hex,
     }, (keys / "jwt_private.pem").read_bytes(), algorithm=ALGORITHM)
     return {"Authorization": f"Bearer {token}"}
 

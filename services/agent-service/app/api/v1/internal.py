@@ -12,7 +12,7 @@ from app.core.internal_auth import require_internal_token
 from app.repositories import conversation as repo
 from app.schemas.minutes import MinutesOut, MinutesRequest
 from app.schemas.summary import SummaryOut, SummaryRequest
-from app.services import case_budget, llm_client, minutes, minutes_prompt, summary
+from app.services import case_budget, conversation_cleanup, llm_client, minutes, minutes_prompt, summary
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,9 @@ def _load_messages(db: Session, conversation_id: uuid.UUID, payload: SummaryRequ
     """(role, content) cũ → mới của các tin trước `until`; None nếu không có hội thoại của đúng chủ này.
     Trả kết nối DB về pool ngay sau khi đọc xong để không giữ slot trong suốt thời gian chờ LLM tóm tắt."""
     try:
-        if repo.get_conversation_of_user(db, conversation_id, payload.user_id) is None:
+        if repo.get_conversation_of_user(
+            db, conversation_id, payload.user_id, cutoff=conversation_cleanup.retention_cutoff(),
+        ) is None:
             return None
         messages = repo.get_messages_before(db, conversation_id, payload.until, limit=summary.MAX_MESSAGES)
         return [(m.role, m.content) for m in messages]

@@ -33,11 +33,14 @@ x-env: &env
   OPENROUTER_API_KEY: ""
   GEMINI_API_KEY: ""
 
+# retries stays small so a failing container still turns unhealthy within ~90s. P3.3 also counts failed probes
+# from .State.Health.Log, because the 66-81s spike is shorter than retries x interval.
 x-health: &health
-  interval: 2s
+  interval: 30s
   timeout: 3s
-  retries: 30
-  start_period: 3s
+  retries: 3
+  start_period: 20s
+  start_interval: 2s
 
 services:
   postgres-e2e:
@@ -63,6 +66,7 @@ services:
         install -o postgres -g postgres -m 0600 /run/test-tls/server.key /tmp/legal-test-tls/server.key
         install -o postgres -g postgres -m 0644 /run/test-tls/server.crt /tmp/legal-test-tls/server.crt
         exec docker-entrypoint.sh postgres -c cluster_name=legal-test-e2e -c max_connections=400 -c ssl=on \
+          -c shared_preload_libraries=pg_stat_statements \
           -c ssl_cert_file=/tmp/legal-test-tls/server.crt -c ssl_key_file=/tmp/legal-test-tls/server.key
     healthcheck:
       <<: *health
@@ -107,6 +111,19 @@ services:
       location-service: {condition: service_healthy}
       consultation-service: {condition: service_healthy}
       notification-service: {condition: service_healthy}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+
+  gateway-perf:
+    image: nginx:alpine
+    pull_policy: never
+    ports: ["127.0.0.1:18081:80"]
+    networks: [default, host-access]
+    volumes:
+      - ${LEGAL_TEST_KEYS_DIR:?Set by the test runner}/nginx.perf.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      gateway: {condition: service_healthy}
     healthcheck:
       <<: *health
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
@@ -211,6 +228,7 @@ services:
       <<: *env
       CONSULTATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/consultation_db
       USER_ACTIVE_CACHE_SECONDS: "30"
+      CONSULTATION_TERMS_VERSION: "2026-11-01"
     healthcheck:
       <<: *health
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/consultations/health', timeout=2)"]
@@ -233,6 +251,7 @@ services:
     command: ["python", "-m", "app.rag_indexing_worker"]
     environment:
       <<: *env
+      PGAPPNAME: legal-perf-rag-worker
       RAG_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/rag_db
     healthcheck:
       <<: *health
@@ -247,6 +266,7 @@ services:
     command: ["python", "-m", "app.notification_event_worker"]
     environment:
       <<: *env
+      PGAPPNAME: legal-perf-notification-worker
       NOTIFICATION_DATABASE_URL: postgresql://postgres:postgres@postgres-e2e:5432/notification_db
     healthcheck:
       <<: *health
