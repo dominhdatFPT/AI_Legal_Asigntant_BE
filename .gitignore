@@ -60,3 +60,7 @@ postman/
 sonar-project.local.properties
 
 
+
+# Bi mat cuc bo cua wrangler (Cloudflare), khong commit
+.dev.vars
+**/.dev.vars
